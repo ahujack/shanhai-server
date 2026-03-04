@@ -14,6 +14,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ZiController = exports.AnalyzeHandwritingDto = exports.RecognizeDto = exports.AnalyzeZiDto = void 0;
 const common_1 = require("@nestjs/common");
+const class_validator_1 = require("class-validator");
 const zi_service_1 = require("./zi.service");
 const ocr_service_1 = require("../ocr/ocr.service");
 class AnalyzeZiDto {
@@ -21,14 +22,26 @@ class AnalyzeZiDto {
     handwriting;
 }
 exports.AnalyzeZiDto = AnalyzeZiDto;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], AnalyzeZiDto.prototype, "zi", void 0);
 class RecognizeDto {
     image;
 }
 exports.RecognizeDto = RecognizeDto;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], RecognizeDto.prototype, "image", void 0);
 class AnalyzeHandwritingDto {
     image;
 }
 exports.AnalyzeHandwritingDto = AnalyzeHandwritingDto;
+__decorate([
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], AnalyzeHandwritingDto.prototype, "image", void 0);
 let ZiController = class ZiController {
     ziService;
     ocrService;
@@ -40,6 +53,7 @@ let ZiController = class ZiController {
         return this.ziService.analyze(dto.zi, dto.handwriting);
     }
     async recognize(dto) {
+        console.log('收到 recognize 请求, dto:', dto);
         const result = await this.ocrService.recognizeHandwriting(dto.image);
         return {
             recognizedZi: result.zi,

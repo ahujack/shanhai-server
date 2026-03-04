@@ -10,6 +10,7 @@ async function bootstrap() {
     new ValidationPipe({
       whitelist: true,
       transform: true,
+      forbidNonWhitelisted: false, // 允许额外属性
     }),
   );
 
