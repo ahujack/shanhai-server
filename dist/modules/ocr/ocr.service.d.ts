@@ -1,5 +1,8 @@
 export declare class OcrService {
     private readonly logger;
+    private readonly API_KEY;
+    private readonly API_URL;
+    private readonly MODEL;
     private readonly SAMPLE_DIR;
     constructor();
     recognizeHandwriting(imageBase64: string): Promise<{

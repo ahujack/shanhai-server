@@ -48,11 +48,15 @@ var OcrService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.OcrService = void 0;
 const common_1 = require("@nestjs/common");
+const axios_1 = __importDefault(require("axios"));
+const sharp_1 = __importDefault(require("sharp"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const sharp_1 = __importDefault(require("sharp"));
 let OcrService = OcrService_1 = class OcrService {
     logger = new common_1.Logger(OcrService_1.name);
+    API_KEY = 'sk-bj2OZEK29RKtXEUR4a93E30f0b664d0c85F665882dCbB69e';
+    API_URL = 'https://api.apiyi.com/v1/chat/completions';
+    MODEL = 'gemini-2.5-flash';
     SAMPLE_DIR = path.join(process.cwd(), 'handwriting-samples');
     constructor() {
         if (!fs.existsSync(this.SAMPLE_DIR)) {
@@ -60,64 +64,102 @@ let OcrService = OcrService_1 = class OcrService {
         }
     }
     async recognizeHandwriting(imageBase64) {
-        this.logger.log('=== 开始手写识别 ===');
+        this.logger.log('=== 开始 Gemini 手写识别 ===');
+        const timestamp = Date.now();
         try {
-            const timestamp = Date.now();
-            let svgContent = '';
+            let imageData;
             if (imageBase64.startsWith('<svg')) {
-                svgContent = imageBase64;
+                const svgBuffer = Buffer.from(imageBase64, 'utf-8');
+                imageData = await (0, sharp_1.default)(svgBuffer)
+                    .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                    .jpeg({ quality: 90 })
+                    .toBuffer();
+                fs.writeFileSync(path.join(this.SAMPLE_DIR, `input_${timestamp}.svg`), imageBase64);
+                this.logger.log('SVG转JPEG成功，大小:', imageData.length);
             }
             else {
                 try {
-                    svgContent = Buffer.from(imageBase64, 'base64').toString('utf-8');
+                    const decoded = Buffer.from(imageBase64, 'base64');
+                    if (decoded.toString('utf-8').startsWith('<svg')) {
+                        imageData = await (0, sharp_1.default)(decoded)
+                            .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                            .jpeg({ quality: 90 })
+                            .toBuffer();
+                        fs.writeFileSync(path.join(this.SAMPLE_DIR, `input_${timestamp}.svg`), decoded.toString('utf-8'));
+                    }
+                    else {
+                        imageData = decoded;
+                    }
                 }
-                catch (e) {
-                    this.logger.error('解码失败:', e);
-                }
-            }
-            if (svgContent) {
-                const svgPath = path.join(this.SAMPLE_DIR, `input_${timestamp}.svg`);
-                fs.writeFileSync(svgPath, svgContent);
-                this.logger.log('已保存SVG:', svgPath);
-                try {
-                    const svgBuffer = Buffer.from(svgContent, 'utf-8');
-                    const pngBuffer = await (0, sharp_1.default)(svgBuffer)
-                        .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-                        .png()
-                        .toBuffer();
-                    const pngPath = path.join(this.SAMPLE_DIR, `input_${timestamp}.png`);
-                    fs.writeFileSync(pngPath, pngBuffer);
-                    this.logger.log('已保存PNG:', pngPath);
-                }
-                catch (imgError) {
-                    this.logger.error('PNG转换失败:', imgError);
+                catch {
+                    imageData = Buffer.from(imageBase64, 'base64');
                 }
             }
-            return this.extractFromSvg(imageBase64);
+            const jpegBase64 = imageData.toString('base64');
+            const requestBody = {
+                model: this.MODEL,
+                messages: [
+                    {
+                        role: 'user',
+                        content: [
+                            {
+                                type: 'text',
+                                text: '分析这张图片中的所有文字内容'
+                            },
+                            {
+                                type: 'image_url',
+                                image_url: {
+                                    url: `data:image/jpeg;base64,${jpegBase64}`
+                                }
+                            }
+                        ]
+                    }
+                ]
+            };
+            this.logger.log('发送 Gemini 请求...');
+            const response = await axios_1.default.post(this.API_URL, requestBody, {
+                headers: {
+                    'Authorization': `Bearer ${this.API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 90000,
+            });
+            this.logger.log('Gemini 响应:', JSON.stringify(response.data));
+            if (response.data?.choices?.[0]?.message?.content) {
+                const content = response.data.choices[0].message.content;
+                this.logger.log('Gemini 返回内容:', content);
+                const boldMatch = content.match(/\*\*([\u4e00-\u9fa5]+)\*\*/);
+                if (boldMatch) {
+                    const zi = boldMatch[1];
+                    this.logger.log('Gemini 识别结果 (加粗):', zi);
+                    return { zi, confidence: 0.9 };
+                }
+                const ziMatch = content.match(/[\u4e00-\u9fa5]/);
+                if (ziMatch) {
+                    const zi = ziMatch[0];
+                    this.logger.log('Gemini 识别结果:', zi);
+                    return { zi, confidence: 0.9 };
+                }
+            }
+            throw new Error('未能识别汉字');
         }
         catch (error) {
-            this.logger.error('手写识别失败:', error.message);
-            return this.extractFromSvg(imageBase64);
+            this.logger.error('Gemini 识别失败:', error.response?.data || error.message);
+            return this.extractFromSvg(imageBase64, timestamp);
         }
     }
-    extractFromSvg(imageBase64) {
+    extractFromSvg(imageBase64, timestamp) {
         try {
             let svgString = imageBase64;
             if (!imageBase64.startsWith('<svg')) {
-                try {
-                    svgString = Buffer.from(imageBase64, 'base64').toString('utf-8');
-                }
-                catch (e) {
-                    this.logger.error('base64解码失败:', e);
-                }
+                svgString = Buffer.from(imageBase64, 'base64').toString('utf-8');
             }
             const textMatch = svgString.match(/<text[^>]*>([^<]*)<\/text>/);
             if (textMatch && textMatch[1]) {
                 const zi = textMatch[1].trim();
-                this.logger.log('从SVG提取的文字:', zi);
+                this.logger.log('备用方案 - 从SVG提取:', zi);
                 return { zi, confidence: 0.95 };
             }
-            this.logger.warn('未能从SVG提取到文字');
         }
         catch (e) {
             this.logger.error('SVG提取失败:', e);
