@@ -42,7 +42,7 @@ export interface ZiResult {
     };
 }
 export declare class ZiService {
-    private logger;
+    private readonly logger;
     analyze(zi: string, handwritingData?: Partial<HandwritingAnalysis>): Promise<ZiResult>;
     private analyzeHandwriting;
     private analyzeZi;

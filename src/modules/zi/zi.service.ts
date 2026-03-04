@@ -215,7 +215,7 @@ export interface ZiResult {
 
 @Injectable()
 export class ZiService {
-  private logger = new Logger(ZiService.name);
+  private readonly logger = new Logger(ZiService.name);
   
   /**
    * 测字主入口
