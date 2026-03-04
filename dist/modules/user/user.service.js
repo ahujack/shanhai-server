@@ -10,6 +10,11 @@ exports.UserService = void 0;
 const common_1 = require("@nestjs/common");
 let UserService = class UserService {
     users = new Map();
+    verificationCodes = new Map();
+    phoneToUser = new Map();
+    emailToUser = new Map();
+    socialToUser = new Map();
+    CODE_EXPIRE_TIME = 5 * 60 * 1000;
     create(dto) {
         const id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const now = new Date().toISOString();
@@ -21,6 +26,8 @@ let UserService = class UserService {
             gender: dto.gender,
             timezone: dto.timezone ?? 'Asia/Shanghai',
             location: dto.location,
+            role: 'user',
+            membership: 'free',
             createdAt: now,
             updatedAt: now,
         };
@@ -52,6 +59,75 @@ let UserService = class UserService {
             throw new common_1.NotFoundException('用户不存在');
         }
         this.users.delete(id);
+    }
+    storeCode(identifier, code) {
+        this.verificationCodes.set(identifier, {
+            code,
+            expiresAt: Date.now() + this.CODE_EXPIRE_TIME,
+        });
+    }
+    verifyCode(identifier, code) {
+        const stored = this.verificationCodes.get(identifier);
+        if (!stored) {
+            return false;
+        }
+        if (Date.now() > stored.expiresAt) {
+            this.verificationCodes.delete(identifier);
+            return false;
+        }
+        if (stored.code === code) {
+            this.verificationCodes.delete(identifier);
+            return true;
+        }
+        return false;
+    }
+    findOrCreateByIdentifier(identifier) {
+        let userId = this.phoneToUser.get(identifier) || this.emailToUser.get(identifier);
+        if (userId) {
+            return this.findOne(userId);
+        }
+        const isPhone = /^\d{11}$/.test(identifier);
+        const user = this.create({
+            name: isPhone ? `用户${identifier.slice(-4)}` : identifier.split('@')[0],
+        });
+        if (isPhone) {
+            user.phone = identifier;
+            this.phoneToUser.set(identifier, user.id);
+        }
+        else {
+            user.email = identifier;
+            this.emailToUser.set(identifier, user.id);
+        }
+        this.users.set(user.id, user);
+        return user;
+    }
+    findOrCreateBySocial(provider, socialId) {
+        const key = `${provider}:${socialId}`;
+        let userId = this.socialToUser.get(key);
+        if (userId) {
+            return this.findOne(userId);
+        }
+        const user = this.create({
+            name: `${provider}用户`,
+        });
+        this.socialToUser.set(key, user.id);
+        user.avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`;
+        this.users.set(user.id, user);
+        return user;
+    }
+    updateUserRole(userId, role) {
+        const user = this.findOne(userId);
+        user.role = role;
+        user.updatedAt = new Date().toISOString();
+        this.users.set(userId, user);
+        return user;
+    }
+    updateUserMembership(userId, membership) {
+        const user = this.findOne(userId);
+        user.membership = membership;
+        user.updatedAt = new Date().toISOString();
+        this.users.set(userId, user);
+        return user;
     }
 };
 exports.UserService = UserService;

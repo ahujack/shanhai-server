@@ -25,7 +25,7 @@ let ChartController = class ChartController {
     }
     async generate(userId, body) {
         const user = this.userService.findOne(userId);
-        return await this.chartService.generateChart(userId, user.birthDate, user.birthTime, body.gender);
+        return await this.chartService.generateChart(userId, user.birthDate || '1990-01-01', user.birthTime || '00:00', body.gender);
     }
     findOne(userId) {
         const chart = this.chartService.findOne(userId);

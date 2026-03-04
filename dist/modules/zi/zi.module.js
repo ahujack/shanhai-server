@@ -10,14 +10,15 @@ exports.ZiModule = void 0;
 const common_1 = require("@nestjs/common");
 const zi_service_1 = require("./zi.service");
 const zi_controller_1 = require("./zi.controller");
-const ocr_service_1 = require("../ocr/ocr.service");
+const ocr_module_1 = require("../ocr/ocr.module");
 let ZiModule = class ZiModule {
 };
 exports.ZiModule = ZiModule;
 exports.ZiModule = ZiModule = __decorate([
     (0, common_1.Module)({
+        imports: [ocr_module_1.OcrModule],
         controllers: [zi_controller_1.ZiController],
-        providers: [zi_service_1.ZiService, ocr_service_1.OcrService],
+        providers: [zi_service_1.ZiService],
         exports: [zi_service_1.ZiService],
     })
 ], ZiModule);
