@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import sharp from 'sharp';
 
 @Injectable()
 export class OcrService {
@@ -14,12 +15,39 @@ export class OcrService {
    * 使用多模态大模型识别手写汉字
    */
   async recognizeHandwriting(imageBase64: string): Promise<{ zi: string; confidence: number; analysis?: any }> {
+    this.logger.log('=== 开始手写识别 ===');
+    this.logger.log('API_KEY 存在:', !!process.env.LLM_API_KEY);
+    this.logger.log('API_URL:', process.env.LLM_API_URL || 'https://api.apiyi.com/v1/chat/completions');
+    this.logger.log('MODEL:', this.MODEL);
+    
     try {
       this.logger.log('使用千问多模态模型识别手写...');
       
       let imageData = imageBase64;
+      let imageFormat = 'base64';
+      let mimeType = 'image/png';
+      
+      // 如果是SVG，先转换为PNG
       if (imageBase64.startsWith('<svg')) {
-        imageData = Buffer.from(imageBase64, 'utf-8').toString('base64');
+        this.logger.log('检测到SVG格式，转换为PNG...');
+        try {
+          const svgBuffer = Buffer.from(imageBase64, 'utf-8');
+          const pngBuffer = await sharp(svgBuffer)
+            .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+            .png()
+            .toBuffer();
+          imageData = pngBuffer.toString('base64');
+          this.logger.log('SVG转PNG成功，PNG大小:', pngBuffer.length);
+        } catch (svgError) {
+          this.logger.error('SVG转PNG失败:', svgError);
+          // 如果转换失败，回退到直接使用SVG的base64
+          imageData = Buffer.from(imageBase64, 'utf-8').toString('base64');
+          imageFormat = 'base64';
+          mimeType = 'image/svg+xml';
+        }
+      } else if (!imageBase64.includes('data:')) {
+        // 如果是纯base64，假设是PNG
+        imageData = imageBase64;
       }
       
       // 构建多模态请求
@@ -29,7 +57,7 @@ export class OcrService {
           {
             role: 'user',
             content: [
-              { type: 'image_url', image_url: { url: `data:image/svg+xml;base64,${imageData}` } },
+              { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageData}` } },
               { type: 'text', text: `请仔细识别这张图片中的手写汉字。返回JSON格式：{"zi": "汉字", "confidence": 0.9}` }
             ]
           }

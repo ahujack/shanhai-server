@@ -13,17 +13,42 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.OcrService = void 0;
 const common_1 = require("@nestjs/common");
 const axios_1 = __importDefault(require("axios"));
+const sharp_1 = __importDefault(require("sharp"));
 let OcrService = OcrService_1 = class OcrService {
     logger = new common_1.Logger(OcrService_1.name);
     API_KEY = process.env.LLM_API_KEY || process.env.OCR_API_KEY || 'sk-bj2OZEK29RKtXEUR4a93E30f0b664d0c85F665882dCbB69e';
     API_URL = process.env.LLM_API_URL || 'https://api.apiyi.com/v1/chat/completions';
     MODEL = process.env.LLM_MODEL || 'qwen-vl-plus';
     async recognizeHandwriting(imageBase64) {
+        this.logger.log('=== 开始手写识别 ===');
+        this.logger.log('API_KEY 存在:', !!process.env.LLM_API_KEY);
+        this.logger.log('API_URL:', process.env.LLM_API_URL || 'https://api.apiyi.com/v1/chat/completions');
+        this.logger.log('MODEL:', this.MODEL);
         try {
             this.logger.log('使用千问多模态模型识别手写...');
             let imageData = imageBase64;
+            let imageFormat = 'base64';
+            let mimeType = 'image/png';
             if (imageBase64.startsWith('<svg')) {
-                imageData = Buffer.from(imageBase64, 'utf-8').toString('base64');
+                this.logger.log('检测到SVG格式，转换为PNG...');
+                try {
+                    const svgBuffer = Buffer.from(imageBase64, 'utf-8');
+                    const pngBuffer = await (0, sharp_1.default)(svgBuffer)
+                        .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                        .png()
+                        .toBuffer();
+                    imageData = pngBuffer.toString('base64');
+                    this.logger.log('SVG转PNG成功，PNG大小:', pngBuffer.length);
+                }
+                catch (svgError) {
+                    this.logger.error('SVG转PNG失败:', svgError);
+                    imageData = Buffer.from(imageBase64, 'utf-8').toString('base64');
+                    imageFormat = 'base64';
+                    mimeType = 'image/svg+xml';
+                }
+            }
+            else if (!imageBase64.includes('data:')) {
+                imageData = imageBase64;
             }
             const requestBody = {
                 model: this.MODEL,
@@ -31,7 +56,7 @@ let OcrService = OcrService_1 = class OcrService {
                     {
                         role: 'user',
                         content: [
-                            { type: 'image_url', image_url: { url: `data:image/svg+xml;base64,${imageData}` } },
+                            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageData}` } },
                             { type: 'text', text: `请仔细识别这张图片中的手写汉字。返回JSON格式：{"zi": "汉字", "confidence": 0.9}` }
                         ]
                     }
