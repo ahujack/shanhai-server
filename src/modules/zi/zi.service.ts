@@ -476,21 +476,21 @@ export class ZiService {
   }
   
   /**
-   * LLM 增强（可选）- 使用 APIYi 的 gemini-1.5-flash-002
+   * LLM 增强（可选）
    */
   private async getLLMEnhancement(
     zi: string, 
     handwriting: HandwritingAnalysis, 
     ziAnalysis: ZiAnalysis
   ): Promise<{ overall?: string; advice?: string[] } | null> {
-    const apiKey = process.env.LLM_API_KEY || process.env.OCR_API_KEY;
+    const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) return null;
     
     try {
       const response = await axios.post(
-        process.env.LLM_API_URL ?? 'https://api.apiyi.com/v1/chat/completions',
+        process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
         {
-          model: process.env.LLM_MODEL ?? 'gemini-1.5-flash-002',
+          model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
           temperature: 0.7,
           max_tokens: 500,
           response_format: { type: 'json_object' },

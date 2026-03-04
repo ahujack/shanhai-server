@@ -115,11 +115,11 @@ export class AgentService {
     persona: PersonaSchema,
     userChart: any,
   ): Promise<{ intent: AgentIntent; category?: 'career' | 'emotion' | 'growth'; mood?: AgentChatDto['mood'] }> {
-    const apiKey = process.env.LLM_API_KEY || process.env.OCR_API_KEY;
-    const model = process.env.LLM_MODEL ?? 'gemini-1.5-flash-002';
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
 
     if (!apiKey) {
-      Logger.warn('LLM_API_KEY 未配置，回退到本地规则意图识别', AgentService.name);
+      Logger.warn('DEEPSEEK_API_KEY 未配置，回退到本地规则意图识别', AgentService.name);
       const fallbackIntent = this.fallbackDetectIntent(dto.message, userChart);
       return { intent: fallbackIntent };
     }
@@ -131,7 +131,7 @@ export class AgentService {
         : '\n用户尚未建立命盘';
 
       const response = await axios.post(
-        process.env.LLM_API_URL ?? 'https://api.apiyi.com/v1/chat/completions',
+        process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
         {
           model,
           temperature: 0,
