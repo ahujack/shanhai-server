@@ -27,48 +27,62 @@ export class OcrService {
     const timestamp = Date.now();
     
     try {
-      // 将图片转换为真正的 JPEG 二进制数据
+      // 将图片转换为压缩的 JPEG 二进制数据
       let imageData: Buffer;
+      let isSvg = false;
       
       if (imageBase64.startsWith('<svg')) {
-        // SVG 转 JPEG
+        isSvg = true;
+        // SVG 转 JPEG - 压缩处理
         const svgBuffer = Buffer.from(imageBase64, 'utf-8');
-        imageData = await sharp(svgBuffer)
-          .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-          .jpeg({ quality: 90 })
-          .toBuffer();
         
         // 保存原始 SVG
         fs.writeFileSync(
           path.join(this.SAMPLE_DIR, `input_${timestamp}.svg`),
           imageBase64
         );
-        this.logger.log('SVG转JPEG成功，大小:', imageData.length);
+        
+        // 压缩转换：更小的尺寸和更低的质量
+        imageData = await sharp(svgBuffer)
+          .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+          .jpeg({ quality: 60, mozjpeg: true })
+          .toBuffer();
+        
+        this.logger.log('SVG转压缩JPEG成功，大小:', imageData.length);
       } else {
         // 可能是 base64，先尝试解码
         try {
           const decoded = Buffer.from(imageBase64, 'base64');
           if (decoded.toString('utf-8').startsWith('<svg')) {
+            isSvg = true;
             // 是 SVG
             imageData = await sharp(decoded)
-              .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-              .jpeg({ quality: 90 })
+              .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+              .jpeg({ quality: 60, mozjpeg: true })
               .toBuffer();
             fs.writeFileSync(
               path.join(this.SAMPLE_DIR, `input_${timestamp}.svg`),
               decoded.toString('utf-8')
             );
           } else {
-            // 是普通图片
-            imageData = decoded;
+            // 是普通图片 - 也压缩一下
+            imageData = await sharp(decoded)
+              .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+              .jpeg({ quality: 60, mozjpeg: true })
+              .toBuffer();
           }
         } catch {
-          imageData = Buffer.from(imageBase64, 'base64');
+          // 尝试作为普通图片处理并压缩
+          imageData = await sharp(Buffer.from(imageBase64, 'base64'))
+            .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+            .jpeg({ quality: 60, mozjpeg: true })
+            .toBuffer();
         }
       }
       
       // 转换为 base64
       const jpegBase64 = imageData.toString('base64');
+      this.logger.log('最终图片base64长度:', jpegBase64.length);
       
       // 按照用户提供的 Python 代码格式
       const requestBody = {

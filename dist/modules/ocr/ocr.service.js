@@ -68,34 +68,44 @@ let OcrService = OcrService_1 = class OcrService {
         const timestamp = Date.now();
         try {
             let imageData;
+            let isSvg = false;
             if (imageBase64.startsWith('<svg')) {
+                isSvg = true;
                 const svgBuffer = Buffer.from(imageBase64, 'utf-8');
-                imageData = await (0, sharp_1.default)(svgBuffer)
-                    .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-                    .jpeg({ quality: 90 })
-                    .toBuffer();
                 fs.writeFileSync(path.join(this.SAMPLE_DIR, `input_${timestamp}.svg`), imageBase64);
-                this.logger.log('SVG转JPEG成功，大小:', imageData.length);
+                imageData = await (0, sharp_1.default)(svgBuffer)
+                    .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                    .jpeg({ quality: 60, mozjpeg: true })
+                    .toBuffer();
+                this.logger.log('SVG转压缩JPEG成功，大小:', imageData.length);
             }
             else {
                 try {
                     const decoded = Buffer.from(imageBase64, 'base64');
                     if (decoded.toString('utf-8').startsWith('<svg')) {
+                        isSvg = true;
                         imageData = await (0, sharp_1.default)(decoded)
-                            .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-                            .jpeg({ quality: 90 })
+                            .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                            .jpeg({ quality: 60, mozjpeg: true })
                             .toBuffer();
                         fs.writeFileSync(path.join(this.SAMPLE_DIR, `input_${timestamp}.svg`), decoded.toString('utf-8'));
                     }
                     else {
-                        imageData = decoded;
+                        imageData = await (0, sharp_1.default)(decoded)
+                            .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                            .jpeg({ quality: 60, mozjpeg: true })
+                            .toBuffer();
                     }
                 }
                 catch {
-                    imageData = Buffer.from(imageBase64, 'base64');
+                    imageData = await (0, sharp_1.default)(Buffer.from(imageBase64, 'base64'))
+                        .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                        .jpeg({ quality: 60, mozjpeg: true })
+                        .toBuffer();
                 }
             }
             const jpegBase64 = imageData.toString('base64');
+            this.logger.log('最终图片base64长度:', jpegBase64.length);
             const requestBody = {
                 model: this.MODEL,
                 messages: [
