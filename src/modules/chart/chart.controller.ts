@@ -17,8 +17,8 @@ export class ChartController {
     const user = this.userService.findOne(userId);
     return await this.chartService.generateChart(
       userId,
-      user.birthDate,
-      user.birthTime,
+      user.birthDate || '1990-01-01',
+      user.birthTime || '00:00',
       body.gender
     );
   }
