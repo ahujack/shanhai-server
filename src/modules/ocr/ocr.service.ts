@@ -109,15 +109,40 @@ export class OcrService {
         this.logger.log('Gemini 返回内容:', content);
         
         // 提取汉字 - 更精确的匹配
-        // 优先匹配带星号的汉字，如 **测**
-        const boldMatch = content.match(/\*\*([\u4e00-\u9fa5]+)\*\*/);
+        // 优先匹配带星号的汉字，如 **测** 或 **汉字：测**
+        const boldMatch = content.match(/\*\*[^\n]*?([\u4e00-\u9fa5])[^\n]*?\*\*/);
         if (boldMatch) {
           const zi = boldMatch[1];
           this.logger.log('Gemini 识别结果 (加粗):', zi);
           return { zi, confidence: 0.9 };
         }
         
-        // 提取第一个汉字
+        // 提取 "汉字：X" 格式
+        const hanziMatch = content.match(/汉字[：:]\s*([\u4e00-\u9fa5])/);
+        if (hanziMatch) {
+          const zi = hanziMatch[1];
+          this.logger.log('Gemini 识别结果 (汉字:):', zi);
+          return { zi, confidence: 0.9 };
+        }
+        
+        // 提取第一个出现的单个汉字（在数字或特殊符号后面）
+        // 匹配 "1. 测" 或 "测 (cè)" 这样的模式
+        const numberedMatch = content.match(/(?:^|\n)\s*\d+\.?\s*([\u4e00-\u9fa5])/);
+        if (numberedMatch) {
+          const zi = numberedMatch[1];
+          this.logger.log('Gemini 识别结果 (编号):', zi);
+          return { zi, confidence: 0.9 };
+        }
+        
+        // 提取括号中的汉字，如 (cè)
+        const parenMatch = content.match(/\(([\u4e00-\u9fa5])\s*[a-zA-Z]+\)/);
+        if (parenMatch) {
+          const zi = parenMatch[1];
+          this.logger.log('Gemini 识别结果 (拼音):', zi);
+          return { zi, confidence: 0.9 };
+        }
+        
+        // 最后尝试提取任何单个汉字（排除常见的词）
         const ziMatch = content.match(/[\u4e00-\u9fa5]/);
         if (ziMatch) {
           const zi = ziMatch[0];

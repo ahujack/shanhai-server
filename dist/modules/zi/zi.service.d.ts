@@ -61,4 +61,6 @@ export declare class ZiService {
     private getComponentMeanings;
     private getCareerByWuxing;
     private getHealthByWuxing;
+    private getXiangxingMeaning;
+    private getTianganDizhi;
 }

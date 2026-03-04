@@ -128,10 +128,28 @@ let OcrService = OcrService_1 = class OcrService {
             if (response.data?.choices?.[0]?.message?.content) {
                 const content = response.data.choices[0].message.content;
                 this.logger.log('Gemini 返回内容:', content);
-                const boldMatch = content.match(/\*\*([\u4e00-\u9fa5]+)\*\*/);
+                const boldMatch = content.match(/\*\*[^\n]*?([\u4e00-\u9fa5])[^\n]*?\*\*/);
                 if (boldMatch) {
                     const zi = boldMatch[1];
                     this.logger.log('Gemini 识别结果 (加粗):', zi);
+                    return { zi, confidence: 0.9 };
+                }
+                const hanziMatch = content.match(/汉字[：:]\s*([\u4e00-\u9fa5])/);
+                if (hanziMatch) {
+                    const zi = hanziMatch[1];
+                    this.logger.log('Gemini 识别结果 (汉字:):', zi);
+                    return { zi, confidence: 0.9 };
+                }
+                const numberedMatch = content.match(/(?:^|\n)\s*\d+\.?\s*([\u4e00-\u9fa5])/);
+                if (numberedMatch) {
+                    const zi = numberedMatch[1];
+                    this.logger.log('Gemini 识别结果 (编号):', zi);
+                    return { zi, confidence: 0.9 };
+                }
+                const parenMatch = content.match(/\(([\u4e00-\u9fa5])\s*[a-zA-Z]+\)/);
+                if (parenMatch) {
+                    const zi = parenMatch[1];
+                    this.logger.log('Gemini 识别结果 (拼音):', zi);
                     return { zi, confidence: 0.9 };
                 }
                 const ziMatch = content.match(/[\u4e00-\u9fa5]/);

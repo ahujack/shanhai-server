@@ -232,27 +232,31 @@ let ZiService = ZiService_1 = class ZiService {
             };
         }
         const now = Date.now();
-        const pressureKeys = Object.keys(handwritingPatterns.pressure);
-        const stabilityKeys = Object.keys(handwritingPatterns.stability);
-        const structureKeys = Object.keys(handwritingPatterns.structure);
-        const continuityKeys = Object.keys(handwritingPatterns.continuity);
-        const pressure = pressureKeys[now % 3];
-        const stability = stabilityKeys[(now >> 4) % 3];
-        const structure = structureKeys[(now >> 8) % 3];
-        const continuity = continuityKeys[(now >> 12) % 3];
+        const pressureKeys = ['heavy', 'light', 'medium'];
+        const stabilityKeys = ['stable', 'shaky', 'average'];
+        const structureKeys = ['compact', 'loose', 'balanced'];
+        const continuityKeys = ['connected', 'broken', 'average'];
+        const pressure = pressureKeys[now % 3] || 'medium';
+        const stability = stabilityKeys[(now >> 4) % 3] || 'average';
+        const structure = structureKeys[(now >> 8) % 3] || 'balanced';
+        const continuity = continuityKeys[(now >> 12) % 3] || 'average';
+        const pData = handwritingPatterns.pressure[pressure] || handwritingPatterns.pressure['medium'];
+        const sData = handwritingPatterns.stability[stability] || handwritingPatterns.stability['average'];
+        const strData = handwritingPatterns.structure[structure] || handwritingPatterns.structure['balanced'];
+        const cData = handwritingPatterns.continuity[continuity] || handwritingPatterns.continuity['average'];
         return {
             pressure,
-            pressureInterpretation: handwritingPatterns.pressure[pressure].interpretation,
+            pressureInterpretation: pData.interpretation,
             stability,
-            stabilityInterpretation: handwritingPatterns.stability[stability].interpretation,
+            stabilityInterpretation: sData.interpretation,
             structure,
-            structureInterpretation: handwritingPatterns.structure[structure].interpretation,
+            structureInterpretation: strData.interpretation,
             continuity,
-            continuityInterpretation: handwritingPatterns.continuity[continuity].interpretation,
+            continuityInterpretation: cData.interpretation,
             overallStyle: 'AI模拟笔迹分析（建议接入真实手写识别）',
             personalityInsights: [
-                ...handwritingPatterns.pressure[pressure].traits,
-                ...handwritingPatterns.stability[stability].traits,
+                ...(pData.traits || []),
+                ...(sData.traits || []),
             ].slice(0, 4),
         };
     }
@@ -378,40 +382,70 @@ let ZiService = ZiService_1 = class ZiService {
         return questions.slice(0, 2);
     }
     async getLLMEnhancement(zi, handwriting, ziAnalysis) {
-        const apiKey = process.env.DEEPSEEK_API_KEY;
-        if (!apiKey)
+        const apiKey = process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY;
+        if (!apiKey) {
             return null;
+        }
         try {
-            const response = await axios_1.default.post(process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions', {
-                model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
+            const apiUrl = process.env.LLM_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.apiyi.com/v1/chat/completions';
+            const model = process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || 'gemini-1.5-flash-002';
+            const response = await axios_1.default.post(apiUrl, {
+                model: model,
                 temperature: 0.7,
                 max_tokens: 500,
                 response_format: { type: 'json_object' },
                 messages: [
                     {
                         role: 'system',
-                        content: `你是一位精通《测字有术》的高阶分析师，擅长笔迹心理学、冷读术和易经解读。
-请根据以下信息，生成一段有深度的测字解读。要求：
-1. 结合笔迹特征和汉字含义
-2. 使用冷读术技巧，让解读显得"神准"
-3. 给出实用的心理建议
-4. 输出JSON格式：{ overall: string, advice: string[] }`,
+                        content: `你是一位精通《测字有术》的高阶分析师，深谙中国传统文化和现代心理学。你融合了以下三大核心技术：
+
+【一、笔迹心理学】
+- 笔画力度：轻重反映潜意识能量和情绪状态
+- 结构松紧：紧凑或松散反映自我认知和决断力
+- 连贯性：断笔/涂改反映决策时的犹豫程度
+- 稳定性：抖动反映焦虑程度
+
+【二、巴纳姆效应与冷读术】
+- 学会说"既像废话又像真话"的模糊预测
+- 利用巴纳姆效应：几乎适用于任何处于压力下的现代人
+- 通过观察（如果有用户画像信息）进行概率推断
+- 用试探性语言"套"信息，必要时用反问策略
+
+【三、汉字拆解与意象联想】
+- 离合法：拆解汉字部件（如"安"="宀"+"女"）
+- 象形法：根据部件形状联想到具体事物（如"十"像十字路口/医院，"八"像分道扬镳）
+- 五行属性：结合金木水火土进行解读
+- 意象联想：根据部件含义进行深层解读
+
+【输出要求】
+1. 先进行笔迹分析（如果有效）
+2. 再进行汉字拆解和意象解读
+3. 融入冷读术技巧，让解读"神准"但不失真诚
+4. 给出实用心理建议
+5. 必要时可以反问用户获取更多信息
+6. 输出JSON格式：{ overall: string, advice: string[] }`,
                     },
                     {
                         role: 'user',
                         content: JSON.stringify({
-                            zi,
+                            question: '请深度解读这个字',
+                            zi: zi,
                             handwriting: {
                                 pressure: handwriting.pressure,
                                 stability: handwriting.stability,
                                 structure: handwriting.structure,
+                                continuity: handwriting.continuity,
                                 traits: handwriting.personalityInsights,
+                                style: handwriting.overallStyle,
                             },
                             ziAnalysis: {
                                 components: ziAnalysis.components,
                                 meanings: ziAnalysis.componentMeanings,
                                 wuxing: ziAnalysis.wuxing,
                                 jixiong: ziAnalysis.jixiong,
+                                bihua: ziAnalysis.bihua,
+                                xiangxing: this.getXiangxingMeaning(zi),
+                                tianGanDiZhi: this.getTianganDizhi(zi),
                             },
                         }),
                     },
@@ -506,6 +540,122 @@ let ZiService = ZiService_1 = class ZiService {
             '木': '肝胆', '火': '心脏', '土': '脾胃', '金': '肺', '水': '肾',
         };
         return map[wuxing] || '身体';
+    }
+    getXiangxingMeaning(zi) {
+        const xiangxingMap = {
+            '一': '地平线、水平面、稳定的基础',
+            '二': '天地、两仪、对立统一',
+            '三': '天地人三才、多数',
+            '十': '十字路口、醫院、方向选择',
+            '人': '人侧立、顶天立地',
+            '八': '分道扬镳、分离、拓展',
+            '卜': '占卜、预测、抉择',
+            '冖': '覆盖、遮蔽、屋顶',
+            '宀': '房屋、 家、 稳定',
+            '口': '嘴巴、出口、容纳',
+            '土': '土地、基础、承载',
+            '士': '男士、知识分子、稳重',
+            '女': '女性、柔弱、婚姻',
+            '子': '孩子、种子、延续',
+            '屮': '植物萌发、生长',
+            '山': '高山、稳重、阻碍',
+            '工': '工作、工程、规矩',
+            '干': '干燥、干预、干涉',
+            '广': '广字旁、宽敞、开放',
+            '之': '前往、到达、过程',
+            '心': '心脏、想法、核心',
+            '忄': '竖心旁、情绪、心理',
+            '戈': '武器、战争、捍卫',
+            '手': '手、能力、掌控',
+            '攵': '敲打、行为、变化',
+            '支': '支持、分支、分散',
+            '日': '太阳、时间、光明',
+            '月': '月亮、身体、周期',
+            '木': '树木、生长、自然',
+            '欠': '欠缺、不足、渴望',
+            '止': '停止、阻止、立场',
+            '歹': '死亡、危险、坏',
+            '殳': '敲打、威胁、压力',
+            '比': '比较、竞争、对称',
+            '瓦': '陶器、屋顶、建筑',
+            '牙': '牙齿、发育、年轻',
+            '牛': '牛、勤劳、固执',
+            '犬': '狗、忠诚、守护',
+            '玄': '玄妙、深奥、神秘',
+            '玉': '玉石、美好、高贵',
+            '王': '国王、权力、统治',
+            '瓜': '瓜果、延续、缠绕',
+            '甘': '甘甜、愿意、满足',
+            '生': '生命、生长、生活',
+            '用': '使用、功能、作用',
+            '田': '田地、财富、生产',
+            '疋': '足、到达、补充',
+            '疒': '疾病、问题、困难',
+            '癶': '古代占卜、登攀',
+            '白': '白色��纯洁、空白',
+            '皮': '皮肤、表面、剥离',
+            '皿': '器皿、容器、承受',
+            '矛': '矛武器、攻击、冲突',
+            '矢': '箭、直线、速度',
+            '石': '石头、坚硬、障碍',
+            '示': '启示、显示、神灵',
+            '禸': '陷阱、網羅、困住',
+            '禾': '庄稼、收成、民生',
+            '竹': '竹子、高洁、节节高',
+            '米': '米粮、食物、基础',
+            '糸': '丝线、联系、缠绕',
+            '缶': '陶器、储存、封闭',
+            '网': '罗网、陷阱、连接',
+            '羊': '羊、吉祥、温和',
+            '羽': '羽毛、飞翔、自由',
+            '老': '老人、经验、传统',
+            '而': '而且、持续、脸面',
+            '耒': '农具、耕种、劳作',
+            '耳': '耳朵、倾听、附属',
+            '聿': '笔书写、记录、文',
+            '肉': '肉身体、欲望、实质',
+            '臣': '臣子、臣服、辅助',
+            '自': '自己、自然、源头',
+            '至': '到达、极致、到来',
+            '臼': '臼齿、咀嚼、基础',
+            '舌': '舌头、语言、表达',
+            '舛': '违背、冲突、不顺',
+            '舟': '船、运输、漂泊',
+            '艮': '山艮、停止、稳重',
+            '色': '颜色、欲望、外表',
+            '艸': '草、生长、野蛮',
+            '虍': '老虎、威猛、危险',
+            '虫': '虫、小问题、慢性',
+            '血': '血液、生命、源头',
+            '行': '行走、行动、过程',
+            '衣': '衣服、外表、掩盖',
+            '襾': '覆盖、包裹、包裹',
+        };
+        return xiangxingMap[zi] || '待解读';
+    }
+    getTianganDizhi(zi) {
+        const tianGanMap = {
+            '甲': ['甲', '木'], '乙': ['乙', '木'],
+            '丙': ['丙', '火'], '丁': ['丁', '火'],
+            '戊': ['戊', '土'], '己': ['己', '土'],
+            '庚': ['庚', '金'], '辛': ['辛', '金'],
+            '壬': ['壬', '水'], '癸': ['癸', '水'],
+        };
+        const diZhiMap = {
+            '子': ['子', '水'], '丑': ['丑', '土'], '寅': ['寅', '木'], '卯': ['卯', '木'],
+            '辰': ['辰', '土'], '巳': ['巳', '火'], '午': ['午', '火'], '未': ['未', '土'],
+            '申': ['申', '金'], '酉': ['酉', '金'], '戌': ['戌', '土'], '亥': ['亥', '水'],
+        };
+        if (tianGanMap[zi])
+            return { tianGan: tianGanMap[zi][0], diZhi: '', naxing: tianGanMap[zi][1] };
+        if (diZhiMap[zi])
+            return { tianGan: '', diZhi: diZhiMap[zi][0], naxing: diZhiMap[zi][1] };
+        const bushou = this.getBushou(zi);
+        if (tianGanMap[bushou])
+            return { tianGan: tianGanMap[bushou][0], diZhi: '', naxing: tianGanMap[bushou][1] };
+        if (diZhiMap[bushou])
+            return { tianGan: '', diZhi: diZhiMap[bushou][0], naxing: diZhiMap[bushou][1] };
+        return { tianGan: '', diZhi: '', naxing: '' };
     }
 };
 exports.ZiService = ZiService;
