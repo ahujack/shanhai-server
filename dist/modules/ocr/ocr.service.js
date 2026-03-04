@@ -74,10 +74,10 @@ let OcrService = OcrService_1 = class OcrService {
                 const svgBuffer = Buffer.from(imageBase64, 'utf-8');
                 fs.writeFileSync(path.join(this.SAMPLE_DIR, `input_${timestamp}.svg`), imageBase64);
                 imageData = await (0, sharp_1.default)(svgBuffer)
-                    .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-                    .jpeg({ quality: 60, mozjpeg: true })
+                    .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                    .jpeg({ quality: 85 })
                     .toBuffer();
-                this.logger.log('SVG转压缩JPEG成功，大小:', imageData.length);
+                this.logger.log('SVG转JPEG成功，大小:', imageData.length);
             }
             else {
                 try {
@@ -85,22 +85,22 @@ let OcrService = OcrService_1 = class OcrService {
                     if (decoded.toString('utf-8').startsWith('<svg')) {
                         isSvg = true;
                         imageData = await (0, sharp_1.default)(decoded)
-                            .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-                            .jpeg({ quality: 60, mozjpeg: true })
+                            .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                            .jpeg({ quality: 85 })
                             .toBuffer();
                         fs.writeFileSync(path.join(this.SAMPLE_DIR, `input_${timestamp}.svg`), decoded.toString('utf-8'));
                     }
                     else {
                         imageData = await (0, sharp_1.default)(decoded)
-                            .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-                            .jpeg({ quality: 60, mozjpeg: true })
+                            .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                            .jpeg({ quality: 85 })
                             .toBuffer();
                     }
                 }
                 catch {
                     imageData = await (0, sharp_1.default)(Buffer.from(imageBase64, 'base64'))
-                        .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-                        .jpeg({ quality: 60, mozjpeg: true })
+                        .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+                        .jpeg({ quality: 85 })
                         .toBuffer();
                 }
             }
@@ -114,7 +114,7 @@ let OcrService = OcrService_1 = class OcrService {
                         content: [
                             {
                                 type: 'text',
-                                text: '分析这张图片中的所有文字内容'
+                                text: '仔细看图，图中只有一个手写汉字。请直接回答这个汉字是什么，只回答一个字，不要说其他话。'
                             },
                             {
                                 type: 'image_url',
@@ -124,9 +124,11 @@ let OcrService = OcrService_1 = class OcrService {
                             }
                         ]
                     }
-                ]
+                ],
+                temperature: 0.1,
+                max_tokens: 200
             };
-            this.logger.log('发送 Gemini 请求...');
+            this.logger.log('发送 Gemini 请求（图片大小: ' + jpegBase64.length + '）...');
             const response = await axios_1.default.post(this.API_URL, requestBody, {
                 headers: {
                     'Authorization': `Bearer ${this.API_KEY}`,
@@ -134,7 +136,13 @@ let OcrService = OcrService_1 = class OcrService {
                 },
                 timeout: 90000,
             });
+            this.logger.log('Gemini 响应状态:', response.status);
+            this.logger.log('Gemini 响应头:', JSON.stringify(response.headers));
             this.logger.log('Gemini 响应:', JSON.stringify(response.data));
+            if (response.data?.error) {
+                this.logger.error('Gemini API 返回错误:', response.data.error);
+                throw new Error('Gemini API 错误: ' + JSON.stringify(response.data.error));
+            }
             if (response.data?.choices?.[0]?.message?.content) {
                 const content = response.data.choices[0].message.content;
                 this.logger.log('Gemini 返回内容:', content);

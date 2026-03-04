@@ -42,40 +42,40 @@ export class OcrService {
           imageBase64
         );
         
-        // 压缩转换：更小的尺寸和更低的质量
+        // 压缩转换：更高的尺寸和质量以提高识别率
         imageData = await sharp(svgBuffer)
-          .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-          .jpeg({ quality: 60, mozjpeg: true })
+          .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+          .jpeg({ quality: 85 })
           .toBuffer();
         
-        this.logger.log('SVG转压缩JPEG成功，大小:', imageData.length);
+        this.logger.log('SVG转JPEG成功，大小:', imageData.length);
       } else {
         // 可能是 base64，先尝试解码
         try {
           const decoded = Buffer.from(imageBase64, 'base64');
           if (decoded.toString('utf-8').startsWith('<svg')) {
             isSvg = true;
-            // 是 SVG
+            // 是 SVG - 更高质量转换
             imageData = await sharp(decoded)
-              .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-              .jpeg({ quality: 60, mozjpeg: true })
+              .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+              .jpeg({ quality: 85 })
               .toBuffer();
             fs.writeFileSync(
               path.join(this.SAMPLE_DIR, `input_${timestamp}.svg`),
               decoded.toString('utf-8')
             );
           } else {
-            // 是普通图片 - 也压缩一下
+            // 是普通图片
             imageData = await sharp(decoded)
-              .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-              .jpeg({ quality: 60, mozjpeg: true })
+              .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+              .jpeg({ quality: 85 })
               .toBuffer();
           }
         } catch {
-          // 尝试作为普通图片处理并压缩
+          // 尝试作为普通图片处理
           imageData = await sharp(Buffer.from(imageBase64, 'base64'))
-            .resize(256, 256, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-            .jpeg({ quality: 60, mozjpeg: true })
+            .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+            .jpeg({ quality: 85 })
             .toBuffer();
         }
       }
@@ -84,7 +84,7 @@ export class OcrService {
       const jpegBase64 = imageData.toString('base64');
       this.logger.log('最终图片base64长度:', jpegBase64.length);
       
-      // 按照用户提供的 Python 代码格式
+      // 按照用户提供的 Python 代码格式 - 优化提示词
       const requestBody = {
         model: this.MODEL,
         messages: [
@@ -93,7 +93,7 @@ export class OcrService {
             content: [
               {
                 type: 'text',
-                text: '分析这张图片中的所有文字内容'
+                text: '仔细看图，图中只有一个手写汉字。请直接回答这个汉字是什么，只回答一个字，不要说其他话。'
               },
               {
                 type: 'image_url',
@@ -103,10 +103,12 @@ export class OcrService {
               }
             ]
           }
-        ]
+        ],
+        temperature: 0.1,
+        max_tokens: 200
       };
       
-      this.logger.log('发送 Gemini 请求...');
+      this.logger.log('发送 Gemini 请求（图片大小: ' + jpegBase64.length + '）...');
       
       const response = await axios.post(this.API_URL, requestBody, {
         headers: { 
@@ -116,7 +118,15 @@ export class OcrService {
         timeout: 90000,
       });
       
+      this.logger.log('Gemini 响应状态:', response.status);
+      this.logger.log('Gemini 响应头:', JSON.stringify(response.headers));
       this.logger.log('Gemini 响应:', JSON.stringify(response.data));
+      
+      // 检查是否有 API 错误
+      if (response.data?.error) {
+        this.logger.error('Gemini API 返回错误:', response.data.error);
+        throw new Error('Gemini API 错误: ' + JSON.stringify(response.data.error));
+      }
       
       if (response.data?.choices?.[0]?.message?.content) {
         const content = response.data.choices[0].message.content;
