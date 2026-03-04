@@ -61,20 +61,29 @@ let ZiController = class ZiController {
         };
     }
     async analyzeHandwriting(dto) {
-        const ocrResult = await this.ocrService.recognizeHandwriting(dto.image);
-        const zi = ocrResult.zi;
-        if (!zi) {
+        try {
+            const ocrResult = await this.ocrService.recognizeHandwriting(dto.image);
+            const zi = ocrResult.zi;
+            if (!zi) {
+                return {
+                    recognizedZi: null,
+                    error: '未能识别出汉字',
+                };
+            }
+            const analysis = await this.ziService.analyze(zi);
             return {
-                recognizedZi: null,
-                error: '未能识别出汉字',
+                recognizedZi: zi,
+                confidence: ocrResult.confidence,
+                analysis,
             };
         }
-        const analysis = await this.ziService.analyze(zi);
-        return {
-            recognizedZi: zi,
-            confidence: ocrResult.confidence,
-            analysis,
-        };
+        catch (error) {
+            console.error('analyze-handwriting 错误:', error);
+            return {
+                recognizedZi: null,
+                error: error.message || '服务器错误',
+            };
+        }
     }
 };
 exports.ZiController = ZiController;

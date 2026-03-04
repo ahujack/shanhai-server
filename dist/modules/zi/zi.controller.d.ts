@@ -20,14 +20,14 @@ export declare class ZiController {
         confidence: number;
     }>;
     analyzeHandwriting(dto: AnalyzeHandwritingDto): Promise<{
-        recognizedZi: null;
-        error: string;
-        confidence?: undefined;
-        analysis?: undefined;
-    } | {
         recognizedZi: string;
         confidence: number;
         analysis: import("./zi.service").ZiResult;
         error?: undefined;
+    } | {
+        recognizedZi: null;
+        error: any;
+        confidence?: undefined;
+        analysis?: undefined;
     }>;
 }

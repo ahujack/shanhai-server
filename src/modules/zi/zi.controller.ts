@@ -44,24 +44,32 @@ export class ZiController {
 
   @Post('analyze-handwriting')
   async analyzeHandwriting(@Body() dto: AnalyzeHandwritingDto) {
-    // 1. 识别文字
-    const ocrResult = await this.ocrService.recognizeHandwriting(dto.image);
-    const zi = ocrResult.zi;
-    
-    if (!zi) {
+    try {
+      // 1. 识别文字
+      const ocrResult = await this.ocrService.recognizeHandwriting(dto.image);
+      const zi = ocrResult.zi;
+      
+      if (!zi) {
+        return {
+          recognizedZi: null,
+          error: '未能识别出汉字',
+        };
+      }
+      
+      // 2. 分析字义
+      const analysis = await this.ziService.analyze(zi);
+      
+      return {
+        recognizedZi: zi,
+        confidence: ocrResult.confidence,
+        analysis,
+      };
+    } catch (error) {
+      console.error('analyze-handwriting 错误:', error);
       return {
         recognizedZi: null,
-        error: '未能识别出汉字',
+        error: error.message || '服务器错误',
       };
     }
-    
-    // 2. 分析字义
-    const analysis = await this.ziService.analyze(zi);
-    
-    return {
-      recognizedZi: zi,
-      confidence: ocrResult.confidence,
-      analysis,
-    };
   }
 }
