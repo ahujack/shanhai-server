@@ -44,6 +44,7 @@ export interface ZiResult {
 export declare class ZiService {
     private readonly logger;
     analyze(zi: string, handwritingData?: Partial<HandwritingAnalysis>): Promise<ZiResult>;
+    private getDefaultResult;
     private analyzeHandwriting;
     private analyzeZi;
     private generateColdReadings;

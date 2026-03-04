@@ -223,42 +223,96 @@ export class ZiService {
    * @param handwritingData 手写特征数据（可选）
    */
   async analyze(zi: string, handwritingData?: Partial<HandwritingAnalysis>): Promise<ZiResult> {
-    const char = zi.charAt(0);
-    
-    // 1. 笔迹分析
-    const handwriting = this.analyzeHandwriting(handwritingData);
-    
-    // 2. 汉字拆解分析
-    const ziAnalysis = this.analyzeZi(char);
-    
-    // 3. 生成冷读话术
-    const coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
-    
-    // 4. 生成综合解读
-    const interpretation = this.generateInterpretation(handwriting, ziAnalysis);
-    
-    // 5. 生成后续问题
-    const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis);
-    
-    // 6. 尝试使用 LLM 增强（如果可用）
     try {
-      const llmEnhancement = await this.getLLMEnhancement(char, handwriting, ziAnalysis);
-      if (llmEnhancement) {
-        interpretation.overall = llmEnhancement.overall || interpretation.overall;
-        if (llmEnhancement.advice) {
-          interpretation.advice = [...interpretation.advice, ...llmEnhancement.advice].slice(0, 5);
+      const char = zi.charAt(0);
+      
+      // 1. 笔迹分析
+      const handwriting = this.analyzeHandwriting(handwritingData);
+      
+      // 2. 汉字拆解分析
+      const ziAnalysis = this.analyzeZi(char);
+      
+      // 3. 生成冷读话术
+      const coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
+      
+      // 4. 生成综合解读
+      const interpretation = this.generateInterpretation(handwriting, ziAnalysis);
+      
+      // 5. 生成后续问题
+      const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis);
+      
+      // 6. 尝试使用 LLM 增强（如果可用）
+      try {
+        const llmEnhancement = await this.getLLMEnhancement(char, handwriting, ziAnalysis);
+        if (llmEnhancement) {
+          interpretation.overall = llmEnhancement.overall || interpretation.overall;
+          if (llmEnhancement.advice) {
+            interpretation.advice = [...interpretation.advice, ...llmEnhancement.advice].slice(0, 5);
+          }
         }
+      } catch (error) {
+        this.logger.warn('LLM增强失败，使用本地分析', error);
       }
+      
+      return {
+        handwriting,
+        zi: ziAnalysis,
+        interpretation,
+        coldReadings,
+        followUpQuestions,
+        metadata: {
+          method: '测字有术 - AI笔迹与语义分析',
+          generatedAt: new Date().toISOString(),
+        },
+      };
     } catch (error) {
-      this.logger.warn('LLM增强失败，使用本地分析', error);
+      this.logger.error('测字分析失败', error);
+      // 返回一个默认结果而不是抛出异常
+      return this.getDefaultResult(zi);
     }
-    
+  }
+  
+  /**
+   * 获取默认结果（当分析失败时）
+   */
+  private getDefaultResult(zi: string): ZiResult {
+    const char = zi.charAt(0);
     return {
-      handwriting,
-      zi: ziAnalysis,
-      interpretation,
-      coldReadings,
-      followUpQuestions,
+      handwriting: {
+        pressure: 'medium',
+        pressureInterpretation: '笔画力度适中',
+        stability: 'average',
+        stabilityInterpretation: '字迹平稳',
+        structure: 'balanced',
+        structureInterpretation: '结构疏密有致',
+        continuity: 'average',
+        continuityInterpretation: '连贯性一般',
+        overallStyle: '默认分析',
+        personalityInsights: ['稳重', '靠谱'],
+      },
+      zi: {
+        zi: char,
+        bushou: '其他',
+        bihua: 4,
+        wuxing: '土',
+        yinyang: '阳',
+        jixiong: '平',
+        yijing: '乾',
+        guaXiang: '卦象深奥',
+        components: [char],
+        componentMeanings: [`部件"${char}"`],
+        associativeMeaning: '此字需细加品味',
+      },
+      interpretation: {
+        overall: '你写的字结构匀称，整体给人稳重的感觉。',
+        career: '你是个有想法的人，适合稳定发展的方向。',
+        love: '你是个重感情的人，内心细腻，需要被理解。',
+        wealth: '财运平稳，需稳扎稳打。',
+        health: '注意身体健康，保持良好作息。',
+        advice: ['保持良好生活习惯', '注意休息', '适度运动'],
+      },
+      coldReadings: ['从你的字来看，是个有想法的人。', '你很重视身边的人和事。', '你是个值得信赖的人。'],
+      followUpQuestions: ['最近是否有特别在意的事情？', '这个字是你随意写的，还是有特别的想法？'],
       metadata: {
         method: '测字有术 - AI笔迹与语义分析',
         generatedAt: new Date().toISOString(),

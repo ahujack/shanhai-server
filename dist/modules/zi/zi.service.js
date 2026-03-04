@@ -133,30 +133,80 @@ const coldReadingPhrases = {
 let ZiService = ZiService_1 = class ZiService {
     logger = new common_1.Logger(ZiService_1.name);
     async analyze(zi, handwritingData) {
-        const char = zi.charAt(0);
-        const handwriting = this.analyzeHandwriting(handwritingData);
-        const ziAnalysis = this.analyzeZi(char);
-        const coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
-        const interpretation = this.generateInterpretation(handwriting, ziAnalysis);
-        const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis);
         try {
-            const llmEnhancement = await this.getLLMEnhancement(char, handwriting, ziAnalysis);
-            if (llmEnhancement) {
-                interpretation.overall = llmEnhancement.overall || interpretation.overall;
-                if (llmEnhancement.advice) {
-                    interpretation.advice = [...interpretation.advice, ...llmEnhancement.advice].slice(0, 5);
+            const char = zi.charAt(0);
+            const handwriting = this.analyzeHandwriting(handwritingData);
+            const ziAnalysis = this.analyzeZi(char);
+            const coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
+            const interpretation = this.generateInterpretation(handwriting, ziAnalysis);
+            const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis);
+            try {
+                const llmEnhancement = await this.getLLMEnhancement(char, handwriting, ziAnalysis);
+                if (llmEnhancement) {
+                    interpretation.overall = llmEnhancement.overall || interpretation.overall;
+                    if (llmEnhancement.advice) {
+                        interpretation.advice = [...interpretation.advice, ...llmEnhancement.advice].slice(0, 5);
+                    }
                 }
             }
+            catch (error) {
+                this.logger.warn('LLM增强失败，使用本地分析', error);
+            }
+            return {
+                handwriting,
+                zi: ziAnalysis,
+                interpretation,
+                coldReadings,
+                followUpQuestions,
+                metadata: {
+                    method: '测字有术 - AI笔迹与语义分析',
+                    generatedAt: new Date().toISOString(),
+                },
+            };
         }
         catch (error) {
-            this.logger.warn('LLM增强失败，使用本地分析', error);
+            this.logger.error('测字分析失败', error);
+            return this.getDefaultResult(zi);
         }
+    }
+    getDefaultResult(zi) {
+        const char = zi.charAt(0);
         return {
-            handwriting,
-            zi: ziAnalysis,
-            interpretation,
-            coldReadings,
-            followUpQuestions,
+            handwriting: {
+                pressure: 'medium',
+                pressureInterpretation: '笔画力度适中',
+                stability: 'average',
+                stabilityInterpretation: '字迹平稳',
+                structure: 'balanced',
+                structureInterpretation: '结构疏密有致',
+                continuity: 'average',
+                continuityInterpretation: '连贯性一般',
+                overallStyle: '默认分析',
+                personalityInsights: ['稳重', '靠谱'],
+            },
+            zi: {
+                zi: char,
+                bushou: '其他',
+                bihua: 4,
+                wuxing: '土',
+                yinyang: '阳',
+                jixiong: '平',
+                yijing: '乾',
+                guaXiang: '卦象深奥',
+                components: [char],
+                componentMeanings: [`部件"${char}"`],
+                associativeMeaning: '此字需细加品味',
+            },
+            interpretation: {
+                overall: '你写的字结构匀称，整体给人稳重的感觉。',
+                career: '你是个有想法的人，适合稳定发展的方向。',
+                love: '你是个重感情的人，内心细腻，需要被理解。',
+                wealth: '财运平稳，需稳扎稳打。',
+                health: '注意身体健康，保持良好作息。',
+                advice: ['保持良好生活习惯', '注意休息', '适度运动'],
+            },
+            coldReadings: ['从你的字来看，是个有想法的人。', '你很重视身边的人和事。', '你是个值得信赖的人。'],
+            followUpQuestions: ['最近是否有特别在意的事情？', '这个字是你随意写的，还是有特别的想法？'],
             metadata: {
                 method: '测字有术 - AI笔迹与语义分析',
                 generatedAt: new Date().toISOString(),
