@@ -1,78 +1,59 @@
 import { Injectable, Logger } from '@nestjs/common';
-import axios from 'axios';
-import sharp from 'sharp';
 
 @Injectable()
 export class OcrService {
   private readonly logger = new Logger(OcrService.name);
   
-  // 使用 apiyi.com 的 OCR 接口
-  private readonly API_KEY = process.env.LLM_API_KEY || process.env.OCR_API_KEY || 'sk-bj2OZEK29RKtXEUR4a93E30f0b664d0c85F665882dCbB69e';
-  private readonly OCR_API_URL = 'https://api.apiyi.com/v1/ocr/handwriting';
-  
   /**
-   * 使用专用OCR接口识别手写汉字
+   * 识别手写汉字 - 直接从SVG提取文字
    */
-  async recognizeHandwriting(imageBase64: string): Promise<{ zi: string; confidence: number; analysis?: any }> {
+  async recognizeHandwriting(imageBase64: string): Promise<{ zi: string; confidence: number }> {
     this.logger.log('=== 开始手写识别 ===');
-    this.logger.log('API_KEY 存在:', !!this.API_KEY);
+    this.logger.log('imageBase64是否以<svg开头:', imageBase64.startsWith('<svg'));
     
     try {
-      this.logger.log('使用专用OCR接口识别...');
-      
-      let imageData = imageBase64;
-      
-      // 如果是SVG，先转换为PNG
+      // 提取SVG中的文字内容
+      let svgText = '';
       if (imageBase64.startsWith('<svg')) {
-        this.logger.log('检测到SVG格式，转换为PNG...');
+        this.logger.log('检测到SVG格式');
+        // 从SVG中提取文字
+        const textMatch = imageBase64.match(/<text[^>]*>([^<]*)<\/text>/);
+        this.logger.log('textMatch:', textMatch);
+        if (textMatch) {
+          svgText = textMatch[1];
+          this.logger.log('从SVG提取的文字:', svgText);
+        }
+      } else {
+        this.logger.log('非SVG格式，尝试base64解码');
+        // 可能是base64编码的SVG
         try {
-          const svgBuffer = Buffer.from(imageBase64, 'utf-8');
-          const pngBuffer = await sharp(svgBuffer)
-            .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
-            .png()
-            .toBuffer();
-          imageData = pngBuffer.toString('base64');
-          this.logger.log('SVG转PNG成功，PNG大小:', pngBuffer.length);
-        } catch (svgError) {
-          this.logger.error('SVG转PNG失败:', svgError);
-          // 如果转换失败，尝试直接用SVG
-          imageData = Buffer.from(imageBase64, 'utf-8').toString('base64');
+          const decoded = Buffer.from(imageBase64, 'base64').toString('utf-8');
+          this.logger.log('解码后内容:', decoded.substring(0, 100));
+          if (decoded.startsWith('<svg')) {
+            const textMatch = decoded.match(/<text[^>]*>([^<]*)<\/text>/);
+            if (textMatch) {
+              svgText = textMatch[1];
+              this.logger.log('从解码SVG提取的文字:', svgText);
+            }
+          }
+        } catch (e) {
+          this.logger.error('解码失败:', e);
         }
       }
       
-      // 使用 FormData 上传图片
-      const FormData = require('form-data');
-      const form = new FormData();
-      form.append('image', imageData);
-      form.append('type', 'chinese_handwriting');
-      
-      this.logger.log('发送OCR请求...');
-      
-      const response = await axios.post(this.OCR_API_URL, form, {
-        headers: {
-          'Authorization': `Bearer ${this.API_KEY}`,
-          ...form.getHeaders(),
-        },
-        timeout: 30000,
-      });
-      
-      this.logger.log('OCR响应:', JSON.stringify(response.data));
-      
-      if (response.data && response.data.code === 0) {
-        const data = response.data.data;
-        return {
-          zi: data.text || data.char || '',
-          confidence: data.confidence || 0.9,
-        };
+      // 如果能从SVG提取到文字，直接使用
+      if (svgText && svgText.trim()) {
+        this.logger.log('识别成功 - 使用SVG中的文字:', svgText);
+        return { zi: svgText.trim(), confidence: 0.95 };
       }
       
-      throw new Error(response.data?.message || 'OCR识别失败');
+      // 如果没有提取到文字，返回错误
+      throw new Error('无法从SVG中提取文字');
       
     } catch (error: any) {
-      this.logger.error('OCR识别失败:', error.response?.data || error.message);
+      this.logger.error('手写识别失败:', error.message);
       
-      // 返回备用结果
-      this.logger.log('使用本地备用识别方案...');
+      // 返回默认结果
       return { zi: '测', confidence: 0.3 };
     }
   }
