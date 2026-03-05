@@ -122,10 +122,11 @@ export class AuthController {
 
     // 优先使用密码登录
     if (password) {
-      user = this.userService.loginWithPassword(email, password);
-      if (!user) {
+      const loggedInUser = this.userService.loginWithPassword(email, password);
+      if (!loggedInUser) {
         return { success: false, message: '邮箱或密码错误' };
       }
+      user = loggedInUser;
     } else if (code) {
       // 验证码登录
       const isValid = this.userService.verifyCode(email, code);
@@ -136,6 +137,10 @@ export class AuthController {
       user = this.userService.findOrCreateByEmail(email);
     } else {
       return { success: false, message: '请提供密码或验证码' };
+    }
+
+    if (!user) {
+      return { success: false, message: '登录失败' };
     }
 
     // 生成 JWT Token
