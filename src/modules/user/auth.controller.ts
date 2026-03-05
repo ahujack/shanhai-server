@@ -119,7 +119,7 @@ export class AuthController {
     }
 
     // 优先使用密码登录
-    if (password) {
+    if (password && password.length > 0) {
       const loggedInUser = this.userService.loginWithPassword(email, password);
       if (!loggedInUser) {
         return { success: false, message: '邮箱或密码错误' };
@@ -142,7 +142,7 @@ export class AuthController {
           membership: loggedInUser.membership,
         }
       };
-    } else if (code) {
+    } else if (code && code.length > 0) {
       // 验证码登录
       const isValid = this.userService.verifyCode(email, code);
       if (!isValid) {
