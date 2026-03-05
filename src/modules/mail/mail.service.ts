@@ -43,18 +43,6 @@ export class MailService {
       connectionTimeout: 30000,
     };
 
-    // 检查是否配置了 SOCKS 代理
-    const socksProxy = process.env.SOCKS_PROXY || process.env.socks_proxy;
-    if (socksProxy) {
-      const proxyParts = socksProxy.replace('socks5://', '').split(':');
-      transportConfig.proxy = {
-        type: 5,
-        host: proxyParts[0],
-        port: parseInt(proxyParts[1] || '7890'),
-      };
-      this.logger.log(`使用 SOCKS 代理: ${proxyParts[0]}:${proxyParts[1]}`);
-    }
-
     this.transporter = nodemailer.createTransport(transportConfig);
     this.logger.log('邮件服务已初始化');
   }
