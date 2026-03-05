@@ -126,20 +126,21 @@ export class AuthController {
       }
 
       // 生成 JWT Token
-      const payload = { sub: loggedInUser.id, email: loggedInUser.email };
+      const user = loggedInUser;
+      const payload = { sub: user.id, email: user.email };
       const token = this.jwtService
         ? this.jwtService.sign(payload)
-        : Buffer.from(`${loggedInUser.id}:${Date.now()}`).toString('base64');
+        : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
 
       return {
         success: true,
         token,
         user: {
-          id: loggedInUser.id,
-          name: loggedInUser.name,
-          email: loggedInUser.email,
-          role: loggedInUser.role,
-          membership: loggedInUser.membership,
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          membership: user.membership,
         }
       };
     } else if (code && code.length > 0) {
