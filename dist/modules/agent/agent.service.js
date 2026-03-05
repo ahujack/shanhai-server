@@ -173,11 +173,13 @@ ${contextInfo}`,
     fallbackDetectIntent(message, userChart) {
         const text = message.toLowerCase();
         const chartKeywords = ['命盘', '八字', '我的命', '排盘', '紫微', '五行', '日主', '强弱'];
-        const fortuneKeywords = ['今日运势', '今天运气', '抽签', '日签', '运气'];
+        const fortuneKeywords = ['今日运势', '今天运气', '抽签', '日签', '运气', '求签'];
         const divinationKeywords = ['占卜', '解读', '卦', '算一算', '问卜', '决定'];
         const meditationKeywords = ['焦虑', '冥想', '睡不着', '平静', '紧张', '失眠', '静心'];
-        const ziKeywords = ['测字', '写字', '看字', '这个字', '字怎么样', '字的意思', '帮我看看'];
-        const hasChinese = /[\u4e00-\u9fa5]/.test(message);
+        const ziKeywords = ['测字', '看字', '字怎么样', '字的意思', '帮我看看这个字', '这个字怎么样'];
+        if (ziKeywords.some(word => text.includes(word))) {
+            return 'zi';
+        }
         if (chartKeywords.some(word => text.includes(word))) {
             return 'chart';
         }
@@ -189,9 +191,6 @@ ${contextInfo}`,
         }
         if (meditationKeywords.some(word => text.includes(word))) {
             return 'meditation';
-        }
-        if (ziKeywords.some(word => text.includes(word)) || (hasChinese && message.length <= 10)) {
-            return 'zi';
         }
         return 'chat';
     }

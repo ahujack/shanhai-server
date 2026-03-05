@@ -195,17 +195,20 @@ ${contextInfo}`,
     // 命盘相关关键词
     const chartKeywords = ['命盘', '八字', '我的命', '排盘', '紫微', '五行', '日主', '强弱'];
     // 运势相关关键词
-    const fortuneKeywords = ['今日运势', '今天运气', '抽签', '日签', '运气'];
+    const fortuneKeywords = ['今日运势', '今天运气', '抽签', '日签', '运气', '求签'];
     // 占卜相关关键词
     const divinationKeywords = ['占卜', '解读', '卦', '算一算', '问卜', '决定'];
     // 冥想相关关键词
     const meditationKeywords = ['焦虑', '冥想', '睡不着', '平静', '紧张', '失眠', '静心'];
-    // 测字相关关键词
-    const ziKeywords = ['测字', '写字', '看字', '这个字', '字怎么样', '字的意思', '帮我看看'];
-
-    // 检查是否包含汉字（可能是测字）
-    const hasChinese = /[\u4e00-\u9fa5]/.test(message);
-
+    // 测字相关关键词 - 需要更精确匹配
+    const ziKeywords = ['测字', '看字', '字怎么样', '字的意思', '帮我看看这个字', '这个字怎么样'];
+    
+    // 检查是否是纯汉字且很短（可能是测字，但需要明确意图）
+    // 只有明确包含测字关键词才触发
+    if (ziKeywords.some(word => text.includes(word))) {
+      return 'zi';
+    }
+    
     if (chartKeywords.some(word => text.includes(word))) {
       return 'chart';
     }
@@ -218,9 +221,8 @@ ${contextInfo}`,
     if (meditationKeywords.some(word => text.includes(word))) {
       return 'meditation';
     }
-    if (ziKeywords.some(word => text.includes(word)) || (hasChinese && message.length <= 10)) {
-      return 'zi';
-    }
+    
+    // 默认都是聊天
     return 'chat';
   }
 
