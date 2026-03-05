@@ -48,8 +48,8 @@ export class AuthController {
     return {
       success: true,
       message: '验证码已发送到您的邮箱',
-      // 测试环境直接返回验证码
-      code: process.env.NODE_ENV === 'production' ? undefined : code
+      // 非生产环境直接返回验证码方便测试
+      code: process.env.NODE_ENV !== 'production' ? code : undefined
     };
   }
 
