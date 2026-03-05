@@ -126,7 +126,7 @@ export class AuthController {
       }
 
       // 生成 JWT Token
-      const user = loggedInUser;
+      const user: UserProfile = loggedInUser;
       const payload = { sub: user.id, email: user.email };
       const token = this.jwtService
         ? this.jwtService.sign(payload)
@@ -150,7 +150,7 @@ export class AuthController {
         return { success: false, message: '验证码错误或已过期' };
       }
       // 验证码登录时自动创建用户（如果不存在）
-      const user = this.userService.findOrCreateByEmail(email);
+      const user: UserProfile = this.userService.findOrCreateByEmail(email);
 
       // 生成 JWT Token
       const payload = { sub: user.id, email: user.email };
