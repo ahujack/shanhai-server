@@ -118,15 +118,30 @@ export class AuthController {
       return { success: false, message: '请提供邮箱' };
     }
 
-    let user: UserProfile | null = null;
-
     // 优先使用密码登录
     if (password) {
       const loggedInUser = this.userService.loginWithPassword(email, password);
       if (!loggedInUser) {
         return { success: false, message: '邮箱或密码错误' };
       }
-      user = loggedInUser;
+
+      // 生成 JWT Token
+      const payload = { sub: loggedInUser.id, email: loggedInUser.email };
+      const token = this.jwtService
+        ? this.jwtService.sign(payload)
+        : Buffer.from(`${loggedInUser.id}:${Date.now()}`).toString('base64');
+
+      return {
+        success: true,
+        token,
+        user: {
+          id: loggedInUser.id,
+          name: loggedInUser.name,
+          email: loggedInUser.email,
+          role: loggedInUser.role,
+          membership: loggedInUser.membership,
+        }
+      };
     } else if (code) {
       // 验证码登录
       const isValid = this.userService.verifyCode(email, code);
@@ -134,32 +149,28 @@ export class AuthController {
         return { success: false, message: '验证码错误或已过期' };
       }
       // 验证码登录时自动创建用户（如果不存在）
-      user = this.userService.findOrCreateByEmail(email);
+      const user = this.userService.findOrCreateByEmail(email);
+
+      // 生成 JWT Token
+      const payload = { sub: user.id, email: user.email };
+      const token = this.jwtService
+        ? this.jwtService.sign(payload)
+        : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
+
+      return {
+        success: true,
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          membership: user.membership,
+        }
+      };
     } else {
       return { success: false, message: '请提供密码或验证码' };
     }
-
-    if (!user) {
-      return { success: false, message: '登录失败' };
-    }
-
-    // 生成 JWT Token
-    const payload = { sub: user.id, email: user.email };
-    const token = this.jwtService
-      ? this.jwtService.sign(payload)
-      : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
-
-    return {
-      success: true,
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        membership: user.membership,
-      }
-    };
   }
 
   // 第三方登录（谷歌/Facebook）
