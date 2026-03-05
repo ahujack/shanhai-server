@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { MailService } from '../mail/mail.service';
 
 export interface UserProfile {
   id: string;
@@ -19,6 +20,7 @@ export interface UserProfile {
 
 export interface CreateUserDto {
   name: string;
+  email?: string;
   birthDate?: string;
   birthTime?: string;
   gender?: 'male' | 'female' | 'other';
@@ -36,12 +38,13 @@ export class UserService {
   // 内存存储，生产环境应连接数据库
   private users: Map<string, UserProfile> = new Map();
   private verificationCodes: Map<string, VerificationCode> = new Map();
-  private phoneToUser: Map<string, string> = new Map();
   private emailToUser: Map<string, string> = new Map();
   private socialToUser: Map<string, string> = new Map();
 
   // 验证码有效期：5分钟
   private readonly CODE_EXPIRE_TIME = 5 * 60 * 1000;
+
+  constructor(private mailService?: MailService) {}
 
   create(dto: CreateUserDto): UserProfile {
     const id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -125,47 +128,54 @@ export class UserService {
     return false;
   }
 
-  // 通过手机号或邮箱查找或创建用户
-  findOrCreateByIdentifier(identifier: string): UserProfile {
+  // 通过邮箱查找或创建用户
+  findOrCreateByEmail(email: string): UserProfile {
     // 检查是否已存在
-    let userId = this.phoneToUser.get(identifier) || this.emailToUser.get(identifier);
+    const userId = this.emailToUser.get(email);
     
     if (userId) {
       return this.findOne(userId);
     }
     
     // 创建新用户
-    const isPhone = /^\d{11}$/.test(identifier);
     const user = this.create({
-      name: isPhone ? `用户${identifier.slice(-4)}` : identifier.split('@')[0],
+      name: email.split('@')[0],
+      email: email,
     });
     
-    // 绑定标识符
-    if (isPhone) {
-      user.phone = identifier;
-      this.phoneToUser.set(identifier, user.id);
-    } else {
-      user.email = identifier;
-      this.emailToUser.set(identifier, user.id);
-    }
+    // 绑定邮箱
+    this.emailToUser.set(email, user.id);
     
     this.users.set(user.id, user);
     return user;
   }
 
   // 第三方登录
-  findOrCreateBySocial(provider: 'google' | 'facebook', socialId: string): UserProfile {
+  findOrCreateBySocial(provider: 'google' | 'facebook', socialId: string, userInfo?: { email?: string; name?: string }): UserProfile {
     const key = `${provider}:${socialId}`;
     
     // 检查是否已存在
     let userId = this.socialToUser.get(key);
     if (userId) {
-      return this.findOne(userId);
+      const user = this.findOne(userId);
+      // 如果有新的用户信息，更新一下
+      if (userInfo) {
+        if (userInfo.email && !user.email) {
+          user.email = userInfo.email;
+          this.emailToUser.set(userInfo.email, user.id);
+        }
+        if (userInfo.name && user.name === `${provider}用户`) {
+          user.name = userInfo.name;
+        }
+        this.users.set(user.id, user);
+      }
+      return user;
     }
     
     // 创建新用户
     const user = this.create({
-      name: `${provider}用户`,
+      name: userInfo?.name || `${provider}用户`,
+      email: userInfo?.email,
     });
     
     // 绑定社交账号

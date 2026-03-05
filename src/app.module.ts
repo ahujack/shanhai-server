@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
 import { HealthModule } from './modules/health/health.module';
 import { PersonaModule } from './modules/persona/persona.module';
 import { ReadingModule } from './modules/reading/reading.module';
@@ -11,6 +12,11 @@ import { ZiModule } from './modules/zi/zi.module';
 
 @Module({
   imports: [
+    JwtModule.register({
+      global: true,
+      secret: process.env.JWT_SECRET || 'shanhai-secret-key-change-in-production',
+      signOptions: { expiresIn: '7d' },
+    }),
     HealthModule, 
     PersonaModule, 
     ReadingModule, 
