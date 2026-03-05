@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { MailService } from '../mail/mail.service';
+import * as crypto from 'crypto';
 
 export interface UserProfile {
   id: string;
@@ -11,6 +12,7 @@ export interface UserProfile {
   location?: string;
   phone?: string;
   email?: string;
+  password?: string; // 哈希后的密码
   avatar?: string;
   role: 'user' | 'admin';
   membership: 'free' | 'premium' | 'vip';
@@ -44,7 +46,67 @@ export class UserService {
   // 验证码有效期：5分钟
   private readonly CODE_EXPIRE_TIME = 5 * 60 * 1000;
 
+  // 密码哈希密钥
+  private readonly PASSWORD_SECRET = 'shanhai-password-secret';
+
   constructor(private mailService?: MailService) {}
+
+  // 哈希密码
+  hashPassword(password: string): string {
+    return crypto.createHmac('sha256', this.PASSWORD_SECRET).update(password).digest('hex');
+  }
+
+  // 验证密码
+  verifyPassword(password: string, hashedPassword: string): boolean {
+    return this.hashPassword(password) === hashedPassword;
+  }
+
+  // 检查邮箱是否已注册
+  isEmailRegistered(email: string): boolean {
+    return this.emailToUser.has(email);
+  }
+
+  // 注册新用户（需要验证码验证）
+  registerWithEmail(email: string, password: string, name: string): UserProfile {
+    // 检查邮箱是否已存在
+    if (this.emailToUser.has(email)) {
+      throw new BadRequestException('该邮箱已注册');
+    }
+
+    const id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const now = new Date().toISOString();
+    
+    const user: UserProfile = {
+      id,
+      name: name || email.split('@')[0],
+      email,
+      password: this.hashPassword(password),
+      timezone: 'Asia/Shanghai',
+      role: 'user',
+      membership: 'free',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.users.set(id, user);
+    this.emailToUser.set(email, user.id);
+    return user;
+  }
+
+  // 使用邮箱密码登录
+  loginWithPassword(email: string, password: string): UserProfile | null {
+    const userId = this.emailToUser.get(email);
+    if (!userId) {
+      return null;
+    }
+
+    const user = this.findOne(userId);
+    if (!user.password || !this.verifyPassword(password, user.password)) {
+      return null;
+    }
+
+    return user;
+  }
 
   create(dto: CreateUserDto): UserProfile {
     const id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;

@@ -1,3 +1,4 @@
+import { MailService } from '../mail/mail.service';
 export interface UserProfile {
     id: string;
     name: string;
@@ -8,6 +9,7 @@ export interface UserProfile {
     location?: string;
     phone?: string;
     email?: string;
+    password?: string;
     avatar?: string;
     role: 'user' | 'admin';
     membership: 'free' | 'premium' | 'vip';
@@ -16,6 +18,7 @@ export interface UserProfile {
 }
 export interface CreateUserDto {
     name: string;
+    email?: string;
     birthDate?: string;
     birthTime?: string;
     gender?: 'male' | 'female' | 'other';
@@ -23,12 +26,19 @@ export interface CreateUserDto {
     location?: string;
 }
 export declare class UserService {
+    private mailService?;
     private users;
     private verificationCodes;
-    private phoneToUser;
     private emailToUser;
     private socialToUser;
     private readonly CODE_EXPIRE_TIME;
+    private readonly PASSWORD_SECRET;
+    constructor(mailService?: MailService | undefined);
+    hashPassword(password: string): string;
+    verifyPassword(password: string, hashedPassword: string): boolean;
+    isEmailRegistered(email: string): boolean;
+    registerWithEmail(email: string, password: string, name: string): UserProfile;
+    loginWithPassword(email: string, password: string): UserProfile | null;
     create(dto: CreateUserDto): UserProfile;
     findAll(): UserProfile[];
     findOne(id: string): UserProfile;
@@ -36,8 +46,11 @@ export declare class UserService {
     delete(id: string): void;
     storeCode(identifier: string, code: string): void;
     verifyCode(identifier: string, code: string): boolean;
-    findOrCreateByIdentifier(identifier: string): UserProfile;
-    findOrCreateBySocial(provider: 'google' | 'facebook', socialId: string): UserProfile;
+    findOrCreateByEmail(email: string): UserProfile;
+    findOrCreateBySocial(provider: 'google' | 'facebook', socialId: string, userInfo?: {
+        email?: string;
+        name?: string;
+    }): UserProfile;
     updateUserRole(userId: string, role: 'user' | 'admin'): UserProfile;
     updateUserMembership(userId: string, membership: 'free' | 'premium' | 'vip'): UserProfile;
 }

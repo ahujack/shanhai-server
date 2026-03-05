@@ -15,8 +15,8 @@ export class AuthController {
   // 发送验证码
   @Post('send-code')
   @HttpCode(HttpStatus.OK)
-  async sendCode(@Body() dto: { email?: string }) {
-    const { email } = dto;
+  async sendCode(@Body() dto: { email?: string; purpose?: string }) {
+    const { email, purpose } = dto;
     
     if (!email) {
       return { success: false, message: '请提供邮箱地址' };
@@ -26,6 +26,13 @@ export class AuthController {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return { success: false, message: '请输入有效的邮箱地址' };
+    }
+
+    // 注册时检查邮箱是否已存在
+    if (purpose === 'register') {
+      if (this.userService.isEmailRegistered(email)) {
+        return { success: false, message: '该邮箱已注册' };
+      }
     }
 
     // 生成6位验证码
@@ -53,14 +60,19 @@ export class AuthController {
     };
   }
 
-  // 邮箱登录
-  @Post('login')
+  // 注册
+  @Post('register')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() dto: { email: string; code: string }) {
-    const { email, code } = dto;
+  async register(@Body() dto: { email: string; password: string; code: string; name?: string }) {
+    const { email, password, code, name } = dto;
     
-    if (!email || !code) {
-      return { success: false, message: '请提供邮箱和验证码' };
+    if (!email || !password || !code) {
+      return { success: false, message: '请提供邮箱、密码和验证码' };
+    }
+
+    // 验证密码长度
+    if (password.length < 6) {
+      return { success: false, message: '密码至少需要6位' };
     }
 
     // 验证验证码
@@ -69,8 +81,62 @@ export class AuthController {
       return { success: false, message: '验证码错误或已过期' };
     }
 
-    // 创建或获取用户
-    const user = this.userService.findOrCreateByEmail(email);
+    // 检查邮箱是否已注册
+    if (this.userService.isEmailRegistered(email)) {
+      return { success: false, message: '该邮箱已注册' };
+    }
+
+    // 创建用户
+    const user = this.userService.registerWithEmail(email, password, name || email.split('@')[0]);
+
+    // 生成 JWT Token
+    const payload = { sub: user.id, email: user.email };
+    const token = this.jwtService
+      ? this.jwtService.sign(payload)
+      : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
+
+    return {
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        membership: user.membership,
+      }
+    };
+  }
+
+  // 密码登录
+  @Post('login')
+  @HttpCode(HttpStatus.OK)
+  async login(@Body() dto: { email: string; password?: string; code?: string }) {
+    const { email, password, code } = dto;
+    
+    if (!email) {
+      return { success: false, message: '请提供邮箱' };
+    }
+
+    let user = null;
+
+    // 优先使用密码登录
+    if (password) {
+      user = this.userService.loginWithPassword(email, password);
+      if (!user) {
+        return { success: false, message: '邮箱或密码错误' };
+      }
+    } else if (code) {
+      // 验证码登录
+      const isValid = this.userService.verifyCode(email, code);
+      if (!isValid) {
+        return { success: false, message: '验证码错误或已过期' };
+      }
+      // 验证码登录时自动创建用户（如果不存在）
+      user = this.userService.findOrCreateByEmail(email);
+    } else {
+      return { success: false, message: '请提供密码或验证码' };
+    }
 
     // 生成 JWT Token
     const payload = { sub: user.id, email: user.email };

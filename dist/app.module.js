@@ -8,6 +8,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppModule = void 0;
 const common_1 = require("@nestjs/common");
+const jwt_1 = require("@nestjs/jwt");
 const health_module_1 = require("./modules/health/health.module");
 const persona_module_1 = require("./modules/persona/persona.module");
 const reading_module_1 = require("./modules/reading/reading.module");
@@ -23,6 +24,11 @@ exports.AppModule = AppModule;
 exports.AppModule = AppModule = __decorate([
     (0, common_1.Module)({
         imports: [
+            jwt_1.JwtModule.register({
+                global: true,
+                secret: process.env.JWT_SECRET || 'shanhai-secret-key-change-in-production',
+                signOptions: { expiresIn: '7d' },
+            }),
             health_module_1.HealthModule,
             persona_module_1.PersonaModule,
             reading_module_1.ReadingModule,
