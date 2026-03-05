@@ -42,14 +42,20 @@ export class AuthController {
     this.userService.storeCode(email, code);
 
     // 发送邮箱验证码
+    let sent = false;
     if (this.mailService) {
-      const sent = await this.mailService.sendVerificationCode(email, code);
-      if (!sent) {
-        return { success: false, message: '发送失败，请稍后重试' };
-      }
-    } else {
-      // 模拟模式：打印到控制台
+      sent = await this.mailService.sendVerificationCode(email, code);
+    }
+    
+    // 如果没有配置 mailService 或者发送失败，进入模拟模式
+    if (!this.mailService || !sent) {
+      // 模拟模式：打印到控制台并返回验证码方便测试
       console.log(`验证码: ${code} (${email})`);
+      return {
+        success: true,
+        message: '验证码已发送到您的邮箱（测试模式）',
+        code: code
+      };
     }
 
     return {

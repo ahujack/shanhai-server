@@ -23,6 +23,7 @@ export class MailService {
     // 如果没有配置 SMTP，则使用模拟模式
     if (!host || !user) {
       this.logger.warn('SMTP 未配置，邮件功能将在模拟模式下运行');
+      this.logger.warn(`SMTP_HOST: ${host}, SMTP_USER: ${user}`);
       this.transporter = null;
       return;
     }
@@ -52,6 +53,8 @@ export class MailService {
    */
   async sendVerificationCode(email: string, code: string): Promise<boolean> {
     const appName = this.getConfig('APP_NAME') || '山海灵境';
+
+    this.logger.log(`准备发送验证码到 ${email}, transporter: ${this.transporter ? '已配置' : '未配置'}`);
 
     // 如果没有配置 SMTP，返回模拟结果
     if (!this.transporter) {
