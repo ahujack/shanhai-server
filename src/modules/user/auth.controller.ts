@@ -2,7 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, 
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from './user.service';
 import { MailService } from '../mail/mail.service';
-import type { CreateUserDto } from './user.service';
+import type { CreateUserDto, UserProfile } from './user.service';
 
 @Controller('auth')
 export class AuthController {
@@ -118,7 +118,7 @@ export class AuthController {
       return { success: false, message: '请提供邮箱' };
     }
 
-    let user = null;
+    let user: UserProfile | null = null;
 
     // 优先使用密码登录
     if (password) {
