@@ -1,57 +1,31 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private transporter: nodemailer.Transporter | null;
+  private resend: Resend | null;
 
   constructor() {
-    this.initTransporter();
+    this.initResend();
   }
 
   private getConfig(key: string): string | undefined {
     return process.env[key];
   }
 
-  private initTransporter() {
-    const host = this.getConfig('SMTP_HOST');
-    const port = this.getConfig('SMTP_PORT');
-    const user = this.getConfig('SMTP_USER');
-    const pass = this.getConfig('SMTP_PASS');
+  private initResend() {
+    const resendKey = this.getConfig('RESEND_API_KEY');
 
-    // 如果没有配置 SMTP，则使用模拟模式
-    if (!host || !user) {
-      this.logger.warn('SMTP 未配置，邮件功能将在模拟模式下运行');
-      this.transporter = null;
+    // 如果没有配置 RESEND_API_KEY，则使用模拟模式
+    if (!resendKey) {
+      this.logger.warn('RESEND_API_KEY 未配置，邮件功能将在模拟模式下运行');
+      this.resend = null;
       return;
     }
 
-    this.logger.log(`初始化邮件服务: host=${host}, port=${port}, user=${user}`);
-
-    const usePort = parseInt(port || '587');
-    const useSecure = usePort === 465;
-
-    const transportConfig: any = {
-      host,
-      port: usePort,
-      secure: useSecure,
-      auth: {
-        user,
-        pass,
-      },
-      tls: {
-        rejectUnauthorized: false,
-        // Brevo 需要这个
-        enableStartTLS: true,
-      },
-      connectionTimeout: 60000,
-      socketTimeout: 60000,
-      maxConnections: 1,
-    };
-
-    this.transporter = nodemailer.createTransport(transportConfig);
-    this.logger.log('邮件服务已初始化');
+    this.resend = new Resend(resendKey);
+    this.logger.log('Resend 邮件服务已初始化');
   }
 
   /**
@@ -60,17 +34,17 @@ export class MailService {
   async sendVerificationCode(email: string, code: string): Promise<boolean> {
     const appName = this.getConfig('APP_NAME') || '山海灵境';
 
-    this.logger.log(`准备发送验证码到 ${email}, transporter: ${this.transporter ? '已配置' : '未配置'}`);
+    this.logger.log(`准备发送验证码到 ${email}, resend: ${this.resend ? '已配置' : '未配置'}`);
 
-    // 如果没有配置 SMTP，返回模拟结果
-    if (!this.transporter) {
+    // 如果没有配置 RESEND，返回模拟结果
+    if (!this.resend) {
       this.logger.log(`[模拟] 发送验证码 ${code} 到 ${email}`);
       return true;
     }
 
     try {
-      await this.transporter.sendMail({
-        from: `"${appName}" <${this.getConfig('SMTP_USER')}>`,
+      const data = await this.resend.emails.send({
+        from: 'onboarding@resend.dev',
         to: email,
         subject: `【${appName}】您的验证码`,
         html: `
@@ -90,12 +64,11 @@ export class MailService {
         `,
       });
 
-      this.logger.log(`验证码已发送到 ${email}`);
+      this.logger.log(`验证码已发送到 ${email}, resend id: ${data.data?.id}`);
       return true;
     } catch (error) {
       this.logger.error(`发送验证码失败: ${error.message}`);
-      // 返回错误信息而不是 false
-      throw new Error(`SMTP发送失败: ${error.message}`);
+      throw new Error(`邮件发送失败: ${error.message}`);
     }
   }
 
@@ -105,14 +78,14 @@ export class MailService {
   async sendWelcomeEmail(email: string, name: string): Promise<boolean> {
     const appName = this.getConfig('APP_NAME') || '山海灵境';
 
-    if (!this.transporter) {
+    if (!this.resend) {
       this.logger.log(`[模拟] 发送欢迎邮件到 ${email}`);
       return true;
     }
 
     try {
-      await this.transporter.sendMail({
-        from: `"${appName}" <${this.getConfig('SMTP_USER')}>`,
+      await this.resend.emails.send({
+        from: 'onboarding@resend.dev',
         to: email,
         subject: `欢迎来到${appName}，开启您的命运探索之旅`,
         html: `

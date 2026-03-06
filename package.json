@@ -34,6 +34,7 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.9.3",
     "rxjs": "^7.8.1",
     "sharp": "^0.34.5",
     "smtp-server": "^3.18.1",
