@@ -23,12 +23,12 @@ export class MailService {
     // 如果没有配置 SMTP，则使用模拟模式
     if (!host || !user) {
       this.logger.warn('SMTP 未配置，邮件功能将在模拟模式下运行');
-      this.logger.warn(`SMTP_HOST: ${host}, SMTP_USER: ${user}`);
+      this.logger.warn(`SMTP_HOST: ${host || 'undefined'}, SMTP_USER: ${user || 'undefined'}, SMTP_PASS: ${pass ? '已设置' : 'undefined'}`);
       this.transporter = null;
       return;
     }
 
-    this.logger.log(`初始化邮件服务: ${host}:${port}, user: ${user}`);
+    this.logger.log(`初始化邮件服务: host=${host}, port=${port}, user=${user}, pass=${pass ? '已设置' : '未设置'}`);
 
     const transportConfig: any = {
       host,
