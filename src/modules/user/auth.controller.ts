@@ -22,6 +22,13 @@ export class AuthController {
       return { success: false, message: '请提供邮箱地址' };
     }
 
+    // 调试：检查 SMTP 配置
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpPort = process.env.SMTP_PORT;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS ? '已设置' : '未设置';
+    console.log(`[Debug] SMTP配置: host=${smtpHost}, port=${smtpPort}, user=${smtpUser}, pass=${smtpPass}`);
+
     // 验证邮箱格式
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
