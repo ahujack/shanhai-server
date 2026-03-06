@@ -5,3 +5,4 @@ dist/
 .DS_Store
 handwriting-samples/
 .env.local
+.env.local
