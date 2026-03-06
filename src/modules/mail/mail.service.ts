@@ -1,14 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
-import * as dns from 'dns';
-import { promisify } from 'util';
-
-const dnsResolve4 = promisify(dns.resolve4);
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
   private transporter: nodemailer.Transporter | null;
+
+  // Gmail SMTP 固定 IP 地址列表
+  private readonly GMAIL_SMTP_IPS = [
+    '74.125.133.108',  // Gmail SMTP
+    '173.194.202.108', // Gmail SMTP
+    '142.250.185.109', // Gmail SMTP
+  ];
 
   constructor() {
     this.initTransporter();
@@ -18,18 +21,7 @@ export class MailService {
     return process.env[key];
   }
 
-  private async resolveIPv4(hostname: string): Promise<string> {
-    try {
-      const addresses = await dnsResolve4(hostname);
-      this.logger.log(`DNS 解析 ${hostname} -> IPv4: ${addresses[0]}`);
-      return addresses[0];
-    } catch (error) {
-      this.logger.warn(`DNS 解析失败，使用原始 hostname: ${hostname}`);
-      return hostname;
-    }
-  }
-
-  private async initTransporter() {
+  private initTransporter() {
     const host = this.getConfig('SMTP_HOST');
     const port = this.getConfig('SMTP_PORT');
     const user = this.getConfig('SMTP_USER');
@@ -45,18 +37,47 @@ export class MailService {
 
     this.logger.log(`初始化邮件服务: host=${host}, port=${port}, user=${user}, pass=${pass ? '已设置' : '未设置'}`);
 
-    // 尝试端口 465 (SSL)，降级到 587 (TLS)
-    let usePort = parseInt(port || '465');
+    // 确定使用哪个端口
+    let usePort = parseInt(port || '587');
     if (usePort !== 465 && usePort !== 587) {
-      usePort = 465;
+      usePort = 587; // 默认使用 587 (TLS)
     }
 
-    // 强制使用 IPv4 地址
-    const ipv4Host = await this.resolveIPv4(host);
-    this.logger.log(`使用 IPv4 地址: ${ipv4Host}`);
+    // 如果是 Gmail，使用固定 IP
+    let connectHost = host;
+    if (host.toLowerCase().includes('gmail.com') || host.toLowerCase() === 'smtp.gmail.com') {
+      // 尝试每个 IP
+      for (const ip of this.GMAIL_SMTP_IPS) {
+        this.logger.log(`尝试使用 Gmail SMTP IP: ${ip}`);
+        try {
+          const transportConfig: any = {
+            host: ip,
+            port: usePort,
+            secure: usePort === 465,
+            auth: {
+              user,
+              pass,
+            },
+            tls: {
+              rejectUnauthorized: false,
+              servername: 'smtp.gmail.com',  // 使用原始域名进行 SNI
+            },
+            connectionTimeout: 30000,
+            socketTimeout: 30000,
+          };
 
+          this.transporter = nodemailer.createTransport(transportConfig);
+          this.logger.log(`邮件服务已初始化 (使用 IP: ${ip})`);
+          return;
+        } catch (err) {
+          this.logger.warn(`Gmail IP ${ip} 失败，尝试下一个...`);
+        }
+      }
+    }
+
+    // 默认连接方式
     const transportConfig: any = {
-      host: ipv4Host,
+      host: connectHost,
       port: usePort,
       secure: usePort === 465,
       auth: {
@@ -65,10 +86,10 @@ export class MailService {
       },
       tls: {
         rejectUnauthorized: false,
-        servername: host,  // 使用原始域名进行 SNI
+        servername: host,
       },
-      connectionTimeout: 60000,
-      socketTimeout: 60000,
+      connectionTimeout: 30000,
+      socketTimeout: 30000,
     };
 
     this.transporter = nodemailer.createTransport(transportConfig);
