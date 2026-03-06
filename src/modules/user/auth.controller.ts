@@ -319,6 +319,17 @@ export class AuthController {
   logout() {
     return { success: true, message: '已登出' };
   }
+
+  // 调试端点：检查 SMTP 配置
+  @Get('debug/smtp')
+  debugSmtp() {
+    return {
+      SMTP_HOST: process.env.SMTP_HOST || 'undefined',
+      SMTP_PORT: process.env.SMTP_PORT || 'undefined',
+      SMTP_USER: process.env.SMTP_USER || 'undefined',
+      SMTP_PASS: process.env.SMTP_PASS ? '已设置' : 'undefined',
+    };
+  }
 }
 
 @Controller('users')
