@@ -49,8 +49,8 @@ export class MailService {
         // 强制使用 IPv4
         servername: host,
       },
-      connectionTimeout: 10000,
-      socketTimeout: 10000,
+      connectionTimeout: 60000,
+      socketTimeout: 60000,
       // 强制 IPv4
       disableTrace: true,
     };
