@@ -43,8 +43,13 @@ export class AuthController {
 
     // 发送邮箱验证码
     let sent = false;
+    let errorMessage = '';
     if (this.mailService) {
-      sent = await this.mailService.sendVerificationCode(email, code);
+      try {
+        sent = await this.mailService.sendVerificationCode(email, code);
+      } catch (error) {
+        errorMessage = error.message;
+      }
     }
     
     // 如果没有配置 mailService 或者发送失败，进入模拟模式
@@ -52,8 +57,8 @@ export class AuthController {
       // 模拟模式：打印到控制台并返回验证码方便测试
       console.log(`验证码: ${code} (${email})`);
       return {
-        success: true,
-        message: '验证码已发送到您的邮箱（测试模式）',
+        success: false,
+        message: errorMessage || '邮件发送失败',
         code: code
       };
     }

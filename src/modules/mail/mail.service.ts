@@ -46,7 +46,15 @@ export class MailService {
     };
 
     this.transporter = nodemailer.createTransport(transportConfig);
-    this.logger.log('邮件服务已初始化');
+    
+    // 验证 SMTP 连接
+    try {
+      await this.transporter.verify();
+      this.logger.log('邮件服务 SMTP 连接验证成功');
+    } catch (error) {
+      this.logger.warn(`SMTP 连接验证失败: ${error.message}，将使用模拟模式`);
+      this.transporter = null;
+    }
   }
 
   /**
@@ -89,7 +97,8 @@ export class MailService {
       return true;
     } catch (error) {
       this.logger.error(`发送验证码失败: ${error.message}`);
-      return false;
+      // 返回错误信息而不是 false
+      throw new Error(`SMTP发送失败: ${error.message}`);
     }
   }
 
