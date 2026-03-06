@@ -30,20 +30,33 @@ export class MailService {
 
     this.logger.log(`初始化邮件服务: host=${host}, port=${port}, user=${user}, pass=${pass ? '已设置' : '未设置'}`);
 
+    // 尝试端口 465 (SSL)，降级到 587 (TLS)
+    let usePort = parseInt(port || '465');
+    if (usePort !== 465 && usePort !== 587) {
+      usePort = 465;
+    }
+
     const transportConfig: any = {
       host,
-      port: parseInt(port || '587'),
-      secure: parseInt(port || '587') === 465,
+      port: usePort,
+      secure: usePort === 465,
       auth: {
         user,
         pass,
       },
       tls: {
         rejectUnauthorized: false,
+        // 强制使用 IPv4
+        servername: host,
       },
       connectionTimeout: 10000,
       socketTimeout: 10000,
+      // 强制 IPv4
+      disableTrace: true,
     };
+
+    // 强制使用 IPv4
+    transportConfig.host = host;
 
     this.transporter = nodemailer.createTransport(transportConfig);
     this.logger.log('邮件服务已初始化');
