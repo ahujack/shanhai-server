@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import * as dns from 'dns';
+import { promisify } from 'util';
+
+const dnsResolve4 = promisify(dns.resolve4);
 
 @Injectable()
 export class MailService {
@@ -14,7 +18,18 @@ export class MailService {
     return process.env[key];
   }
 
-  private initTransporter() {
+  private async resolveIPv4(hostname: string): Promise<string> {
+    try {
+      const addresses = await dnsResolve4(hostname);
+      this.logger.log(`DNS 解析 ${hostname} -> IPv4: ${addresses[0]}`);
+      return addresses[0];
+    } catch (error) {
+      this.logger.warn(`DNS 解析失败，使用原始 hostname: ${hostname}`);
+      return hostname;
+    }
+  }
+
+  private async initTransporter() {
     const host = this.getConfig('SMTP_HOST');
     const port = this.getConfig('SMTP_PORT');
     const user = this.getConfig('SMTP_USER');
@@ -36,8 +51,12 @@ export class MailService {
       usePort = 465;
     }
 
+    // 强制使用 IPv4 地址
+    const ipv4Host = await this.resolveIPv4(host);
+    this.logger.log(`使用 IPv4 地址: ${ipv4Host}`);
+
     const transportConfig: any = {
-      host,
+      host: ipv4Host,
       port: usePort,
       secure: usePort === 465,
       auth: {
@@ -46,17 +65,11 @@ export class MailService {
       },
       tls: {
         rejectUnauthorized: false,
-        // 强制使用 IPv4
-        servername: host,
+        servername: host,  // 使用原始域名进行 SNI
       },
       connectionTimeout: 60000,
       socketTimeout: 60000,
-      // 强制 IPv4
-      disableTrace: true,
     };
-
-    // 强制使用 IPv4
-    transportConfig.host = host;
 
     this.transporter = nodemailer.createTransport(transportConfig);
     this.logger.log('邮件服务已初始化');
