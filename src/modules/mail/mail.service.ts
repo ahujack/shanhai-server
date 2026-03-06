@@ -42,9 +42,12 @@ export class MailService {
       },
       tls: {
         rejectUnauthorized: false,
+        // Brevo 需要这个
+        enableStartTLS: true,
       },
-      connectionTimeout: 30000,
-      socketTimeout: 30000,
+      connectionTimeout: 60000,
+      socketTimeout: 60000,
+      maxConnections: 1,
     };
 
     this.transporter = nodemailer.createTransport(transportConfig);
