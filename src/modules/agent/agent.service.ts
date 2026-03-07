@@ -120,7 +120,7 @@ export class AgentService {
       }
     }
 
-    const reply = this.composeReply(persona, intent, dto.message, artifacts, userChart);
+    const reply = await this.composeReply(persona, intent, dto.message, artifacts, userChart, dto);
 
     // 保存聊天记录到数据库
     if (dto.userId) {
@@ -331,13 +331,134 @@ ${contextInfo}`,
     };
   }
 
-  private composeReply(
+  /**
+   * 使用 DeepSeek AI 生成真正的个性化回复
+   */
+  private async generateAIReply(
+    message: string,
+    persona: PersonaSchema,
+    userChart: any,
+    dto: AgentChatDto,
+  ): Promise<string> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
+
+    // 如果没有配置APIKey，使用默认回复
+    if (!apiKey) {
+      return this.getDefaultChatReply(persona, userChart);
+    }
+
+    try {
+      // 构建用户上下文
+      let contextInfo = '';
+      if (userChart) {
+        const wxNames: Record<string, string> = {
+          wood: '木', fire: '火', earth: '土', metal: '金', water: '水'
+        };
+        const dominantWx = Object.entries(userChart.wuxingStrength as Record<string, number>)
+          .sort((a, b) => b[1] - a[1])[0];
+        
+        contextInfo = `
+用户命盘信息：
+- 八字：${userChart.yearGanZhi}年 ${userChart.monthGanZhi}月 ${userChart.dayGanZhi}日 ${userChart.hourGanZhi}时
+- 日主：${userChart.dayGanZhi}
+- 最强的五行：${wxNames[dominantWx[0]]}性 (${dominantWx[1]}%)
+- 性格特点：${userChart.personalityTraits.slice(0, 3).join('、')}
+`;
+      }
+
+      // 构建系统提示词
+      const systemPrompt = `${persona.description}
+
+你是${persona.name}，${persona.title}。
+${contextInfo}
+
+你的回复风格：
+- toneTags: ${persona.toneTags.join('、')}
+- 使用优雅、古风的语言，但不要过于晦涩
+- 适当引用诗词典故增添文化韵味
+- 理解用户的情感需求，给予温暖、有智慧的回应
+- 每次回复控制在100-200字之间，保持简洁有力
+- 如果用户提到命理相关内容，可以适当引用用户的八字信息给出个性化建议
+
+注意：
+- 用户可能只是在倾诉，不要急着给出建议，先表达理解和共情
+- 如果用户问的是专业命理问题，引导他们使用相应的功能（占卜/测字/命盘）
+- 保持神秘感和东方美学气质`;
+
+      const response = await axios.post(
+        process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
+        {
+          model,
+          temperature: 0.8, // 稍高一点温度，让回复更生动
+          max_tokens: 300,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: message },
+          ],
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 15000,
+        },
+      );
+
+      const reply = response.data?.choices?.[0]?.message?.content?.trim();
+      if (reply) {
+        return `${persona.name}：${reply}`;
+      }
+      
+      return this.getDefaultChatReply(persona, userChart);
+    } catch (error) {
+      this.logger.error(`DeepSeek 生成回复失败: ${(error as Error).message}`);
+      return this.getDefaultChatReply(persona, userChart);
+    }
+  }
+
+  /**
+   * 默认聊天回复（当AI不可用时）
+   */
+  private getDefaultChatReply(persona: PersonaSchema, userChart: any): string {
+    const defaultReplies = [
+      `${persona.name}：我听到了你的心声。山海之间，万物有灵，愿你能在这纷扰的世界找到片刻宁静。`,
+      `${persona.name}：所言甚是。命运如河，有时平静有时汹涌，保持内心的定力最为重要。`,
+      `${persona.name}：你今天的困惑，我已记下。若想更深入了解，不妨与我聊聊你的近况，或者去抽支签、测个字，看看天意如何。`,
+      `${persona.name}：人生如逆旅，我亦是行人。在这山海之间相逢，便是有缘。有什么想说的，尽管道来。`,
+    ];
+
+    // 如果用户有命盘，添加个性化引用
+    if (userChart) {
+      const wxNames: Record<string, string> = {
+        wood: '木', fire: '火', earth: '土', metal: '金', water: '水'
+      };
+      const dominantWx = Object.entries(userChart.wuxingStrength as Record<string, number>)
+        .sort((a, b) => b[1] - a[1])[0];
+      
+      const personalizedReplies = [
+        `${persona.name}：从你的八字来看，你的${wxNames[dominantWx[0]]}性较强。或许最近可以考虑做一些${wxNames[dominantWx[0]]}属性的事情来平衡身心。`,
+        `${persona.name}：我注意到你的日主是${userChart.dayGanZhi}，这注定你是一个有独特气质的人。有什么心事不妨说说。`,
+      ];
+      return personalizedReplies[Math.floor(Math.random() * personalizedReplies.length)];
+    }
+
+    return defaultReplies[Math.floor(Math.random() * defaultReplies.length)];
+  }
+
+  /**
+   * 合成回复
+   * 当是聊天意图时，使用AI生成个性化回复
+   */
+  private async composeReply(
     persona: PersonaSchema,
     intent: AgentIntent,
     message: string,
     artifacts: Record<string, unknown>,
     userChart: any,
-  ) {
+    dto: AgentChatDto,
+  ): Promise<string> {
     // 测字回复 - 使用冷读术风格
     if (intent === 'zi' && artifacts.zi) {
       const zi = artifacts.zi as ZiResult;
@@ -379,14 +500,9 @@ ${contextInfo}`,
       }
     }
 
-    // 日常聊天 - 如果用户有命盘，可以适当引用
-    if (userChart && intent === 'chat') {
-      const wxKey = Object.entries(userChart.wuxingStrength as Record<string, number>)
-        .sort((a, b) => b[1] - a[1])[0];
-      const wxNames: Record<string, string> = {
-        wood: '木', fire: '火', earth: '土', metal: '金', water: '水'
-      };
-      return `${persona.name}：我听到了你的心绪。\n\n从你的八字来看，你的${wxNames[wxKey[0]]}性较强，或许可以尝试从这个角度来调整自己的状态。\n\n若想更进一步，可告诉我需要抽签、静坐还是查看命盘，我都在。`;
+    // 日常聊天 - 使用AI生成真正的个性化回复
+    if (intent === 'chat') {
+      return await this.generateAIReply(message, persona, userChart, dto);
     }
 
     // 默认回复

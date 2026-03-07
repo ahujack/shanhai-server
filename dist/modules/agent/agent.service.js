@@ -28,6 +28,7 @@ let AgentService = AgentService_1 = class AgentService {
     fortuneService;
     chartService;
     ziService;
+    logger = new common_1.Logger(AgentService_1.name);
     prisma = new client_1.PrismaClient();
     constructor(personaService, readingService, fortuneService, chartService, ziService) {
         this.personaService = personaService;
@@ -37,23 +38,43 @@ let AgentService = AgentService_1 = class AgentService {
         this.ziService = ziService;
     }
     async handleChat(dto) {
+        if (!dto.message || dto.message.trim().length === 0) {
+            throw new common_1.BadRequestException('消息不能为空');
+        }
+        if (dto.message.length > 500) {
+            throw new common_1.BadRequestException('消息长度不能超过500字符');
+        }
         const persona = this.resolvePersona(dto.personaId);
-        const userChart = dto.userId ? this.chartService.findOne(dto.userId) : null;
+        let userChart = null;
+        if (dto.userId) {
+            try {
+                userChart = await this.chartService.findOne(dto.userId);
+            }
+            catch (error) {
+                this.logger.warn(`获取用户命盘失败: ${error.message}`);
+            }
+        }
         const { intent, category, mood } = await this.classifyWithDeepSeek(dto, persona, userChart);
         const actions = [];
         let artifacts = {};
         const divinationCategory = category === 'emotion' ? 'love' : category;
         if (intent === 'divination') {
-            const reading = await this.readingService.generate({
-                question: dto.message,
-                category: category || divinationCategory || this.inferCategory(dto.message),
-                userId: dto.userId,
-            });
-            artifacts = { reading };
-            actions.push({
-                type: 'view_reading',
-                label: '查看完整解读',
-            });
+            try {
+                const reading = await this.readingService.generate({
+                    question: dto.message,
+                    category: category || divinationCategory || this.inferCategory(dto.message),
+                    userId: dto.userId,
+                });
+                artifacts = { reading };
+                actions.push({
+                    type: 'view_reading',
+                    label: '查看完整解读',
+                });
+            }
+            catch (error) {
+                this.logger.error(`生成占卜失败: ${error.message}`);
+                artifacts = { reading: null };
+            }
         }
         if (intent === 'meditation') {
             const meditation = this.buildMeditation({ ...dto, mood });
@@ -86,15 +107,21 @@ let AgentService = AgentService_1 = class AgentService {
         if (intent === 'zi') {
             const ziChar = this.extractZiFromMessage(dto.message);
             if (ziChar) {
-                const ziResult = await this.ziService.analyze(ziChar);
-                artifacts = { zi: ziResult };
-                actions.push({
-                    type: 'view_zi',
-                    label: '查看测字详情',
-                });
+                try {
+                    const ziResult = await this.ziService.analyze(ziChar);
+                    artifacts = { zi: ziResult };
+                    actions.push({
+                        type: 'view_zi',
+                        label: '查看测字详情',
+                    });
+                }
+                catch (error) {
+                    this.logger.error(`测字分析失败: ${error.message}`);
+                    artifacts = { zi: null };
+                }
             }
         }
-        const reply = this.composeReply(persona, intent, dto.message, artifacts, userChart);
+        const reply = await this.composeReply(persona, intent, dto.message, artifacts, userChart, dto);
         if (dto.userId) {
             try {
                 await this.prisma.chatMessage.create({
@@ -110,7 +137,7 @@ let AgentService = AgentService_1 = class AgentService {
                 });
             }
             catch (error) {
-                common_1.Logger.error('保存聊天记录失败', error.message, AgentService_1.name);
+                this.logger.error('保存聊天记录失败', error.message);
             }
         }
         return {
@@ -130,7 +157,7 @@ let AgentService = AgentService_1 = class AgentService {
         const apiKey = process.env.DEEPSEEK_API_KEY;
         const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
         if (!apiKey) {
-            common_1.Logger.warn('DEEPSEEK_API_KEY 未配置，回退到本地规则意图识别', AgentService_1.name);
+            this.logger.warn('DEEPSEEK_API_KEY 未配置，回退到本地规则意图识别');
             const fallbackIntent = this.fallbackDetectIntent(dto.message, userChart);
             return { intent: fallbackIntent };
         }
@@ -173,6 +200,7 @@ ${contextInfo}`,
                     Authorization: `Bearer ${apiKey}`,
                     'Content-Type': 'application/json',
                 },
+                timeout: 10000,
             });
             const raw = response.data?.choices?.[0]?.message?.content ?? '{}';
             const parsed = JSON.parse(raw);
@@ -185,7 +213,7 @@ ${contextInfo}`,
             };
         }
         catch (error) {
-            common_1.Logger.error('DeepSeek 意图识别失败，使用本地规则回退', error.message, AgentService_1.name);
+            this.logger.error(`DeepSeek 意图识别失败: ${error.message}，使用本地规则回退`);
             const intent = this.fallbackDetectIntent(dto.message, userChart);
             return { intent };
         }
@@ -263,15 +291,107 @@ ${contextInfo}`,
             script,
         };
     }
-    composeReply(persona, intent, message, artifacts, userChart) {
+    async generateAIReply(message, persona, userChart, dto) {
+        const apiKey = process.env.DEEPSEEK_API_KEY;
+        const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
+        if (!apiKey) {
+            return this.getDefaultChatReply(persona, userChart);
+        }
+        try {
+            let contextInfo = '';
+            if (userChart) {
+                const wxNames = {
+                    wood: '木', fire: '火', earth: '土', metal: '金', water: '水'
+                };
+                const dominantWx = Object.entries(userChart.wuxingStrength)
+                    .sort((a, b) => b[1] - a[1])[0];
+                contextInfo = `
+用户命盘信息：
+- 八字：${userChart.yearGanZhi}年 ${userChart.monthGanZhi}月 ${userChart.dayGanZhi}日 ${userChart.hourGanZhi}时
+- 日主：${userChart.dayGanZhi}
+- 最强的五行：${wxNames[dominantWx[0]]}性 (${dominantWx[1]}%)
+- 性格特点：${userChart.personalityTraits.slice(0, 3).join('、')}
+`;
+            }
+            const systemPrompt = `${persona.description}
+
+你是${persona.name}，${persona.title}。
+${contextInfo}
+
+你的回复风格：
+- toneTags: ${persona.toneTags.join('、')}
+- 使用优雅、古风的语言，但不要过于晦涩
+- 适当引用诗词典故增添文化韵味
+- 理解用户的情感需求，给予温暖、有智慧的回应
+- 每次回复控制在100-200字之间，保持简洁有力
+- 如果用户提到命理相关内容，可以适当引用用户的八字信息给出个性化建议
+
+注意：
+- 用户可能只是在倾诉，不要急着给出建议，先表达理解和共情
+- 如果用户问的是专业命理问题，引导他们使用相应的功能（占卜/测字/命盘）
+- 保持神秘感和东方美学气质`;
+            const response = await axios_1.default.post(process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions', {
+                model,
+                temperature: 0.8,
+                max_tokens: 300,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: message },
+                ],
+            }, {
+                headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+                timeout: 15000,
+            });
+            const reply = response.data?.choices?.[0]?.message?.content?.trim();
+            if (reply) {
+                return `${persona.name}：${reply}`;
+            }
+            return this.getDefaultChatReply(persona, userChart);
+        }
+        catch (error) {
+            this.logger.error(`DeepSeek 生成回复失败: ${error.message}`);
+            return this.getDefaultChatReply(persona, userChart);
+        }
+    }
+    getDefaultChatReply(persona, userChart) {
+        const defaultReplies = [
+            `${persona.name}：我听到了你的心声。山海之间，万物有灵，愿你能在这纷扰的世界找到片刻宁静。`,
+            `${persona.name}：所言甚是。命运如河，有时平静有时汹涌，保持内心的定力最为重要。`,
+            `${persona.name}：你今天的困惑，我已记下。若想更深入了解，不妨与我聊聊你的近况，或者去抽支签、测个字，看看天意如何。`,
+            `${persona.name}：人生如逆旅，我亦是行人。在这山海之间相逢，便是有缘。有什么想说的，尽管道来。`,
+        ];
+        if (userChart) {
+            const wxNames = {
+                wood: '木', fire: '火', earth: '土', metal: '金', water: '水'
+            };
+            const dominantWx = Object.entries(userChart.wuxingStrength)
+                .sort((a, b) => b[1] - a[1])[0];
+            const personalizedReplies = [
+                `${persona.name}：从你的八字来看，你的${wxNames[dominantWx[0]]}性较强。或许最近可以考虑做一些${wxNames[dominantWx[0]]}属性的事情来平衡身心。`,
+                `${persona.name}：我注意到你的日主是${userChart.dayGanZhi}，这注定你是一个有独特气质的人。有什么心事不妨说说。`,
+            ];
+            return personalizedReplies[Math.floor(Math.random() * personalizedReplies.length)];
+        }
+        return defaultReplies[Math.floor(Math.random() * defaultReplies.length)];
+    }
+    async composeReply(persona, intent, message, artifacts, userChart, dto) {
         if (intent === 'zi' && artifacts.zi) {
             const zi = artifacts.zi;
+            if (!zi) {
+                return `${persona.name}：抱歉，测字服务暂时不可用，请稍后再试。`;
+            }
             const coldRead = zi.coldReadings[0];
             const advice = zi.interpretation.advice[0];
             return `${persona.name}：${coldRead}\n\n🔍 拆解："${zi.zi.zi}"字\n📦 部件：${zi.zi.components.join(' + ')}\n💡 联想：${zi.zi.associativeMeaning}\n\n📋 建议：${advice}\n\n${zi.handwriting.stabilityInterpretation}\n\n点击「查看测字详情」可获得完整分析。`;
         }
         if (intent === 'divination' && artifacts.reading) {
             const reading = artifacts.reading;
+            if (!reading) {
+                return `${persona.name}：抱歉，占卜服务暂时不可用，请稍后再试。`;
+            }
             return `${persona.name}：你的问题我已感知。\n\n🙏 所得卦象：${reading.hexagram.originalName}\n📖 解读：${reading.interpretation.overall}\n\n${persona.name}建议你：${reading.recommendations[0]}\n\n若想查看完整解读，可点击下方按钮。`;
         }
         if (intent === 'meditation') {
@@ -289,13 +409,8 @@ ${contextInfo}`,
                 return `${persona.name}：你还没有建立命盘呢。\n\n若想了解自己的八字命盘，可以先去「我的」页面输入出生信息，我会为你生成专属命盘分析。`;
             }
         }
-        if (userChart && intent === 'chat') {
-            const wxKey = Object.entries(userChart.wuxingStrength)
-                .sort((a, b) => b[1] - a[1])[0];
-            const wxNames = {
-                wood: '木', fire: '火', earth: '土', metal: '金', water: '水'
-            };
-            return `${persona.name}：我听到了你的心绪。\n\n从你的八字来看，你的${wxNames[wxKey[0]]}性较强，或许可以尝试从这个角度来调整自己的状态。\n\n若想更进一步，可告诉我需要抽签、静坐还是查看命盘，我都在。`;
+        if (intent === 'chat') {
+            return await this.generateAIReply(message, persona, userChart, dto);
         }
         return `${persona.name}：我听到了你的心绪。若想更进一步，可告诉我需要抽签、静坐还是查看命盘，我都在。`;
     }

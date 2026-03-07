@@ -11,13 +11,17 @@ export declare class AgentService {
     private readonly fortuneService;
     private readonly chartService;
     private readonly ziService;
+    private readonly logger;
     private prisma;
     constructor(personaService: PersonaService, readingService: ReadingService, fortuneService: FortuneService, chartService: ChartService, ziService: ZiService);
     handleChat(dto: AgentChatDto): Promise<{
         persona: import("../persona/persona.service").PersonaId;
         intent: AgentIntent;
         reply: string;
-        actions: any[];
+        actions: {
+            type: string;
+            label: string;
+        }[];
         artifacts: Record<string, unknown>;
         hasChart: boolean;
     }>;
@@ -27,6 +31,8 @@ export declare class AgentService {
     private inferCategory;
     private resolvePersona;
     private buildMeditation;
+    private generateAIReply;
+    private getDefaultChatReply;
     private composeReply;
 }
 export {};

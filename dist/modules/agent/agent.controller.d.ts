@@ -7,7 +7,10 @@ export declare class AgentController {
         persona: import("../persona/persona.service").PersonaId;
         intent: "fortune" | "zi" | "chat" | "divination" | "meditation" | "chart";
         reply: string;
-        actions: any[];
+        actions: {
+            type: string;
+            label: string;
+        }[];
         artifacts: Record<string, unknown>;
         hasChart: boolean;
     }>;

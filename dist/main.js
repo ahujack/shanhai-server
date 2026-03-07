@@ -38,19 +38,41 @@ const app_module_1 = require("./app.module");
 const common_1 = require("@nestjs/common");
 const dotenv_1 = require("dotenv");
 const path = __importStar(require("path"));
+const global_exception_filter_1 = require("./modules/auth/global-exception.filter");
+const logging_interceptor_1 = require("./modules/auth/logging.interceptor");
 (0, dotenv_1.config)({ path: path.resolve(__dirname, '../.env') });
 (0, dotenv_1.config)({ path: path.resolve(__dirname, '../.env.local'), override: true });
 async function bootstrap() {
-    const app = await core_1.NestFactory.create(app_module_1.AppModule);
-    app.enableCors();
+    const logger = new common_1.Logger('Bootstrap');
+    const app = await core_1.NestFactory.create(app_module_1.AppModule, {
+        logger: process.env.NODE_ENV === 'production'
+            ? ['error', 'warn']
+            : ['log', 'debug', 'error', 'verbose', 'warn'],
+    });
+    app.enableCors({
+        origin: process.env.ALLOWED_ORIGINS?.split(',') || true,
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    });
     app.setGlobalPrefix('api');
     app.useGlobalPipes(new common_1.ValidationPipe({
         whitelist: true,
         transform: true,
         forbidNonWhitelisted: false,
+        transformOptions: {
+            enableImplicitConversion: true,
+        },
     }));
+    app.useGlobalFilters(new global_exception_filter_1.GlobalExceptionFilter());
+    app.useGlobalInterceptors(new logging_interceptor_1.LoggingInterceptor());
     const port = process.env.PORT ?? 3000;
     await app.listen(port);
+    logger.log(`🚀 山海灵境 API 服务已启动: http://localhost:${port}`);
+    logger.log(`📦 环境: ${process.env.NODE_ENV || 'development'}`);
+    if (process.env.NODE_ENV !== 'production') {
+        logger.debug(`🔍 健康检查: http://localhost:${port}/api/health`);
+    }
 }
 bootstrap();
 //# sourceMappingURL=main.js.map

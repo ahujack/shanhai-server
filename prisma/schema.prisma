@@ -40,6 +40,7 @@ model User {
   chatMessages  ChatMessage[]
   ziAnalyses   ZiAnalysis[]
   readings     Reading[]
+  checkIns     CheckIn[]
 }
 
 // 聊天消息模型
@@ -182,5 +183,22 @@ model Fortune {
   createdAt       DateTime  @default(now())
 
   @@unique([userId, date]) // 每个用户每天只能有一条运势
+  @@index([userId])
+}
+
+// 每日签到模型
+model CheckIn {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  date            String    // 日期格式：2024-01-15
+  streak          Int       @default(1)   // 连续签到天数
+  points          Int       @default(10)  // 获得积分
+  reward          String?   // 奖励描述
+  
+  createdAt       DateTime  @default(now())
+
+  @@unique([userId, date]) // 每个用户每天只能签到一次
   @@index([userId])
 }

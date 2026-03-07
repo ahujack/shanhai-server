@@ -10,6 +10,7 @@ import { ChartModule } from './modules/chart/chart.module';
 import { FortuneModule } from './modules/fortune/fortune.module';
 import { MeditationModule } from './modules/meditation/meditation.module';
 import { ZiModule } from './modules/zi/zi.module';
+import { CheckInModule } from './modules/checkin/checkin.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { ZiModule } from './modules/zi/zi.module';
     FortuneModule,
     MeditationModule,
     ZiModule,
+    CheckInModule,
   ],
 })
 export class AppModule {}

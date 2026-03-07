@@ -19,6 +19,7 @@ const chart_module_1 = require("./modules/chart/chart.module");
 const fortune_module_1 = require("./modules/fortune/fortune.module");
 const meditation_module_1 = require("./modules/meditation/meditation.module");
 const zi_module_1 = require("./modules/zi/zi.module");
+const checkin_module_1 = require("./modules/checkin/checkin.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -40,6 +41,7 @@ exports.AppModule = AppModule = __decorate([
             fortune_module_1.FortuneModule,
             meditation_module_1.MeditationModule,
             zi_module_1.ZiModule,
+            checkin_module_1.CheckInModule,
         ],
     })
 ], AppModule);

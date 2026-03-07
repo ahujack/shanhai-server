@@ -8,16 +8,24 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserModule = void 0;
 const common_1 = require("@nestjs/common");
-const user_service_1 = require("./user.service");
+const jwt_1 = require("@nestjs/jwt");
 const user_controller_1 = require("./user.controller");
 const auth_controller_1 = require("./auth.controller");
+const user_service_1 = require("./user.service");
 const mail_module_1 = require("../mail/mail.module");
 let UserModule = class UserModule {
 };
 exports.UserModule = UserModule;
 exports.UserModule = UserModule = __decorate([
     (0, common_1.Module)({
-        imports: [mail_module_1.MailModule],
+        imports: [
+            jwt_1.JwtModule.register({
+                global: true,
+                secret: process.env.JWT_SECRET || 'shanhai-secret-key-change-in-production',
+                signOptions: { expiresIn: '7d' },
+            }),
+            mail_module_1.MailModule,
+        ],
         controllers: [user_controller_1.UserController, auth_controller_1.AuthController],
         providers: [user_service_1.UserService],
         exports: [user_service_1.UserService],
