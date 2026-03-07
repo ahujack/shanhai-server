@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma.service';
+import { PrismaService } from '../../prisma.service';
 import { MailService } from '../mail/mail.service';
 import * as bcrypt from 'bcryptjs';
 import { Prisma } from '@prisma/client';
@@ -138,6 +138,7 @@ export class UserService {
   async create(dto: CreateUserDto): Promise<UserProfile> {
     const user = await this.prisma.user.create({
       data: {
+        email: dto.email || `${Date.now()}@example.com`,
         name: dto.name,
         birthDate: dto.birthDate,
         birthTime: dto.birthTime,
@@ -287,7 +288,7 @@ export class UserService {
 
     // 创建新用户
     const data: Prisma.UserCreateInput = {
-      email: userInfo?.email,
+      email: userInfo?.email || `${socialId}@${provider}.com`,
       name: userInfo?.name || `${provider}用户`,
       timezone: 'Asia/Shanghai',
       role: 'user',

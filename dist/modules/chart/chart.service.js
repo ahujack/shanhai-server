@@ -5,11 +5,18 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChartService = void 0;
 const common_1 = require("@nestjs/common");
+const prisma_service_1 = require("../../prisma.service");
 let ChartService = class ChartService {
-    charts = new Map();
+    prisma;
+    constructor(prisma) {
+        this.prisma = prisma;
+    }
     gan = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'];
     zhi = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
     async generateChart(userId, birthDate, birthTime, gender) {
@@ -44,11 +51,72 @@ let ChartService = class ChartService {
             fortuneSummary,
             suggestions,
         };
-        this.charts.set(userId, chart);
+        await this.prisma.baziChart.upsert({
+            where: { userId },
+            update: {
+                birthDate,
+                birthTime,
+                gender,
+                yearGanZhi: yearGZ,
+                monthGanZhi: monthGZ,
+                dayGanZhi: dayGZ,
+                hourGanZhi: hourGZ,
+                dayMaster,
+                sun: chart.sun,
+                moon: chart.moon,
+                wuxingStrength: JSON.stringify(wuxingStrength),
+                personalityTraits: JSON.stringify(personalityTraits),
+                fortuneSummary: JSON.stringify(fortuneSummary),
+                suggestions: JSON.stringify(suggestions),
+                updatedAt: new Date(),
+            },
+            create: {
+                userId,
+                birthDate,
+                birthTime,
+                gender,
+                yearGanZhi: yearGZ,
+                monthGanZhi: monthGZ,
+                dayGanZhi: dayGZ,
+                hourGanZhi: hourGZ,
+                dayMaster,
+                sun: chart.sun,
+                moon: chart.moon,
+                wuxingStrength: JSON.stringify(wuxingStrength),
+                personalityTraits: JSON.stringify(personalityTraits),
+                fortuneSummary: JSON.stringify(fortuneSummary),
+                suggestions: JSON.stringify(suggestions),
+            },
+        });
         return chart;
     }
-    findOne(userId) {
-        return this.charts.get(userId) ?? null;
+    async findOne(userId) {
+        const chart = await this.prisma.baziChart.findUnique({
+            where: { userId },
+        });
+        if (!chart) {
+            return null;
+        }
+        return this.formatChart(chart);
+    }
+    formatChart(chart) {
+        return {
+            userId: chart.userId,
+            birthDate: chart.birthDate,
+            birthTime: chart.birthTime,
+            gender: chart.gender,
+            yearGanZhi: chart.yearGanZhi,
+            monthGanZhi: chart.monthGanZhi,
+            dayGanZhi: chart.dayGanZhi,
+            hourGanZhi: chart.hourGanZhi,
+            dayMaster: chart.dayMaster,
+            sun: chart.sun,
+            moon: chart.moon,
+            wuxingStrength: JSON.parse(chart.wuxingStrength),
+            personalityTraits: JSON.parse(chart.personalityTraits),
+            fortuneSummary: JSON.parse(chart.fortuneSummary),
+            suggestions: JSON.parse(chart.suggestions),
+        };
     }
     calculateYearGanZhi(year) {
         const ganIndex = (year - 4) % 10;
@@ -213,6 +281,7 @@ let ChartService = class ChartService {
 };
 exports.ChartService = ChartService;
 exports.ChartService = ChartService = __decorate([
-    (0, common_1.Injectable)()
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
 ], ChartService);
 //# sourceMappingURL=chart.service.js.map

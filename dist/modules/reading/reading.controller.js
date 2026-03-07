@@ -11,18 +11,38 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+var ReadingController_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ReadingController = void 0;
 const common_1 = require("@nestjs/common");
+const common_2 = require("@nestjs/common");
+const client_1 = require("@prisma/client");
 const reading_service_1 = require("./reading.service");
 const create_reading_dto_1 = require("./dto/create-reading.dto");
-let ReadingController = class ReadingController {
+let ReadingController = ReadingController_1 = class ReadingController {
     readingService;
+    prisma = new client_1.PrismaClient();
     constructor(readingService) {
         this.readingService = readingService;
     }
     async create(dto) {
-        return this.readingService.generate(dto);
+        const result = await this.readingService.generate(dto);
+        if (dto.userId) {
+            try {
+                await this.prisma.reading.create({
+                    data: {
+                        userId: dto.userId,
+                        question: dto.question,
+                        category: dto.category,
+                        result: JSON.stringify(result),
+                    },
+                });
+            }
+            catch (error) {
+                common_2.Logger.error('保存占卜记录失败', error.message, ReadingController_1.name);
+            }
+        }
+        return result;
     }
 };
 exports.ReadingController = ReadingController;
@@ -33,7 +53,7 @@ __decorate([
     __metadata("design:paramtypes", [create_reading_dto_1.CreateReadingDto]),
     __metadata("design:returntype", Promise)
 ], ReadingController.prototype, "create", null);
-exports.ReadingController = ReadingController = __decorate([
+exports.ReadingController = ReadingController = ReadingController_1 = __decorate([
     (0, common_1.Controller)('readings'),
     __metadata("design:paramtypes", [reading_service_1.ReadingService])
 ], ReadingController);

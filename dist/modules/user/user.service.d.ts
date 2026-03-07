@@ -1,3 +1,4 @@
+import { PrismaService } from '../../prisma.service';
 import { MailService } from '../mail/mail.service';
 export interface UserProfile {
     id: string;
@@ -13,8 +14,10 @@ export interface UserProfile {
     avatar?: string;
     role: 'user' | 'admin';
     membership: 'free' | 'premium' | 'vip';
-    createdAt: string;
-    updatedAt: string;
+    googleId?: string;
+    facebookId?: string;
+    createdAt: Date;
+    updatedAt: Date;
 }
 export interface CreateUserDto {
     name: string;
@@ -26,31 +29,31 @@ export interface CreateUserDto {
     location?: string;
 }
 export declare class UserService {
+    private prisma;
     private mailService?;
-    private users;
     private verificationCodes;
-    private emailToUser;
-    private socialToUser;
     private readonly CODE_EXPIRE_TIME;
-    private readonly PASSWORD_SECRET;
-    constructor(mailService?: MailService | undefined);
-    hashPassword(password: string): string;
-    verifyPassword(password: string, hashedPassword: string): boolean;
-    isEmailRegistered(email: string): boolean;
-    registerWithEmail(email: string, password: string, name: string): UserProfile;
-    loginWithPassword(email: string, password: string): UserProfile | null;
-    create(dto: CreateUserDto): UserProfile;
-    findAll(): UserProfile[];
-    findOne(id: string): UserProfile;
-    update(id: string, dto: Partial<CreateUserDto>): UserProfile;
-    delete(id: string): void;
+    private readonly BCRYPT_ROUNDS;
+    constructor(prisma: PrismaService, mailService?: MailService | undefined);
+    hashPassword(password: string): Promise<string>;
+    verifyPassword(password: string, hashedPassword: string): Promise<boolean>;
+    isEmailRegistered(email: string): Promise<boolean>;
+    registerWithEmail(email: string, password: string, name: string): Promise<UserProfile>;
+    loginWithPassword(email: string, password: string): Promise<UserProfile | null>;
+    resetPassword(email: string, newPassword: string): Promise<UserProfile>;
+    create(dto: CreateUserDto): Promise<UserProfile>;
+    findAll(): Promise<UserProfile[]>;
+    findOne(id: string): Promise<UserProfile>;
+    update(id: string, dto: Partial<CreateUserDto>): Promise<UserProfile>;
+    delete(id: string): Promise<void>;
     storeCode(identifier: string, code: string): void;
     verifyCode(identifier: string, code: string): boolean;
-    findOrCreateByEmail(email: string): UserProfile;
+    findOrCreateByEmail(email: string): Promise<UserProfile>;
     findOrCreateBySocial(provider: 'google' | 'facebook', socialId: string, userInfo?: {
         email?: string;
         name?: string;
-    }): UserProfile;
-    updateUserRole(userId: string, role: 'user' | 'admin'): UserProfile;
-    updateUserMembership(userId: string, membership: 'free' | 'premium' | 'vip'): UserProfile;
+    }): Promise<UserProfile>;
+    updateUserRole(userId: string, role: 'user' | 'admin'): Promise<UserProfile>;
+    updateUserMembership(userId: string, membership: 'free' | 'premium' | 'vip'): Promise<UserProfile>;
+    private formatUser;
 }

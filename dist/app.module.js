@@ -9,6 +9,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppModule = void 0;
 const common_1 = require("@nestjs/common");
 const jwt_1 = require("@nestjs/jwt");
+const prisma_module_1 = require("./prisma.module");
 const health_module_1 = require("./modules/health/health.module");
 const persona_module_1 = require("./modules/persona/persona.module");
 const reading_module_1 = require("./modules/reading/reading.module");
@@ -24,6 +25,7 @@ exports.AppModule = AppModule;
 exports.AppModule = AppModule = __decorate([
     (0, common_1.Module)({
         imports: [
+            prisma_module_1.PrismaModule,
             jwt_1.JwtModule.register({
                 global: true,
                 secret: process.env.JWT_SECRET || 'shanhai-secret-key-change-in-production',

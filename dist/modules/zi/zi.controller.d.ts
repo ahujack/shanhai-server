@@ -3,16 +3,19 @@ import { OcrService } from '../ocr/ocr.service';
 export declare class AnalyzeZiDto {
     zi: string;
     handwriting?: Partial<HandwritingAnalysis>;
+    userId?: string;
 }
 export declare class RecognizeDto {
     image: string;
 }
 export declare class AnalyzeHandwritingDto {
     image: string;
+    userId?: string;
 }
 export declare class ZiController {
     private readonly ziService;
     private readonly ocrService;
+    private prisma;
     constructor(ziService: ZiService, ocrService: OcrService);
     analyze(dto: AnalyzeZiDto): Promise<import("./zi.service").ZiResult>;
     recognize(dto: RecognizeDto): Promise<{

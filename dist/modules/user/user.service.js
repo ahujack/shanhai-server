@@ -44,104 +44,127 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserService = void 0;
 const common_1 = require("@nestjs/common");
+const prisma_service_1 = require("../../prisma.service");
 const mail_service_1 = require("../mail/mail.service");
-const crypto = __importStar(require("crypto"));
+const bcrypt = __importStar(require("bcryptjs"));
 let UserService = class UserService {
+    prisma;
     mailService;
-    users = new Map();
     verificationCodes = new Map();
-    emailToUser = new Map();
-    socialToUser = new Map();
     CODE_EXPIRE_TIME = 5 * 60 * 1000;
-    PASSWORD_SECRET = 'shanhai-password-secret';
-    constructor(mailService) {
+    BCRYPT_ROUNDS = 10;
+    constructor(prisma, mailService) {
+        this.prisma = prisma;
         this.mailService = mailService;
     }
-    hashPassword(password) {
-        return crypto.createHmac('sha256', this.PASSWORD_SECRET).update(password).digest('hex');
+    async hashPassword(password) {
+        return bcrypt.hash(password, this.BCRYPT_ROUNDS);
     }
-    verifyPassword(password, hashedPassword) {
-        return this.hashPassword(password) === hashedPassword;
+    async verifyPassword(password, hashedPassword) {
+        return bcrypt.compare(password, hashedPassword);
     }
-    isEmailRegistered(email) {
-        return this.emailToUser.has(email);
+    async isEmailRegistered(email) {
+        const user = await this.prisma.user.findUnique({
+            where: { email },
+        });
+        return !!user;
     }
-    registerWithEmail(email, password, name) {
-        if (this.emailToUser.has(email)) {
+    async registerWithEmail(email, password, name) {
+        const existingUser = await this.prisma.user.findUnique({
+            where: { email },
+        });
+        if (existingUser) {
             throw new common_1.BadRequestException('该邮箱已注册');
         }
-        const id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const now = new Date().toISOString();
-        const user = {
-            id,
-            name: name || email.split('@')[0],
-            email,
-            password: this.hashPassword(password),
-            timezone: 'Asia/Shanghai',
-            role: 'user',
-            membership: 'free',
-            createdAt: now,
-            updatedAt: now,
-        };
-        this.users.set(id, user);
-        this.emailToUser.set(email, user.id);
-        return user;
+        const user = await this.prisma.user.create({
+            data: {
+                email,
+                name: name || email.split('@')[0],
+                password: await this.hashPassword(password),
+                timezone: 'Asia/Shanghai',
+                role: 'user',
+                membership: 'free',
+            },
+        });
+        return this.formatUser(user);
     }
-    loginWithPassword(email, password) {
-        const userId = this.emailToUser.get(email);
-        if (!userId) {
+    async loginWithPassword(email, password) {
+        const user = await this.prisma.user.findUnique({
+            where: { email },
+        });
+        if (!user || !user.password) {
             return null;
         }
-        const user = this.findOne(userId);
-        if (!user.password || !this.verifyPassword(password, user.password)) {
+        const isValid = await this.verifyPassword(password, user.password);
+        if (!isValid) {
             return null;
         }
-        return user;
+        return this.formatUser(user);
     }
-    create(dto) {
-        const id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const now = new Date().toISOString();
-        const user = {
-            id,
-            name: dto.name,
-            birthDate: dto.birthDate,
-            birthTime: dto.birthTime,
-            gender: dto.gender,
-            timezone: dto.timezone ?? 'Asia/Shanghai',
-            location: dto.location,
-            role: 'user',
-            membership: 'free',
-            createdAt: now,
-            updatedAt: now,
-        };
-        this.users.set(id, user);
-        return user;
-    }
-    findAll() {
-        return Array.from(this.users.values());
-    }
-    findOne(id) {
-        const user = this.users.get(id);
+    async resetPassword(email, newPassword) {
+        const user = await this.prisma.user.findUnique({
+            where: { email },
+        });
         if (!user) {
             throw new common_1.NotFoundException('用户不存在');
         }
-        return user;
+        const updatedUser = await this.prisma.user.update({
+            where: { email },
+            data: {
+                password: await this.hashPassword(newPassword),
+            },
+        });
+        return this.formatUser(updatedUser);
     }
-    update(id, dto) {
-        const user = this.findOne(id);
-        const updated = {
-            ...user,
-            ...dto,
-            updatedAt: new Date().toISOString(),
-        };
-        this.users.set(id, updated);
-        return updated;
+    async create(dto) {
+        const user = await this.prisma.user.create({
+            data: {
+                email: dto.email || `${Date.now()}@example.com`,
+                name: dto.name,
+                birthDate: dto.birthDate,
+                birthTime: dto.birthTime,
+                gender: dto.gender,
+                timezone: dto.timezone ?? 'Asia/Shanghai',
+                location: dto.location,
+                role: 'user',
+                membership: 'free',
+            },
+        });
+        return this.formatUser(user);
     }
-    delete(id) {
-        if (!this.users.has(id)) {
+    async findAll() {
+        const users = await this.prisma.user.findMany();
+        return users.map(this.formatUser);
+    }
+    async findOne(id) {
+        const user = await this.prisma.user.findUnique({
+            where: { id },
+        });
+        if (!user) {
             throw new common_1.NotFoundException('用户不存在');
         }
-        this.users.delete(id);
+        return this.formatUser(user);
+    }
+    async update(id, dto) {
+        const user = await this.prisma.user.update({
+            where: { id },
+            data: {
+                ...dto,
+                updatedAt: new Date(),
+            },
+        });
+        return this.formatUser(user);
+    }
+    async delete(id) {
+        const user = await this.prisma.user.findUnique({
+            where: { id },
+        });
+        if (!user) {
+            throw new common_1.NotFoundException('用户不存在');
+        }
+        await this.prisma.user.delete({
+            where: { id },
+        });
     }
     storeCode(identifier, code) {
         this.verificationCodes.set(identifier, {
@@ -164,63 +187,95 @@ let UserService = class UserService {
         }
         return false;
     }
-    findOrCreateByEmail(email) {
-        const userId = this.emailToUser.get(email);
-        if (userId) {
-            return this.findOne(userId);
-        }
-        const user = this.create({
-            name: email.split('@')[0],
-            email: email,
+    async findOrCreateByEmail(email) {
+        let user = await this.prisma.user.findUnique({
+            where: { email },
         });
-        this.emailToUser.set(email, user.id);
-        this.users.set(user.id, user);
-        return user;
+        if (!user) {
+            user = await this.prisma.user.create({
+                data: {
+                    email,
+                    name: email.split('@')[0],
+                    timezone: 'Asia/Shanghai',
+                    role: 'user',
+                    membership: 'free',
+                },
+            });
+        }
+        return this.formatUser(user);
     }
-    findOrCreateBySocial(provider, socialId, userInfo) {
-        const key = `${provider}:${socialId}`;
-        let userId = this.socialToUser.get(key);
-        if (userId) {
-            const user = this.findOne(userId);
+    async findOrCreateBySocial(provider, socialId, userInfo) {
+        const where = provider === 'google'
+            ? { googleId: socialId }
+            : { facebookId: socialId };
+        let user = await this.prisma.user.findFirst({
+            where,
+        });
+        if (user) {
             if (userInfo) {
+                const updateData = {};
                 if (userInfo.email && !user.email) {
-                    user.email = userInfo.email;
-                    this.emailToUser.set(userInfo.email, user.id);
+                    updateData.email = userInfo.email;
                 }
-                if (userInfo.name && user.name === `${provider}用户`) {
-                    user.name = userInfo.name;
+                if (userInfo.name && user.name.includes('用户')) {
+                    updateData.name = userInfo.name;
                 }
-                this.users.set(user.id, user);
+                if (Object.keys(updateData).length > 0) {
+                    user = await this.prisma.user.update({
+                        where: { id: user.id },
+                        data: updateData,
+                    });
+                }
             }
-            return user;
+            return this.formatUser(user);
         }
-        const user = this.create({
+        const data = {
+            email: userInfo?.email || `${socialId}@${provider}.com`,
             name: userInfo?.name || `${provider}用户`,
-            email: userInfo?.email,
+            timezone: 'Asia/Shanghai',
+            role: 'user',
+            membership: 'free',
+            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(userInfo?.name || provider)}&background=random`,
+        };
+        if (provider === 'google') {
+            data.googleId = socialId;
+        }
+        else {
+            data.facebookId = socialId;
+        }
+        user = await this.prisma.user.create({
+            data,
         });
-        this.socialToUser.set(key, user.id);
-        user.avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`;
-        this.users.set(user.id, user);
-        return user;
+        return this.formatUser(user);
     }
-    updateUserRole(userId, role) {
-        const user = this.findOne(userId);
-        user.role = role;
-        user.updatedAt = new Date().toISOString();
-        this.users.set(userId, user);
-        return user;
+    async updateUserRole(userId, role) {
+        const user = await this.prisma.user.update({
+            where: { id: userId },
+            data: { role },
+        });
+        return this.formatUser(user);
     }
-    updateUserMembership(userId, membership) {
-        const user = this.findOne(userId);
-        user.membership = membership;
-        user.updatedAt = new Date().toISOString();
-        this.users.set(userId, user);
-        return user;
+    async updateUserMembership(userId, membership) {
+        const user = await this.prisma.user.update({
+            where: { id: userId },
+            data: { membership },
+        });
+        return this.formatUser(user);
+    }
+    formatUser(user) {
+        const { password, ...result } = user;
+        return {
+            ...result,
+            role: user.role,
+            membership: user.membership,
+            gender: user.gender,
+        };
     }
 };
 exports.UserService = UserService;
 exports.UserService = UserService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [mail_service_1.MailService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        mail_service_1.MailService])
 ], UserService);
 //# sourceMappingURL=user.service.js.map

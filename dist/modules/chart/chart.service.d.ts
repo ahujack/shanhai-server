@@ -1,3 +1,4 @@
+import { PrismaService } from '../../prisma.service';
 export interface BaziChart {
     userId: string;
     birthDate: string;
@@ -27,11 +28,13 @@ export interface BaziChart {
     suggestions: string[];
 }
 export declare class ChartService {
-    private charts;
+    private prisma;
+    constructor(prisma: PrismaService);
     private gan;
     private zhi;
     generateChart(userId: string, birthDate: string, birthTime: string, gender: 'male' | 'female'): Promise<BaziChart>;
-    findOne(userId: string): BaziChart | null;
+    findOne(userId: string): Promise<BaziChart | null>;
+    private formatChart;
     private calculateYearGanZhi;
     private calculateMonthGanZhi;
     private calculateDayGanZhi;

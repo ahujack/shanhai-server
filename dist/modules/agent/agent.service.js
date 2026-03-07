@@ -16,6 +16,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AgentService = void 0;
 const common_1 = require("@nestjs/common");
 const axios_1 = __importDefault(require("axios"));
+const client_1 = require("@prisma/client");
 const persona_service_1 = require("../persona/persona.service");
 const reading_service_1 = require("../reading/reading.service");
 const fortune_service_1 = require("../fortune/fortune.service");
@@ -27,6 +28,7 @@ let AgentService = AgentService_1 = class AgentService {
     fortuneService;
     chartService;
     ziService;
+    prisma = new client_1.PrismaClient();
     constructor(personaService, readingService, fortuneService, chartService, ziService) {
         this.personaService = personaService;
         this.readingService = readingService;
@@ -93,6 +95,24 @@ let AgentService = AgentService_1 = class AgentService {
             }
         }
         const reply = this.composeReply(persona, intent, dto.message, artifacts, userChart);
+        if (dto.userId) {
+            try {
+                await this.prisma.chatMessage.create({
+                    data: {
+                        userId: dto.userId,
+                        message: dto.message,
+                        reply,
+                        intent,
+                        personaId: dto.personaId,
+                        mood: dto.mood || undefined,
+                        artifacts: JSON.stringify(artifacts),
+                    },
+                });
+            }
+            catch (error) {
+                common_1.Logger.error('保存聊天记录失败', error.message, AgentService_1.name);
+            }
+        }
         return {
             persona: persona.id,
             intent,

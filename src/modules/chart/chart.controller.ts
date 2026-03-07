@@ -14,7 +14,7 @@ export class ChartController {
     @Param('userId') userId: string,
     @Body() body: { gender: 'male' | 'female' }
   ) {
-    const user = this.userService.findOne(userId);
+    const user = await this.userService.findOne(userId);
     return await this.chartService.generateChart(
       userId,
       user.birthDate || '1990-01-01',

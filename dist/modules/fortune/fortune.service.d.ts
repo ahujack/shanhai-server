@@ -1,3 +1,4 @@
+import { PrismaService } from '../../prisma.service';
 export interface FortuneSlip {
     id: string;
     zodiac: string;
@@ -28,6 +29,8 @@ export interface FortuneSlip {
     };
 }
 export declare class FortuneService {
+    private prisma;
+    constructor(prisma: PrismaService);
     private lastUserId;
     private lastDate;
     private cachedSlip;

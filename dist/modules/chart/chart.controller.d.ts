@@ -13,7 +13,7 @@ export declare class ChartController {
         chart?: undefined;
     } | {
         hasChart: boolean;
-        chart: import("./chart.service").BaziChart;
+        chart: Promise<import("./chart.service").BaziChart | null>;
         message?: undefined;
     };
 }

@@ -37,14 +37,14 @@ export class AuthController {
 
     // 注册时检查邮箱是否已存在
     if (purpose === 'register') {
-      if (this.userService.isEmailRegistered(email)) {
+      if (await this.userService.isEmailRegistered(email)) {
         return { success: false, message: '该邮箱已注册' };
       }
     }
 
     // 重置密码时检查邮箱是否存在
     if (purpose === 'reset') {
-      if (!this.userService.isEmailRegistered(email)) {
+      if (!await this.userService.isEmailRegistered(email)) {
         return { success: false, message: '该邮箱未注册' };
       }
     }
@@ -107,7 +107,7 @@ export class AuthController {
     }
 
     // 检查邮箱是否已注册
-    if (this.userService.isEmailRegistered(email)) {
+    if (await this.userService.isEmailRegistered(email)) {
       return { success: false, message: '该邮箱已注册' };
     }
 
@@ -175,7 +175,7 @@ export class AuthController {
         return { success: false, message: '验证码错误或已过期' };
       }
       // 验证码登录时自动创建用户（如果不存在）
-      const user: UserProfile = this.userService.findOrCreateByEmail(email);
+      const user = await this.userService.findOrCreateByEmail(email);
 
       // 生成 JWT Token
       const payload = { sub: user.id, email: user.email };
@@ -218,7 +218,7 @@ export class AuthController {
     }
 
     // 创建或更新用户
-    const user = this.userService.findOrCreateBySocial(dto.provider, dto.idToken, userInfo);
+    const user = await this.userService.findOrCreateBySocial(dto.provider, dto.idToken, userInfo);
 
     // 生成 JWT Token
     const payload = { sub: user.id, email: user.email, provider: dto.provider };
@@ -307,7 +307,7 @@ export class AuthController {
   // 刷新 Token
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  refresh(@Body() dto: { token: string }) {
+  async refresh(@Body() dto: { token: string }) {
     try {
       let userId: string;
 
@@ -319,7 +319,7 @@ export class AuthController {
         [userId] = decoded.split(':');
       }
 
-      const user = this.userService.findOne(userId);
+      const user = await this.userService.findOne(userId);
 
       const payload = { sub: user.id, email: user.email };
       const newToken = this.jwtService

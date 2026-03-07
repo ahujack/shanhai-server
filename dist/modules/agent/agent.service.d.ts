@@ -11,6 +11,7 @@ export declare class AgentService {
     private readonly fortuneService;
     private readonly chartService;
     private readonly ziService;
+    private prisma;
     constructor(personaService: PersonaService, readingService: ReadingService, fortuneService: FortuneService, chartService: ChartService, ziService: ZiService);
     handleChat(dto: AgentChatDto): Promise<{
         persona: import("../persona/persona.service").PersonaId;
