@@ -630,8 +630,6 @@ export class ReadingService {
     };
     return names[index] || `卦象${index}` || '天地否';
   }
-    return names[index] || `第${index}卦`;
-  }
 
   // 获取爻描述
   private getYaoDescription(yao: string): string {
