@@ -1,17 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaClient } from '@prisma/client';
 import { PersonaService, PersonaSchema } from '../persona/persona.service';
 import { ReadingService, DivinationCategory } from '../reading/reading.service';
 import { FortuneService } from '../fortune/fortune.service';
 import { ChartService } from '../chart/chart.service';
-import { ZiService, HandwritingAnalysis, ZiResult } from '../zi/zi.service';
+import { ZiService, ZiResult } from '../zi/zi.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
 
 @Injectable()
 export class AgentService {
+  private readonly logger = new Logger(AgentService.name);
   private prisma = new PrismaClient();
 
   constructor(
@@ -23,29 +24,51 @@ export class AgentService {
   ) {}
 
   async handleChat(dto: AgentChatDto) {
+    // 验证输入
+    if (!dto.message || dto.message.trim().length === 0) {
+      throw new BadRequestException('消息不能为空');
+    }
+
+    // 限制消息长度
+    if (dto.message.length > 500) {
+      throw new BadRequestException('消息长度不能超过500字符');
+    }
+
     const persona = this.resolvePersona(dto.personaId);
     
     // 获取用户命盘（如有）
-    const userChart = dto.userId ? this.chartService.findOne(dto.userId) : null;
+    let userChart: any = null;
+    if (dto.userId) {
+      try {
+        userChart = await this.chartService.findOne(dto.userId);
+      } catch (error) {
+        this.logger.warn(`获取用户命盘失败: ${(error as Error).message}`);
+      }
+    }
     
     const { intent, category, mood } = await this.classifyWithDeepSeek(dto, persona, userChart);
-    const actions: any[] = [];
+    const actions: Array<{ type: string; label: string }> = [];
     let artifacts: Record<string, unknown> = {};
 
     // map emotion to wealth for divination
     const divinationCategory = category === 'emotion' ? 'love' : category;
 
     if (intent === 'divination') {
-      const reading = await this.readingService.generate({
-        question: dto.message,
-        category: category as DivinationCategory || divinationCategory as DivinationCategory || this.inferCategory(dto.message),
-        userId: dto.userId,
-      });
-      artifacts = { reading };
-      actions.push({
-        type: 'view_reading',
-        label: '查看完整解读',
-      });
+      try {
+        const reading = await this.readingService.generate({
+          question: dto.message,
+          category: category as DivinationCategory || divinationCategory as DivinationCategory || this.inferCategory(dto.message),
+          userId: dto.userId,
+        });
+        artifacts = { reading };
+        actions.push({
+          type: 'view_reading',
+          label: '查看完整解读',
+        });
+      } catch (error) {
+        this.logger.error(`生成占卜失败: ${error.message}`);
+        artifacts = { reading: null };
+      }
     }
 
     if (intent === 'meditation') {
@@ -83,12 +106,17 @@ export class AgentService {
     if (intent === 'zi') {
       const ziChar = this.extractZiFromMessage(dto.message);
       if (ziChar) {
-        const ziResult = await this.ziService.analyze(ziChar);
-        artifacts = { zi: ziResult };
-        actions.push({
-          type: 'view_zi',
-          label: '查看测字详情',
-        });
+        try {
+          const ziResult = await this.ziService.analyze(ziChar);
+          artifacts = { zi: ziResult };
+          actions.push({
+            type: 'view_zi',
+            label: '查看测字详情',
+          });
+        } catch (error) {
+          this.logger.error(`测字分析失败: ${error.message}`);
+          artifacts = { zi: null };
+        }
       }
     }
 
@@ -109,7 +137,7 @@ export class AgentService {
           },
         });
       } catch (error) {
-        Logger.error('保存聊天记录失败', (error as Error).message, AgentService.name);
+        this.logger.error('保存聊天记录失败', error.message);
       }
     }
 
@@ -141,7 +169,7 @@ export class AgentService {
     const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
 
     if (!apiKey) {
-      Logger.warn('DEEPSEEK_API_KEY 未配置，回退到本地规则意图识别', AgentService.name);
+      this.logger.warn('DEEPSEEK_API_KEY 未配置，回退到本地规则意图识别');
       const fallbackIntent = this.fallbackDetectIntent(dto.message, userChart);
       return { intent: fallbackIntent };
     }
@@ -190,6 +218,7 @@ ${contextInfo}`,
             Authorization: `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
           },
+          timeout: 10000, // 10秒超时
         },
       );
 
@@ -205,7 +234,7 @@ ${contextInfo}`,
         mood: parsed.mood,
       };
     } catch (error) {
-      Logger.error('DeepSeek 意图识别失败，使用本地规则回退', (error as Error).message, AgentService.name);
+      this.logger.error(`DeepSeek 意图识别失败: ${error.message}，使用本地规则回退`);
       const intent = this.fallbackDetectIntent(dto.message, userChart);
       return { intent };
     }
@@ -222,7 +251,7 @@ ${contextInfo}`,
     const divinationKeywords = ['占卜', '解读', '卦', '算一算', '问卜', '决定'];
     // 冥想相关关键词
     const meditationKeywords = ['焦虑', '冥想', '睡不着', '平静', '紧张', '失眠', '静心'];
-    // 测字相关关键词 - 需要更精确匹配
+    // 测字相关关键词
     const ziKeywords = ['测字', '看字', '字怎么样', '字的意思', '帮我看看这个字', '这个字怎么样'];
     
     // 检查是否是纯汉字且很短（可能是测字，但需要明确意图）
@@ -312,6 +341,9 @@ ${contextInfo}`,
     // 测字回复 - 使用冷读术风格
     if (intent === 'zi' && artifacts.zi) {
       const zi = artifacts.zi as ZiResult;
+      if (!zi) {
+        return `${persona.name}：抱歉，测字服务暂时不可用，请稍后再试。`;
+      }
       const coldRead = zi.coldReadings[0];
       const advice = zi.interpretation.advice[0];
       
@@ -321,6 +353,9 @@ ${contextInfo}`,
     // 占卜回复
     if (intent === 'divination' && artifacts.reading) {
       const reading = artifacts.reading as any;
+      if (!reading) {
+        return `${persona.name}：抱歉，占卜服务暂时不可用，请稍后再试。`;
+      }
       return `${persona.name}：你的问题我已感知。\n\n🙏 所得卦象：${reading.hexagram.originalName}\n📖 解读：${reading.interpretation.overall}\n\n${persona.name}建议你：${reading.recommendations[0]}\n\n若想查看完整解读，可点击下方按钮。`;
     }
 

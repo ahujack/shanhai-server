@@ -1,8 +1,17 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, UnauthorizedException, Inject, forwardRef } from '@nestjs/common';
+import { Controller, Get, Post, Body, HttpCode, HttpStatus, UnauthorizedException, Inject, forwardRef, UseGuards } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { UserService } from './user.service';
+import { UserService } from '../user/user.service';
 import { MailService } from '../mail/mail.service';
-import type { CreateUserDto, UserProfile } from './user.service';
+import type { UserProfile } from '../user/user.service';
+import { 
+  SendCodeDto, 
+  RegisterDto, 
+  LoginDto, 
+  SocialLoginDto, 
+  RefreshTokenDto,
+  ResetPasswordDto 
+} from '../auth/dto/auth.dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -15,7 +24,7 @@ export class AuthController {
   // 发送验证码
   @Post('send-code')
   @HttpCode(HttpStatus.OK)
-  async sendCode(@Body() dto: { email?: string; purpose?: string }) {
+  async sendCode(@Body() dto: SendCodeDto) {
     const { email, purpose } = dto;
     
     if (!email) {
@@ -28,12 +37,6 @@ export class AuthController {
     const smtpUser = process.env.SMTP_USER;
     const smtpPass = process.env.SMTP_PASS ? '已设置' : '未设置';
     console.log(`[Debug] SMTP配置: host=${smtpHost}, port=${smtpPort}, user=${smtpUser}, pass=${smtpPass}`);
-
-    // 验证邮箱格式
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return { success: false, message: '请输入有效的邮箱地址' };
-    }
 
     // 注册时检查邮箱是否已存在
     if (purpose === 'register') {
@@ -88,13 +91,9 @@ export class AuthController {
   // 注册
   @Post('register')
   @HttpCode(HttpStatus.OK)
-  async register(@Body() dto: { email: string; password: string; code: string; name?: string }) {
+  async register(@Body() dto: RegisterDto) {
     const { email, password, code, name } = dto;
     
-    if (!email || !password || !code) {
-      return { success: false, message: '请提供邮箱、密码和验证码' };
-    }
-
     // 验证密码长度
     if (password.length < 6) {
       return { success: false, message: '密码至少需要6位' };
@@ -136,7 +135,7 @@ export class AuthController {
   // 密码登录
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() dto: { email: string; password?: string; code?: string }) {
+  async login(@Body() dto: LoginDto) {
     const { email, password, code } = dto;
     
     if (!email) {
@@ -202,7 +201,7 @@ export class AuthController {
   // 第三方登录（谷歌/Facebook）
   @Post('social-login')
   @HttpCode(HttpStatus.OK)
-  async socialLogin(@Body() dto: { provider: 'google' | 'facebook'; idToken: string }) {
+  async socialLogin(@Body() dto: SocialLoginDto) {
     let userInfo: { email?: string; name?: string } | null = null;
 
     if (dto.provider === 'google') {
@@ -307,7 +306,7 @@ export class AuthController {
   // 刷新 Token
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refresh(@Body() dto: { token: string }) {
+  async refresh(@Body() dto: RefreshTokenDto) {
     try {
       let userId: string;
 
@@ -342,11 +341,12 @@ export class AuthController {
   // 重置密码
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
-  async resetPassword(@Body() dto: { email: string; code: string; newPassword: string }) {
+  async resetPassword(@Body() dto: ResetPasswordDto) {
     const { email, code, newPassword } = dto;
 
-    if (!email || !code || !newPassword) {
-      return { success: false, message: '请提供邮箱、验证码和新密码' };
+    // 验证新密码长度
+    if (newPassword.length < 6) {
+      return { success: false, message: '密码至少需要6位' };
     }
 
     // 验证验证码
@@ -356,18 +356,13 @@ export class AuthController {
     }
 
     // 检查用户是否存在
-    if (!this.userService.isEmailRegistered(email)) {
+    if (!await this.userService.isEmailRegistered(email)) {
       return { success: false, message: '该邮箱未注册' };
-    }
-
-    // 验证新密码长度
-    if (newPassword.length < 6) {
-      return { success: false, message: '密码至少需要6位' };
     }
 
     // 更新密码
     try {
-      const user = await this.userService.resetPassword(email, newPassword);
+      await this.userService.resetPassword(email, newPassword);
       return { success: true, message: '密码重置成功' };
     } catch (error) {
       return { success: false, message: '密码重置失败' };
@@ -383,35 +378,5 @@ export class AuthController {
       SMTP_USER: process.env.SMTP_USER || 'undefined',
       SMTP_PASS: process.env.SMTP_PASS ? '已设置' : 'undefined',
     };
-  }
-}
-
-@Controller('users')
-export class UserController {
-  constructor(private readonly userService: UserService) {}
-
-  @Post()
-  create(@Body() dto: CreateUserDto) {
-    return this.userService.create(dto);
-  }
-
-  @Get()
-  findAll() {
-    return this.userService.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.userService.findOne(id);
-  }
-
-  @Put(':id')
-  update(@Param('id') id: string, @Body() dto: Partial<CreateUserDto>) {
-    return this.userService.update(id, dto);
-  }
-
-  @Delete(':id')
-  delete(@Param('id') id: string) {
-    return this.userService.delete(id);
   }
 }
