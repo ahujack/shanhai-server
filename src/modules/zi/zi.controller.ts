@@ -1,5 +1,7 @@
 import { Body, Controller, Post } from '@nestjs/common';
-import { IsString } from 'class-validator';
+import { IsString, IsOptional } from 'class-validator';
+import { Logger } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
 import { ZiService, HandwritingAnalysis } from './zi.service';
 import { OcrService } from '../ocr/ocr.service';
 
@@ -8,6 +10,10 @@ export class AnalyzeZiDto {
   zi: string;
   
   handwriting?: Partial<HandwritingAnalysis>;
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
 }
 
 export class RecognizeDto {
@@ -18,10 +24,16 @@ export class RecognizeDto {
 export class AnalyzeHandwritingDto {
   @IsString()
   image: string; // base64
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
 }
 
 @Controller('zi')
 export class ZiController {
+  private prisma = new PrismaClient();
+
   constructor(
     private readonly ziService: ZiService,
     private readonly ocrService: OcrService,
@@ -29,7 +41,36 @@ export class ZiController {
 
   @Post('analyze')
   async analyze(@Body() dto: AnalyzeZiDto) {
-    return this.ziService.analyze(dto.zi, dto.handwriting);
+    const result = await this.ziService.analyze(dto.zi, dto.handwriting);
+
+    // 保存测字记录
+    if (dto.userId) {
+      try {
+        await this.prisma.ziAnalysis.create({
+          data: {
+            userId: dto.userId,
+            zi: dto.zi,
+            pressure: result.handwriting.pressure,
+            pressureInterpretation: result.handwriting.pressureInterpretation,
+            stability: result.handwriting.stability,
+            stabilityInterpretation: result.handwriting.stabilityInterpretation,
+            structure: result.handwriting.structure,
+            structureInterpretation: result.handwriting.structureInterpretation,
+            continuity: result.handwriting.continuity,
+            continuityInterpretation: result.handwriting.continuityInterpretation,
+            overallStyle: result.handwriting.overallStyle,
+            personalityInsights: JSON.stringify(result.handwriting.personalityInsights),
+            interpretation: result.interpretation.summary,
+            coldReadings: JSON.stringify(result.coldReadings),
+            followUpQuestions: JSON.stringify(result.followUpQuestions),
+          },
+        });
+      } catch (error) {
+        Logger.error('保存测字记录失败', (error as Error).message, ZiController.name);
+      }
+    }
+
+    return result;
   }
 
   @Post('recognize')
@@ -59,6 +100,34 @@ export class ZiController {
       // 2. 分析字义
       const analysis = await this.ziService.analyze(zi);
       
+      // 保存测字记录
+      if (dto.userId) {
+        try {
+          await this.prisma.ziAnalysis.create({
+            data: {
+              userId: dto.userId,
+              zi,
+              pressure: analysis.handwriting.pressure,
+              pressureInterpretation: analysis.handwriting.pressureInterpretation,
+              stability: analysis.handwriting.stability,
+              stabilityInterpretation: analysis.handwriting.stabilityInterpretation,
+              structure: analysis.handwriting.structure,
+              structureInterpretation: analysis.handwriting.structureInterpretation,
+              continuity: analysis.handwriting.continuity,
+              continuityInterpretation: analysis.handwriting.continuityInterpretation,
+              overallStyle: analysis.handwriting.overallStyle,
+              personalityInsights: JSON.stringify(analysis.handwriting.personalityInsights),
+              interpretation: analysis.interpretation.summary,
+              coldReadings: JSON.stringify(analysis.coldReadings),
+              followUpQuestions: JSON.stringify(analysis.followUpQuestions),
+              confidence: ocrResult.confidence,
+            },
+          });
+        } catch (error) {
+          Logger.error('保存测字记录失败', (error as Error).message, ZiController.name);
+        }
+      }
+
       return {
         recognizedZi: zi,
         confidence: ocrResult.confidence,

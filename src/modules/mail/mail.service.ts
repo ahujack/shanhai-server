@@ -117,4 +117,47 @@ export class MailService {
       return false;
     }
   }
+
+  /**
+   * 发送密码重置邮件
+   */
+  async sendPasswordResetEmail(email: string, code: string): Promise<boolean> {
+    const appName = this.getConfig('APP_NAME') || '山海灵境';
+
+    if (!this.resend) {
+      this.logger.log(`[模拟] 发送密码重置邮件到 ${email}, 验证码: ${code}`);
+      return true;
+    }
+
+    try {
+      await this.resend.emails.send({
+        from: 'onboarding@resend.dev',
+        to: email,
+        subject: `【${appName}】密码重置验证码`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 12px;">
+              <h1 style="color: #fff; margin: 0 0 20px 0; font-size: 24px;">${appName} - 密码重置</h1>
+              <div style="background: #fff; padding: 30px; border-radius: 8px;">
+                <p style="color: #333; font-size: 16px; margin: 0 0 20px 0;">您好，</p>
+                <p style="color: #666; font-size: 14px; margin: 0 0 20px 0;">
+                  您正在进行密码重置操作。请使用以下验证码完成验证：
+                </p>
+                <div style="background: #f5f5f5; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
+                  <span style="font-size: 32px; font-weight: bold; color: #667eea; letter-spacing: 8px;">${code}</span>
+                </div>
+                <p style="color: #666; font-size: 14px; margin: 0;">验证码有效期为 5 分钟，请尽快完成操作。</p>
+                <p style="color: #999; font-size: 12px; margin: 20px 0 0 0;">如果这不是您的操作，请忽略此邮件，您的账户安全不会受到影响。</p>
+              </div>
+            </div>
+          </div>
+        `,
+      });
+
+      return true;
+    } catch (error) {
+      this.logger.error(`发送密码重置邮件失败: ${error.message}`);
+      return false;
+    }
+  }
 }

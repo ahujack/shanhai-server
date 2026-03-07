@@ -42,6 +42,13 @@ export class AuthController {
       }
     }
 
+    // 重置密码时检查邮箱是否存在
+    if (purpose === 'reset') {
+      if (!this.userService.isEmailRegistered(email)) {
+        return { success: false, message: '该邮箱未注册' };
+      }
+    }
+
     // 生成6位验证码
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -105,7 +112,7 @@ export class AuthController {
     }
 
     // 创建用户
-    const user = this.userService.registerWithEmail(email, password, name || email.split('@')[0]);
+    const user = await this.userService.registerWithEmail(email, password, name || email.split('@')[0]);
 
     // 生成 JWT Token
     const payload = { sub: user.id, email: user.email };
@@ -138,7 +145,7 @@ export class AuthController {
 
     // 优先使用密码登录
     if (password && password.length > 0) {
-      const loggedInUser = this.userService.loginWithPassword(email, password);
+      const loggedInUser = await this.userService.loginWithPassword(email, password);
       if (!loggedInUser) {
         return { success: false, message: '邮箱或密码错误' };
       }
@@ -330,6 +337,41 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   logout() {
     return { success: true, message: '已登出' };
+  }
+
+  // 重置密码
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  async resetPassword(@Body() dto: { email: string; code: string; newPassword: string }) {
+    const { email, code, newPassword } = dto;
+
+    if (!email || !code || !newPassword) {
+      return { success: false, message: '请提供邮箱、验证码和新密码' };
+    }
+
+    // 验证验证码
+    const isValid = this.userService.verifyCode(email, code);
+    if (!isValid) {
+      return { success: false, message: '验证码错误或已过期' };
+    }
+
+    // 检查用户是否存在
+    if (!this.userService.isEmailRegistered(email)) {
+      return { success: false, message: '该邮箱未注册' };
+    }
+
+    // 验证新密码长度
+    if (newPassword.length < 6) {
+      return { success: false, message: '密码至少需要6位' };
+    }
+
+    // 更新密码
+    try {
+      const user = await this.userService.resetPassword(email, newPassword);
+      return { success: true, message: '密码重置成功' };
+    } catch (error) {
+      return { success: false, message: '密码重置失败' };
+    }
   }
 
   // 调试端点：检查 SMTP 配置

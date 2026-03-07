@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import { PrismaClient } from '@prisma/client';
 import { PersonaService, PersonaSchema } from '../persona/persona.service';
 import { ReadingService, DivinationCategory } from '../reading/reading.service';
 import { FortuneService } from '../fortune/fortune.service';
@@ -11,6 +12,8 @@ type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 
 
 @Injectable()
 export class AgentService {
+  private prisma = new PrismaClient();
+
   constructor(
     private readonly personaService: PersonaService,
     private readonly readingService: ReadingService,
@@ -90,6 +93,25 @@ export class AgentService {
     }
 
     const reply = this.composeReply(persona, intent, dto.message, artifacts, userChart);
+
+    // 保存聊天记录到数据库
+    if (dto.userId) {
+      try {
+        await this.prisma.chatMessage.create({
+          data: {
+            userId: dto.userId,
+            message: dto.message,
+            reply,
+            intent,
+            personaId: dto.personaId,
+            mood: dto.mood || undefined,
+            artifacts: JSON.stringify(artifacts),
+          },
+        });
+      } catch (error) {
+        Logger.error('保存聊天记录失败', (error as Error).message, AgentService.name);
+      }
+    }
 
     return {
       persona: persona.id,

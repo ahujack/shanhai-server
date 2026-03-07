@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../prisma.service';
 
 export interface FortuneSlip {
   id: string;
@@ -332,6 +333,8 @@ const fortuneSlips: FortuneSlip[] = [
 
 @Injectable()
 export class FortuneService {
+  constructor(private prisma: PrismaService) {}
+
   private lastUserId: string | null = null;
   private lastDate: string | null = null;
   private cachedSlip: FortuneSlip | null = null;

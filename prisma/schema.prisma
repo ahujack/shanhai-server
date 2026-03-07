@@ -1,0 +1,186 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户模型
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String
+  password      String?   // 加密后的密码，第三方登录为 null
+  avatar        String?
+  phone         String?
+  birthDate     String?
+  birthTime     String?
+  gender        String?
+  timezone      String    @default("Asia/Shanghai")
+  location      String?
+  role          String    @default("user") // user | admin
+  membership    String    @default("free") // free | premium | vip
+  
+  // 社交登录绑定
+  googleId      String?   @unique
+  facebookId    String?   @unique
+  
+  // 时间戳
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // 关联
+  charts        BaziChart[]
+  fortunes      Fortune[]
+  chatMessages  ChatMessage[]
+  ziAnalyses   ZiAnalysis[]
+  readings     Reading[]
+}
+
+// 聊天消息模型
+model ChatMessage {
+  id            String    @id @default(uuid())
+  userId        String?
+  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // 消息内容
+  message       String    // 用户消息
+  reply         String?   // AI 回复
+  intent        String?   // 意图：chat, divination, meditation, chart, fortune, zi
+  
+  // 上下文
+  personaId    String?   // 使用的人格 ID
+  mood          String?   // 用户情绪：calm, anxious, sad, excited
+  
+  // 额外数据 (存储为 JSON)
+  artifacts     String?   // 生成的 artifacts，如运势、命盘等
+  
+  createdAt     DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// 测字分析模型
+model ZiAnalysis {
+  id            String    @id @default(uuid())
+  userId        String?
+  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // 测的字
+  zi            String    // 分析的字
+  
+  // 笔迹分析结果
+  pressure          String?   // 力度：heavy, light, medium
+  pressureInterpretation String?
+  stability         String?   // 稳定性：stable, shaky, average
+  stabilityInterpretation String?
+  structure         String?   // 结构：compact, loose, balanced
+  structureInterpretation String?
+  continuity        String?   // 连贯性：connected, broken, average
+  continuityInterpretation String?
+  overallStyle      String?   // 整体风格
+  personalityInsights String? // 性格洞察 (JSON 数组)
+  
+  // 解读结果
+  interpretation   String?   // 综合解读
+  coldReadings     String?   // 冷读语录 (JSON 数组)
+  followUpQuestions String? // 跟进问题 (JSON 数组)
+  
+  // 置信度
+  confidence    Float?     // 识别置信度
+  
+  createdAt     DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// 占卜解读模型
+model Reading {
+  id            String    @id @default(uuid())
+  userId        String?
+  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // 问题
+  question      String    // 用户问题
+  
+  // 分类
+  category      String?   // 分类：career, love, wealth, health, growth, general
+  
+  // 解读内容 (JSON 字符串)
+  result        String?   // 解读结果
+  
+  createdAt     DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([category])
+  @@index([createdAt])
+}
+
+// 八字命盘模型
+model BaziChart {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // 基本信息
+  birthDate       String
+  birthTime       String
+  gender          String
+  
+  // 八字
+  yearGanZhi      String    // 年柱
+  monthGanZhi     String    // 月柱
+  dayGanZhi       String    // 日柱
+  hourGanZhi      String    // 时柱
+  
+  // 十神
+  dayMaster       String    // 日主
+  sun             String    // 太阳星座
+  moon            String    // 月亮星座
+  
+  // 五行强弱 (存储为 JSON 字符串)
+  wuxingStrength  String    // {"wood": 20, "fire": 15, ...}
+  
+  // 性格特点 (存储为 JSON 字符串数组)
+  personalityTraits String   // ["性格1", "性格2", ...]
+  
+  // 运势简述 (存储为 JSON 字符串)
+  fortuneSummary  String    // {"career": "...", "wealth": "...", ...}
+  
+  // 建议 (存储为 JSON 字符串数组)
+  suggestions     String    // ["建议1", "建议2", ...]
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// 每日运势模型
+model Fortune {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  date            String    // 日期格式：2024-01-15
+  zodiac          String?   // 星座
+  overall         String    // 总体运势
+  love            String    // 爱情运势
+  career          String    // 事业运势
+  wealth          String    // 财运
+  health          String    // 健康运势
+  luckyColor      String?   // 幸运颜色
+  luckyNumber     String?   // 幸运数字
+  luckyDirection  String?   // 幸运方向
+  advice          String    // 建议
+  
+  createdAt       DateTime  @default(now())
+
+  @@unique([userId, date]) // 每个用户每天只能有一条运势
+  @@index([userId])
+}

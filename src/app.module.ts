@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { PrismaModule } from './prisma.module';
 import { HealthModule } from './modules/health/health.module';
 import { PersonaModule } from './modules/persona/persona.module';
 import { ReadingModule } from './modules/reading/reading.module';
@@ -12,6 +13,7 @@ import { ZiModule } from './modules/zi/zi.module';
 
 @Module({
   imports: [
+    PrismaModule,
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || 'shanhai-secret-key-change-in-production',

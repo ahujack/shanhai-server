@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../prisma.service';
 import { MailService } from '../mail/mail.service';
-import * as crypto from 'crypto';
+import * as bcrypt from 'bcryptjs';
+import { Prisma } from '@prisma/client';
 
 export interface UserProfile {
   id: string;
@@ -12,12 +14,14 @@ export interface UserProfile {
   location?: string;
   phone?: string;
   email?: string;
-  password?: string; // 哈希后的密码
+  password?: string;
   avatar?: string;
   role: 'user' | 'admin';
   membership: 'free' | 'premium' | 'vip';
-  createdAt: string;
-  updatedAt: string;
+  googleId?: string;
+  facebookId?: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface CreateUserDto {
@@ -37,127 +41,162 @@ interface VerificationCode {
 
 @Injectable()
 export class UserService {
-  // 内存存储，生产环境应连接数据库
-  private users: Map<string, UserProfile> = new Map();
   private verificationCodes: Map<string, VerificationCode> = new Map();
-  private emailToUser: Map<string, string> = new Map();
-  private socialToUser: Map<string, string> = new Map();
 
   // 验证码有效期：5分钟
   private readonly CODE_EXPIRE_TIME = 5 * 60 * 1000;
 
-  // 密码哈希密钥
-  private readonly PASSWORD_SECRET = 'shanhai-password-secret';
+  // 密码哈希轮数
+  private readonly BCRYPT_ROUNDS = 10;
 
-  constructor(private mailService?: MailService) {}
+  constructor(
+    private prisma: PrismaService,
+    private mailService?: MailService,
+  ) {}
 
-  // 哈希密码
-  hashPassword(password: string): string {
-    return crypto.createHmac('sha256', this.PASSWORD_SECRET).update(password).digest('hex');
+  // 哈希密码（使用 bcrypt）
+  async hashPassword(password: string): Promise<string> {
+    return bcrypt.hash(password, this.BCRYPT_ROUNDS);
   }
 
   // 验证密码
-  verifyPassword(password: string, hashedPassword: string): boolean {
-    return this.hashPassword(password) === hashedPassword;
+  async verifyPassword(password: string, hashedPassword: string): Promise<boolean> {
+    return bcrypt.compare(password, hashedPassword);
   }
 
   // 检查邮箱是否已注册
-  isEmailRegistered(email: string): boolean {
-    return this.emailToUser.has(email);
+  async isEmailRegistered(email: string): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+    return !!user;
   }
 
   // 注册新用户（需要验证码验证）
-  registerWithEmail(email: string, password: string, name: string): UserProfile {
+  async registerWithEmail(email: string, password: string, name: string): Promise<UserProfile> {
     // 检查邮箱是否已存在
-    if (this.emailToUser.has(email)) {
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email },
+    });
+    if (existingUser) {
       throw new BadRequestException('该邮箱已注册');
     }
 
-    const id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const now = new Date().toISOString();
-    
-    const user: UserProfile = {
-      id,
-      name: name || email.split('@')[0],
-      email,
-      password: this.hashPassword(password),
-      timezone: 'Asia/Shanghai',
-      role: 'user',
-      membership: 'free',
-      createdAt: now,
-      updatedAt: now,
-    };
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        name: name || email.split('@')[0],
+        password: await this.hashPassword(password),
+        timezone: 'Asia/Shanghai',
+        role: 'user',
+        membership: 'free',
+      },
+    });
 
-    this.users.set(id, user);
-    this.emailToUser.set(email, user.id);
-    return user;
+    return this.formatUser(user);
   }
 
   // 使用邮箱密码登录
-  loginWithPassword(email: string, password: string): UserProfile | null {
-    const userId = this.emailToUser.get(email);
-    if (!userId) {
+  async loginWithPassword(email: string, password: string): Promise<UserProfile | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user || !user.password) {
       return null;
     }
 
-    const user = this.findOne(userId);
-    if (!user.password || !this.verifyPassword(password, user.password)) {
+    const isValid = await this.verifyPassword(password, user.password);
+    if (!isValid) {
       return null;
     }
 
-    return user;
+    return this.formatUser(user);
   }
 
-  create(dto: CreateUserDto): UserProfile {
-    const id = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const now = new Date().toISOString();
-    
-    const user: UserProfile = {
-      id,
-      name: dto.name,
-      birthDate: dto.birthDate,
-      birthTime: dto.birthTime,
-      gender: dto.gender,
-      timezone: dto.timezone ?? 'Asia/Shanghai',
-      location: dto.location,
-      role: 'user',
-      membership: 'free',
-      createdAt: now,
-      updatedAt: now,
-    };
+  // 重置密码
+  async resetPassword(email: string, newPassword: string): Promise<UserProfile> {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
 
-    this.users.set(id, user);
-    return user;
-  }
-
-  findAll(): UserProfile[] {
-    return Array.from(this.users.values());
-  }
-
-  findOne(id: string): UserProfile {
-    const user = this.users.get(id);
     if (!user) {
       throw new NotFoundException('用户不存在');
     }
-    return user;
+
+    const updatedUser = await this.prisma.user.update({
+      where: { email },
+      data: {
+        password: await this.hashPassword(newPassword),
+      },
+    });
+
+    return this.formatUser(updatedUser);
   }
 
-  update(id: string, dto: Partial<CreateUserDto>): UserProfile {
-    const user = this.findOne(id);
-    const updated: UserProfile = {
-      ...user,
-      ...dto,
-      updatedAt: new Date().toISOString(),
-    };
-    this.users.set(id, updated);
-    return updated;
+  // 创建用户
+  async create(dto: CreateUserDto): Promise<UserProfile> {
+    const user = await this.prisma.user.create({
+      data: {
+        name: dto.name,
+        birthDate: dto.birthDate,
+        birthTime: dto.birthTime,
+        gender: dto.gender,
+        timezone: dto.timezone ?? 'Asia/Shanghai',
+        location: dto.location,
+        role: 'user',
+        membership: 'free',
+      },
+    });
+
+    return this.formatUser(user);
   }
 
-  delete(id: string): void {
-    if (!this.users.has(id)) {
+  // 获取所有用户
+  async findAll(): Promise<UserProfile[]> {
+    const users = await this.prisma.user.findMany();
+    return users.map(this.formatUser);
+  }
+
+  // 获取单个用户
+  async findOne(id: string): Promise<UserProfile> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
       throw new NotFoundException('用户不存在');
     }
-    this.users.delete(id);
+
+    return this.formatUser(user);
+  }
+
+  // 更新用户
+  async update(id: string, dto: Partial<CreateUserDto>): Promise<UserProfile> {
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: {
+        ...dto,
+        updatedAt: new Date(),
+      },
+    });
+
+    return this.formatUser(user);
+  }
+
+  // 删除用户
+  async delete(id: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+
+    await this.prisma.user.delete({
+      where: { id },
+    });
   }
 
   // 存储验证码
@@ -174,95 +213,129 @@ export class UserService {
     if (!stored) {
       return false;
     }
-    
+
     // 检查是否过期
     if (Date.now() > stored.expiresAt) {
       this.verificationCodes.delete(identifier);
       return false;
     }
-    
+
     // 验证成功，删除验证码
     if (stored.code === code) {
       this.verificationCodes.delete(identifier);
       return true;
     }
-    
+
     return false;
   }
 
   // 通过邮箱查找或创建用户
-  findOrCreateByEmail(email: string): UserProfile {
-    // 检查是否已存在
-    const userId = this.emailToUser.get(email);
-    
-    if (userId) {
-      return this.findOne(userId);
-    }
-    
-    // 创建新用户
-    const user = this.create({
-      name: email.split('@')[0],
-      email: email,
+  async findOrCreateByEmail(email: string): Promise<UserProfile> {
+    let user = await this.prisma.user.findUnique({
+      where: { email },
     });
-    
-    // 绑定邮箱
-    this.emailToUser.set(email, user.id);
-    
-    this.users.set(user.id, user);
-    return user;
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          name: email.split('@')[0],
+          timezone: 'Asia/Shanghai',
+          role: 'user',
+          membership: 'free',
+        },
+      });
+    }
+
+    return this.formatUser(user);
   }
 
-  // 第三方登录
-  findOrCreateBySocial(provider: 'google' | 'facebook', socialId: string, userInfo?: { email?: string; name?: string }): UserProfile {
-    const key = `${provider}:${socialId}`;
-    
-    // 检查是否已存在
-    let userId = this.socialToUser.get(key);
-    if (userId) {
-      const user = this.findOne(userId);
+  // 第三方登录 - 查找或创建用户
+  async findOrCreateBySocial(
+    provider: 'google' | 'facebook',
+    socialId: string,
+    userInfo?: { email?: string; name?: string },
+  ): Promise<UserProfile> {
+    const where = provider === 'google'
+      ? { googleId: socialId }
+      : { facebookId: socialId };
+
+    let user = await this.prisma.user.findFirst({
+      where,
+    });
+
+    if (user) {
       // 如果有新的用户信息，更新一下
       if (userInfo) {
+        const updateData: Prisma.UserUpdateInput = {};
         if (userInfo.email && !user.email) {
-          user.email = userInfo.email;
-          this.emailToUser.set(userInfo.email, user.id);
+          updateData.email = userInfo.email;
         }
-        if (userInfo.name && user.name === `${provider}用户`) {
-          user.name = userInfo.name;
+        if (userInfo.name && user.name.includes('用户')) {
+          updateData.name = userInfo.name;
         }
-        this.users.set(user.id, user);
+
+        if (Object.keys(updateData).length > 0) {
+          user = await this.prisma.user.update({
+            where: { id: user.id },
+            data: updateData,
+          });
+        }
       }
-      return user;
+      return this.formatUser(user);
     }
-    
+
     // 创建新用户
-    const user = this.create({
-      name: userInfo?.name || `${provider}用户`,
+    const data: Prisma.UserCreateInput = {
       email: userInfo?.email,
+      name: userInfo?.name || `${provider}用户`,
+      timezone: 'Asia/Shanghai',
+      role: 'user',
+      membership: 'free',
+      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(userInfo?.name || provider)}&background=random`,
+    };
+
+    if (provider === 'google') {
+      data.googleId = socialId;
+    } else {
+      data.facebookId = socialId;
+    }
+
+    user = await this.prisma.user.create({
+      data,
     });
-    
-    // 绑定社交账号
-    this.socialToUser.set(key, user.id);
-    user.avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`;
-    
-    this.users.set(user.id, user);
-    return user;
+
+    return this.formatUser(user);
   }
 
   // 更新用户角色（管理员功能）
-  updateUserRole(userId: string, role: 'user' | 'admin'): UserProfile {
-    const user = this.findOne(userId);
-    user.role = role;
-    user.updatedAt = new Date().toISOString();
-    this.users.set(userId, user);
-    return user;
+  async updateUserRole(userId: string, role: 'user' | 'admin'): Promise<UserProfile> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { role },
+    });
+
+    return this.formatUser(user);
   }
 
   // 更新用户会员等级（管理员功能）
-  updateUserMembership(userId: string, membership: 'free' | 'premium' | 'vip'): UserProfile {
-    const user = this.findOne(userId);
-    user.membership = membership;
-    user.updatedAt = new Date().toISOString();
-    this.users.set(userId, user);
-    return user;
+  async updateUserMembership(userId: string, membership: 'free' | 'premium' | 'vip'): Promise<UserProfile> {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { membership },
+    });
+
+    return this.formatUser(user);
+  }
+
+  // 格式化用户数据（移除敏感信息）
+  private formatUser(user: any): UserProfile {
+    const { password, ...result } = user;
+    return {
+      ...result,
+      role: user.role as 'user' | 'admin',
+      membership: user.membership as 'free' | 'premium' | 'vip',
+      gender: user.gender as 'male' | 'female' | 'other' | undefined,
+    };
   }
 }

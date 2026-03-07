@@ -9,6 +9,9 @@
 PORT=3000
 NODE_ENV=production
 
+# JWT 密钥
+JWT_SECRET=your-super-secret-jwt-key
+
 # LLM API (用于 AI 对话和测字增强) - 使用 APIYi
 # 前往 https://docs.apiyi.com 获取 API Key
 LLM_API_KEY=your_apiyi_api_key_here

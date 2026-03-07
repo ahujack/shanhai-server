@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma.service';
 import axios from 'axios';
 
 export interface BaziChart {
@@ -44,7 +45,7 @@ export interface BaziChart {
 
 @Injectable()
 export class ChartService {
-  private charts: Map<string, BaziChart> = new Map();
+  constructor(private prisma: PrismaService) {}
   
   // 天干
   private gan = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'];
@@ -104,12 +105,79 @@ export class ChartService {
       suggestions,
     };
 
-    this.charts.set(userId, chart);
+    // 保存到数据库（使用 upsert，如果已存在则更新）
+    await this.prisma.baziChart.upsert({
+      where: { userId },
+      update: {
+        birthDate,
+        birthTime,
+        gender,
+        yearGanZhi: yearGZ,
+        monthGanZhi: monthGZ,
+        dayGanZhi: dayGZ,
+        hourGanZhi: hourGZ,
+        dayMaster,
+        sun: chart.sun,
+        moon: chart.moon,
+        wuxingStrength: JSON.stringify(wuxingStrength),
+        personalityTraits: JSON.stringify(personalityTraits),
+        fortuneSummary: JSON.stringify(fortuneSummary),
+        suggestions: JSON.stringify(suggestions),
+        updatedAt: new Date(),
+      },
+      create: {
+        userId,
+        birthDate,
+        birthTime,
+        gender,
+        yearGanZhi: yearGZ,
+        monthGanZhi: monthGZ,
+        dayGanZhi: dayGZ,
+        hourGanZhi: hourGZ,
+        dayMaster,
+        sun: chart.sun,
+        moon: chart.moon,
+        wuxingStrength: JSON.stringify(wuxingStrength),
+        personalityTraits: JSON.stringify(personalityTraits),
+        fortuneSummary: JSON.stringify(fortuneSummary),
+        suggestions: JSON.stringify(suggestions),
+      },
+    });
+
     return chart;
   }
   
-  findOne(userId: string): BaziChart | null {
-    return this.charts.get(userId) ?? null;
+  async findOne(userId: string): Promise<BaziChart | null> {
+    const chart = await this.prisma.baziChart.findUnique({
+      where: { userId },
+    });
+
+    if (!chart) {
+      return null;
+    }
+
+    return this.formatChart(chart);
+  }
+
+  // 格式化数据库中的图表数据
+  private formatChart(chart: any): BaziChart {
+    return {
+      userId: chart.userId,
+      birthDate: chart.birthDate,
+      birthTime: chart.birthTime,
+      gender: chart.gender as 'male' | 'female',
+      yearGanZhi: chart.yearGanZhi,
+      monthGanZhi: chart.monthGanZhi,
+      dayGanZhi: chart.dayGanZhi,
+      hourGanZhi: chart.hourGanZhi,
+      dayMaster: chart.dayMaster,
+      sun: chart.sun,
+      moon: chart.moon,
+      wuxingStrength: JSON.parse(chart.wuxingStrength),
+      personalityTraits: JSON.parse(chart.personalityTraits),
+      fortuneSummary: JSON.parse(chart.fortuneSummary),
+      suggestions: JSON.parse(chart.suggestions),
+    };
   }
   
   // 计算年柱
