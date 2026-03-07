@@ -519,8 +519,9 @@ export class ReadingService {
     const now = Date.now();
     const { original, changed, lines } = this.generateHexagram(now);
     
-    const originalInfo = this.hexagrams[original];
-    const changedInfo = this.hexagrams[changed];
+    // 获取卦名
+    const originalName = this.getHexagramName(original);
+    const changedName = this.getHexagramName(changed);
     
     const result: DivinationResult = {
       id: `reading_${now}`,
@@ -528,10 +529,10 @@ export class ReadingService {
       category: dto.category ?? 'general',
       
       hexagram: {
-        original,
-        originalName: originalInfo?.name ?? '未知',
-        changed,
-        changedName: changedInfo?.name ?? '未知',
+        original: String(original),
+        originalName,
+        changed: String(changed),
+        changedName,
         lines,
         yaoDescriptions: lines.map((l, i) => 
           `${['初', '二', '三', '四', '五', '上'][i]}：${this.getYaoDescription(l)}`
@@ -539,19 +540,19 @@ export class ReadingService {
       },
       
       interpretation: {
-        overall: originalInfo?.meaning ?? '卦象显示...',
+        overall: `${originalName}，象征着特定的意义和趋势。`,
         situation: this.analyzeSituation(original, changed),
-        guidance: originalInfo?.advice ?? '顺其自然，静待时机',
+        guidance: '保持内心平静，顺应变化，把握时机',
       },
       
       recommendations: this.generateRecommendations(original, changed, dto.category),
       
       timing: {
-        suitable: originalInfo?.timing ?? '时机成熟时自会有所显现',
+        suitable: '保持耐心，等待合适时机',
         caution: this.getCaution(original, changed),
       },
       
-      culturalSource: `出自《周易》六十四卦 ${originalInfo?.name ?? original} 卦`,
+      culturalSource: `出自《周易》六十四卦 ${originalName}`,
       
       metadata: {
         generatedAt: new Date().toISOString(),
@@ -563,7 +564,7 @@ export class ReadingService {
   }
 
   // 生成卦象
-  private generateHexagram(seed: number): { original: string; changed: string; lines: string[] } {
+  private generateHexagram(seed: number): { original: number; changed: number; lines: string[] } {
     const lines: string[] = [];
     
     // 用时间戳生成 6 爻
@@ -591,16 +592,36 @@ export class ReadingService {
     return { original, changed, lines };
   }
 
-  // 爻转换为卦
-  private linesToHexagram(binaryLines: string[]): string {
-    // 二进制转十六进制: 111111 (上九) -> 0 -> 乾
-    // 0=阴, 1=阳
-    const hexChars = '坤震坎艮巽离兑乾';
-    let index = 0;
-    for (let i = 0; i < 6; i++) {
-      if (binaryLines[i] === '1') index += Math.pow(2, 5 - i);
+  // 爻转换为卦 - 返回0-63的数字索引
+  private linesToHexagram(binaryLines: string[]): number {
+    let lower = 0, upper = 0;
+    for (let i = 0; i < 3; i++) {
+      if (binaryLines[i] === '1') lower += Math.pow(2, 2 - i);
     }
-    return hexChars[index];
+    for (let i = 3; i < 6; i++) {
+      if (binaryLines[i] === '1') upper += Math.pow(2, 5 - i);
+    }
+    return lower * 8 + upper;
+  }
+
+  // 获取64卦名称
+  private getHexagramName(index: number): string {
+    const names: Record<number, string> = {
+      0: '坤为地', 1: '地雷复', 2: '地水师', 3: '地山谦',
+      4: '地天泰', 5: '地火明夷', 6: '地泽临', 7: '地天决',
+      10: '雷地豫', 11: '震为雷', 12: '雷水解', 13: '雷山小过',
+      14: '雷天大壮', 15: '雷火丰', 16: '雷泽归妹', 17: '雷天夬',
+      20: '水地比', 21: '水雷屯', 22: '坎为水', 23: '水山蹇',
+      24: '水天需', 25: '水火既济', 26: '水泽节', 27: '水天讼',
+      30: '山地剥', 31: '山雷颐', 32: '山水蒙', 33: '艮为山',
+      34: '山天大畜', 35: '山火贲', 36: '山泽损', 37: '山天咸',
+      40: '天地否', 41: '天雷无妄', 42: '天水讼', 43: '天山遯',
+      44: '乾为天', 45: '天火同人', 46: '天泽履', 47: '天风姤',
+      50: '火地晋', 51: '火雷噬嗑', 52: '火水未济', 53: '火山旅',
+      54: '火天大有', 55: '离为火', 56: '火泽睽', 57: '火风鼎',
+      60: '泽地萃', 61: '泽雷随', 62: '泽水困', 63: '泽山咸',
+    };
+    return names[index] || `第${index}卦`;
   }
 
   // 获取爻描述
@@ -615,34 +636,33 @@ export class ReadingService {
   }
 
   // 分析形势
-  private analyzeSituation(original: string, changed: string): string {
+  private analyzeSituation(original: number, changed: number): string {
     if (original === changed) {
       return '当前处于稳定状态，暂无重大变化，需静待时机。';
     }
-    return `从 ${this.hexagrams[original]?.name ?? original} 转化为 ${this.hexagrams[changed]?.name ?? changed}，暗示事态正在发生转变。`;
+    return `从 ${this.getHexagramName(original)} 转化为 ${this.getHexagramName(changed)}，暗示事态正在发生转变。`;
   }
 
   // 获取注意事项
-  private getCaution(original: string, changed: string): string {
-    const cautions: Record<string, string> = {
-      '讼': '避免与人争执，诉讼之事需慎重',
-      '遯': '退避不是逃避，是蓄势待发',
-      '明夷': '此时宜韬光养晦，不可锋芒毕露',
-      '困': '坚守正道，耐心等待转机',
-      '剥': '防止损失扩大，保护根本为上',
+  private getCaution(original: number, changed: number): string {
+    const cautions: Record<number, string> = {
+      42: '避免与人争执，诉讼之事需慎重',
+      43: '退避不是逃避，是蓄势待发',
+      45: '此时宜韬光养晦，不可锋芒毕露',
+      62: '坚守正道，耐心等待转机',
+      30: '防止损失扩大，保护根本为上',
     };
     return cautions[original] ?? '顺势而为，切勿强求';
   }
 
   // 生成建议
-  private generateRecommendations(original: string, changed: string, category?: DivinationCategory): string[] {
+  private generateRecommendations(original: number, changed: number, category?: DivinationCategory): string[] {
     const recommendations: string[] = [];
     
     // 基于卦象的建议
-    const hex = this.hexagrams[original];
-    if (hex) {
-      recommendations.push(hex.advice);
-    }
+    const hexName = this.getHexagramName(original);
+    recommendations.push('保持积极心态，顺应时势而动');
+    recommendations.push('把握当下机会，谨慎决策');
     
     // 基于类别的建议
     if (category === 'career') {

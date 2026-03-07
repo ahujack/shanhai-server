@@ -37,6 +37,7 @@ export declare class ReadingService {
     }): Promise<DivinationResult>;
     private generateHexagram;
     private linesToHexagram;
+    private getHexagramName;
     private getYaoDescription;
     private analyzeSituation;
     private getCaution;
