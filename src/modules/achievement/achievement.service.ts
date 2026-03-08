@@ -138,12 +138,27 @@ export class AchievementService implements OnModuleInit {
       return null;
     }
     
+    return this.unlockAchievementById(userId, achievement.id);
+  }
+
+  /**
+   * 直接通过成就ID解锁
+   */
+  async unlockAchievementById(userId: string, achievementId: string): Promise<Achievement | null> {
+    const achievement = await this.prisma.achievement.findUnique({
+      where: { id: achievementId },
+    });
+    
+    if (!achievement) {
+      return null;
+    }
+    
     // 检查是否已解锁
     const existing = await this.prisma.userAchievement.findUnique({
       where: {
         userId_achievementId: {
           userId,
-          achievementId: achievement.id,
+          achievementId,
         },
       },
     });
@@ -156,12 +171,26 @@ export class AchievementService implements OnModuleInit {
     await this.prisma.userAchievement.create({
       data: {
         userId,
-        achievementId: achievement.id,
+        achievementId,
       },
     });
     
-    console.log(`用户 ${userId} 解锁成就: ${achievement.name}`);
     return achievement;
+  }
+
+  /**
+   * 直接通过成就code解锁
+   */
+  async unlockAchievementByCode(userId: string, code: string): Promise<Achievement | null> {
+    const achievement = await this.prisma.achievement.findUnique({
+      where: { code },
+    });
+    
+    if (!achievement) {
+      return null;
+    }
+    
+    return this.unlockAchievementById(userId, achievement.id);
   }
 
   /**

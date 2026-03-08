@@ -94,7 +94,7 @@ export class UserService {
     const userReferralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
 
     // 处理推荐关系
-    let referredBy = null;
+    let referredBy: string | null = null;
     if (referralCode) {
       // 查找推荐人
       const referrer = await this.prisma.user.findFirst({
@@ -123,14 +123,14 @@ export class UserService {
       try {
         // 给新用户50积分
         if (this.pointsService) {
-          await this.pointsService.addPoints(user.id, 50, 'referral_bonus', '新用户注册奖励');
+          await this.pointsService.awardPoints(user.id, 50, 'referral_bonus', '新用户注册奖励');
           // 给推荐人50积分
-          await this.pointsService.addPoints(referredBy, 50, 'referral_reward', '推荐好友奖励');
+          await this.pointsService.awardPoints(referredBy, 50, 'referral_reward', '推荐好友奖励');
         }
         // 解锁成就
         if (this.achievementService) {
-          await this.achievementService.unlockAchievement(user.id, 'login_1');
-          await this.achievementService.unlockAchievement(referredBy, 'invite_1');
+          await this.achievementService.unlockAchievementByCode(user.id, 'login_1');
+          await this.achievementService.unlockAchievementByCode(referredBy, 'invite_1');
         }
       } catch (e) {
         console.error('推荐奖励发放失败:', e);
@@ -139,10 +139,10 @@ export class UserService {
       // 新用户首次注册奖励
       try {
         if (this.pointsService) {
-          await this.pointsService.addPoints(user.id, 20, 'register_bonus', '新用户注册奖励');
+          await this.pointsService.awardPoints(user.id, 20, 'register_bonus', '新用户注册奖励');
         }
         if (this.achievementService) {
-          await this.achievementService.unlockAchievement(user.id, 'login_1');
+          await this.achievementService.unlockAchievementByCode(user.id, 'login_1');
         }
       } catch (e) {
         console.error('注册奖励发放失败:', e);
