@@ -92,7 +92,7 @@ export class AuthController {
   @Post('register')
   @HttpCode(HttpStatus.OK)
   async register(@Body() dto: RegisterDto) {
-    const { email, password, code, name } = dto;
+    const { email, password, code, name, referralCode } = dto;
     
     // 验证密码长度
     if (password.length < 6) {
@@ -110,8 +110,8 @@ export class AuthController {
       return { success: false, message: '该邮箱已注册' };
     }
 
-    // 创建用户
-    const user = await this.userService.registerWithEmail(email, password, name || email.split('@')[0]);
+    // 创建用户（带推荐码）
+    const user = await this.userService.registerWithEmail(email, password, name || email.split('@')[0], referralCode);
 
     // 生成 JWT Token
     const payload = { sub: user.id, email: user.email };

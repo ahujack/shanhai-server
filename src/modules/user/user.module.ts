@@ -1,9 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { UserController } from './user.controller';
 import { AuthController } from './auth.controller';
 import { UserService } from './user.service';
 import { MailModule } from '../mail/mail.module';
+import { PointsModule } from '../points/points.module';
+import { AchievementModule } from '../achievement/achievement.module';
 
 @Module({
   imports: [
@@ -13,6 +15,8 @@ import { MailModule } from '../mail/mail.module';
       signOptions: { expiresIn: '7d' },
     }),
     MailModule,
+    forwardRef(() => PointsModule),
+    forwardRef(() => AchievementModule),
   ],
   controllers: [UserController, AuthController],
   providers: [UserService],

@@ -30,6 +30,10 @@ model User {
   googleId      String?   @unique
   facebookId    String?   @unique
   
+  // 推荐系统
+  referredBy    String?   // 推荐人用户ID
+  referralCode  String?   @unique // 自己的推荐码
+  
   // 时间戳
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

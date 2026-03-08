@@ -45,6 +45,11 @@ export class AchievementService implements OnModuleInit {
       { code: 'login_7', name: '一周之约', description: '连续登录7天', icon: '💫', category: 'login', requirement: 7, points: 70 },
       { code: 'login_30', name: '月度签到', description: '连续登录30天', icon: '🏆', category: 'login', requirement: 30, points: 300 },
       
+      // 推荐成就
+      { code: 'invite_1', name: '引路人', description: '成功邀请1位好友', icon: '🤝', category: 'invite', requirement: 1, points: 50 },
+      { code: 'invite_5', name: '推广达人', description: '成功邀请5位好友', icon: '🌟', category: 'invite', requirement: 5, points: 200 },
+      { code: 'invite_10', name: '金牌推手', description: '成功邀请10位好友', icon: '👑', category: 'invite', requirement: 10, points: 500 },
+      
       // 抽签成就
       { code: 'draw_1', name: '初试手气', description: '完成首次抽签', icon: '🎯', category: 'draw', requirement: 1, points: 10 },
       { code: 'draw_10', name: '抽签达人', description: '累计抽签10次', icon: '🎰', category: 'draw', requirement: 10, points: 50 },

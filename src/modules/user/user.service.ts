@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { MailService } from '../mail/mail.service';
+import { PointsService } from '../points/points.service';
+import { AchievementService } from '../achievement/achievement.service';
 import * as bcrypt from 'bcryptjs';
 import { Prisma } from '@prisma/client';
 
@@ -20,6 +22,8 @@ export interface UserProfile {
   membership: 'free' | 'premium' | 'vip';
   googleId?: string;
   facebookId?: string;
+  referralCode?: string; // 推荐码
+  referredBy?: string;   // 推荐人ID
   createdAt: Date;
   updatedAt: Date;
 }
@@ -52,6 +56,10 @@ export class UserService {
   constructor(
     private prisma: PrismaService,
     private mailService?: MailService,
+    @Inject(forwardRef(() => PointsService))
+    private pointsService?: PointsService,
+    @Inject(forwardRef(() => AchievementService))
+    private achievementService?: AchievementService,
   ) {}
 
   // 哈希密码（使用 bcrypt）
@@ -73,13 +81,28 @@ export class UserService {
   }
 
   // 注册新用户（需要验证码验证）
-  async registerWithEmail(email: string, password: string, name: string): Promise<UserProfile> {
+  async registerWithEmail(email: string, password: string, name: string, referralCode?: string): Promise<UserProfile> {
     // 检查邮箱是否已存在
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
     });
     if (existingUser) {
       throw new BadRequestException('该邮箱已注册');
+    }
+
+    // 生成随机推荐码
+    const userReferralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+
+    // 处理推荐关系
+    let referredBy = null;
+    if (referralCode) {
+      // 查找推荐人
+      const referrer = await this.prisma.user.findFirst({
+        where: { referralCode },
+      });
+      if (referrer) {
+        referredBy = referrer.id;
+      }
     }
 
     const user = await this.prisma.user.create({
@@ -90,8 +113,41 @@ export class UserService {
         timezone: 'Asia/Shanghai',
         role: 'user',
         membership: 'free',
+        referralCode: userReferralCode,
+        referredBy,
       },
     });
+
+    // 处理推荐奖励
+    if (referredBy) {
+      try {
+        // 给新用户50积分
+        if (this.pointsService) {
+          await this.pointsService.addPoints(user.id, 50, 'referral_bonus', '新用户注册奖励');
+          // 给推荐人50积分
+          await this.pointsService.addPoints(referredBy, 50, 'referral_reward', '推荐好友奖励');
+        }
+        // 解锁成就
+        if (this.achievementService) {
+          await this.achievementService.unlockAchievement(user.id, 'login_1');
+          await this.achievementService.unlockAchievement(referredBy, 'invite_1');
+        }
+      } catch (e) {
+        console.error('推荐奖励发放失败:', e);
+      }
+    } else {
+      // 新用户首次注册奖励
+      try {
+        if (this.pointsService) {
+          await this.pointsService.addPoints(user.id, 20, 'register_bonus', '新用户注册奖励');
+        }
+        if (this.achievementService) {
+          await this.achievementService.unlockAchievement(user.id, 'login_1');
+        }
+      } catch (e) {
+        console.error('注册奖励发放失败:', e);
+      }
+    }
 
     return this.formatUser(user);
   }

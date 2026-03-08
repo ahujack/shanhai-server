@@ -25,6 +25,10 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsString()
+  referralCode?: string; // 推荐码
 }
 
 export class LoginDto {

@@ -81,14 +81,17 @@ ALTER TABLE "PointRecord" ADD CONSTRAINT "PointRecord_userId_fkey"
     FOREIGN KEY ("userId") REFERENCES "User"(id) ON DELETE CASCADE;
 
 -- Seed initial achievements (idempotent)
-INSERT INTO "Achievement" (code, name, description, category, requirement, points) VALUES
-('login_1', '初次登录', '完成首次签到', 'login', 1, 10),
-('login_3', '连续登录', '连续签到3天', 'login', 3, 30),
-('login_7', '一周签到', '连续签到7天', 'login', 7, 70),
-('login_30', '月度签到', '连续签到30天', 'login', 30, 300),
-('first_draw', '初次占卜', '完成首次占卜', 'draw', 1, 20),
-('draw_10', '占卜达人', '完成10次占卜', 'draw', 10, 100),
-('first_chart', '命盘生成', '生成个人命盘', 'chart', 1, 50),
-('chat_1', '开始对话', '进行首次AI对话', 'chat', 1, 10),
-('chat_100', '聊天大师', '进行100次AI对话', 'chat', 100, 200)
+INSERT INTO "Achievement" (code, name, description, icon, category, requirement, points) VALUES
+('login_1', '初次登录', '首次登录山海灵境', '🌟', 'login', 1, 10),
+('login_3', '连续登录', '连续签到3天', '🔥', 'login', 3, 30),
+('login_7', '一周签到', '连续签到7天', '💫', 'login', 7, 70),
+('login_30', '月度签到', '连续签到30天', '🏆', 'login', 30, 300),
+('invite_1', '引路人', '成功邀请1位好友', '🤝', 'invite', 1, 50),
+('invite_5', '推广达人', '成功邀请5位好友', '🌟', 'invite', 5, 200),
+('invite_10', '金牌推手', '成功邀请10位好友', '👑', 'invite', 10, 500),
+('first_draw', '初次占卜', '完成首次占卜', '🎯', 'draw', 1, 20),
+('draw_10', '占卜达人', '完成10次占卜', '🎰', 'draw', 10, 100),
+('first_chart', '命盘生成', '生成个人命盘', '📊', 'chart', 1, 50),
+('chat_1', '开始对话', '进行首次AI对话', '💬', 'chat', 1, 10),
+('chat_100', '聊天大师', '进行100次AI对话', '🧙', 'chat', 100, 200)
 ON CONFLICT (code) DO NOTHING;
