@@ -22,6 +22,7 @@ const zi_module_1 = require("./modules/zi/zi.module");
 const checkin_module_1 = require("./modules/checkin/checkin.module");
 const achievement_module_1 = require("./modules/achievement/achievement.module");
 const points_module_1 = require("./modules/points/points.module");
+const payment_module_1 = require("./modules/payment/payment.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -46,6 +47,7 @@ exports.AppModule = AppModule = __decorate([
             checkin_module_1.CheckInModule,
             achievement_module_1.AchievementModule,
             points_module_1.PointsModule,
+            payment_module_1.PaymentModule,
         ],
     })
 ], AppModule);

@@ -44,6 +44,7 @@ model User {
   achievements  UserAchievement[]
   userPoints    UserPoints?
   pointRecords  PointRecord[]
+  payments     Payment[]
 }
 
 // 聊天消息模型
@@ -254,10 +255,80 @@ model PointRecord {
   userId          String
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   points          Int       // 积分变动数量（正数为增加，负数为消耗）
-  type            String    // 积分类型：checkin, reward, draw, exchange, bonus 等
+  type            String    // 积分类型：checkin, reward, draw, exchange, bonus, recharge 等
   description     String?  // 描述
   createdAt       DateTime  @default(now())
   
   @@index([userId])
+  @@index([createdAt])
+}
+
+// 支付产品/套餐模型
+model PaymentProduct {
+  id              String    @id @default(uuid())
+  code            String    @unique // 产品代码，如 "points_100", "vip_monthly"
+  name            String    // 产品名称
+  description     String?   // 产品描述
+  
+  // 产品类型：points - 积分包, subscription - 订阅
+  type            String    @default("points")
+  
+  // 金额（美元）
+  price           Float
+  
+  // 获得积分数量（type=points时）
+  points          Int       @default(0)
+  
+  // 订阅相关（type=subscription时）
+  periodDays      Int?      // 订阅天数
+  features        String?   // 功能列表（JSON数组）
+  
+  // Stripe相关
+  stripePriceId  String?   // Stripe Price ID
+  
+  // 状态
+  isActive        Boolean   @default(true)
+  sortOrder       Int       @default(0)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // 关联
+  payments        Payment[]
+}
+
+// 支付记录模型
+model Payment {
+  id              String    @id @default(uuid())
+  
+  // 用户
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // 产品
+  productId       String
+  product         PaymentProduct @relation(fields: [productId], references: [id])
+  
+  // 金额
+  amount          Float     // 支付金额（美元）
+  currency        String    @default("usd")
+  
+  // 积分
+  points          Int       // 获得的积分
+  
+  // Stripe相关
+  stripePaymentId String?   // Stripe Payment Intent ID
+  stripeSessionId String?   // Stripe Checkout Session ID
+  status          String    @default("pending") // pending, completed, failed, refunded
+  
+  // 支付方式
+  paymentMethod   String?   // payment_method 类型
+  
+  // 时间
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime? // 支付完成时间
+  
+  @@index([userId])
+  @@index([status])
   @@index([createdAt])
 }

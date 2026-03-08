@@ -13,6 +13,7 @@ import { ZiModule } from './modules/zi/zi.module';
 import { CheckInModule } from './modules/checkin/checkin.module';
 import { AchievementModule } from './modules/achievement/achievement.module';
 import { PointsModule } from './modules/points/points.module';
+import { PaymentModule } from './modules/payment/payment.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { PointsModule } from './modules/points/points.module';
     CheckInModule,
     AchievementModule,
     PointsModule,
+    PaymentModule,
   ],
 })
 export class AppModule {}
