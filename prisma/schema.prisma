@@ -41,6 +41,9 @@ model User {
   ziAnalyses   ZiAnalysis[]
   readings     Reading[]
   checkIns     CheckIn[]
+  achievements  UserAchievement[]
+  userPoints    UserPoints?
+  pointRecords  PointRecord[]
 }
 
 // 聊天消息模型
@@ -201,4 +204,60 @@ model CheckIn {
 
   @@unique([userId, date]) // 每个用户每天只能签到一次
   @@index([userId])
+}
+
+// 成就定义模型
+model Achievement {
+  id              String    @id @default(uuid())
+  code            String    @unique // 成就代码，如 "login_1", "login_3", "login_7", "first_draw" 等
+  name            String    // 成就名称
+  description     String    // 成就描述
+  icon            String?   // 成就图标
+  category        String    // 成就分类：login, draw, chart, chat, vip 等
+  requirement     Int       @default(1) // 达成条件（数值）
+  points          Int       @default(0) // 成就奖励积分
+  createdAt       DateTime  @default(now())
+  
+  // 关联
+  userAchievements UserAchievement[]
+  
+  @@index([category])
+}
+
+// 用户成就关联模型
+model UserAchievement {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId   String
+  achievement     Achievement @relation(fields: [achievementId], references: [id])
+  unlockedAt      DateTime  @default(now()) // 解锁时间
+  
+  @@unique([userId, achievementId]) // 每个用户每个成就只能解锁一次
+  @@index([userId])
+}
+
+// 用户积分模型
+model UserPoints {
+  id              String    @id @default(uuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalPoints     Int       @default(0) // 总积分
+  availablePoints Int       @default(0) // 可用积分
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// 积分记录模型
+model PointRecord {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  points          Int       // 积分变动数量（正数为增加，负数为消耗）
+  type            String    // 积分类型：checkin, reward, draw, exchange, bonus 等
+  description     String?  // 描述
+  createdAt       DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([createdAt])
 }

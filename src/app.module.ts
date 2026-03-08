@@ -11,6 +11,8 @@ import { FortuneModule } from './modules/fortune/fortune.module';
 import { MeditationModule } from './modules/meditation/meditation.module';
 import { ZiModule } from './modules/zi/zi.module';
 import { CheckInModule } from './modules/checkin/checkin.module';
+import { AchievementModule } from './modules/achievement/achievement.module';
+import { PointsModule } from './modules/points/points.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { CheckInModule } from './modules/checkin/checkin.module';
     MeditationModule,
     ZiModule,
     CheckInModule,
+    AchievementModule,
+    PointsModule,
   ],
 })
 export class AppModule {}

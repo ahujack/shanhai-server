@@ -1,5 +1,6 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
+import { AchievementService } from '../achievement/achievement.service';
 
 export interface CheckInResult {
   success: boolean;
@@ -8,6 +9,11 @@ export interface CheckInResult {
   points: number;
   reward?: string;
   isFirstCheckIn?: boolean;
+  unlockedAchievement?: {
+    name: string;
+    description: string;
+    icon: string;
+  } | null;
 }
 
 export interface CheckInStatus {
@@ -19,7 +25,11 @@ export interface CheckInStatus {
 
 @Injectable()
 export class CheckInService implements OnModuleInit {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => AchievementService))
+    private achievementService?: AchievementService,
+  ) {}
 
   async onModuleInit() {
     console.log('📝 CheckIn Service 已初始化');
@@ -95,12 +105,86 @@ export class CheckInService implements OnModuleInit {
       },
     });
 
+    // 创建或更新用户积分
+    let userPoints = await this.prisma.userPoints.findUnique({
+      where: { userId },
+    });
+    
+    if (!userPoints) {
+      userPoints = await this.prisma.userPoints.create({
+        data: {
+          userId,
+          totalPoints: points,
+          availablePoints: points,
+        },
+      });
+    } else {
+      userPoints = await this.prisma.userPoints.update({
+        where: { userId },
+        data: {
+          totalPoints: { increment: points },
+          availablePoints: { increment: points },
+        },
+      });
+    }
+
+    // 记录积分变动
+    await this.prisma.pointRecord.create({
+      data: {
+        userId,
+        points,
+        type: 'checkin',
+        description: `签到奖励${streak > 1 ? `（连续${streak}天）` : ''}`,
+      },
+    });
+
+    // 检查并解锁成就
+    let unlockedAchievement: {
+      name: string;
+      description: string;
+      icon: string;
+    } | null = null;
+    if (this.achievementService) {
+      const achievement = await this.achievementService.checkLoginAchievements(userId, streak);
+      if (achievement) {
+        // 奖励成就积分
+        if (achievement.points > 0) {
+          await this.prisma.userPoints.update({
+            where: { userId },
+            data: {
+              totalPoints: { increment: achievement.points },
+              availablePoints: { increment: achievement.points },
+            },
+          });
+          
+          await this.prisma.pointRecord.create({
+            data: {
+              userId,
+              points: achievement.points,
+              type: 'reward',
+              description: `成就奖励：${achievement.name}`,
+            },
+          });
+        }
+        
+        unlockedAchievement = {
+          name: achievement.name,
+          description: achievement.description,
+          icon: achievement.icon || '🏆',
+        };
+      }
+    }
+
+    const isFirstCheckIn = streak === 1;
+
     return {
       success: true,
       message: streak === 1 ? '签到成功，欢迎回来！' : `已连续签到 ${streak} 天`,
       streak,
       points,
       reward: reward || undefined,
+      isFirstCheckIn,
+      ...(unlockedAchievement ? { unlockedAchievement } : {}),
     };
   }
 
