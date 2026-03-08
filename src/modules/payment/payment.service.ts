@@ -1,25 +1,52 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { PointsService } from '../points/points.service';
+import Stripe from 'stripe';
 
 @Injectable()
 export class PaymentService implements OnModuleInit {
+  private stripe: Stripe | null = null;
+
   constructor(
     private prisma: PrismaService,
     private pointsService: PointsService,
   ) {}
 
   async onModuleInit() {
+    // 初始化 Stripe
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    if (stripeKey) {
+      this.stripe = new Stripe(stripeKey);
+      console.log('Stripe initialized successfully');
+    } else {
+      console.log('Stripe not configured, using mock payment');
+    }
+
     // 初始化支付产品
     await this.seedPaymentProducts();
   }
 
+  // 检查 Stripe 是否可用
+  isStripeConfigured(): boolean {
+    return this.stripe !== null;
+  }
+
   // 获取所有可用的支付产品
   async getPaymentProducts() {
-    return this.prisma.paymentProduct.findMany({
+    const products = await this.prisma.paymentProduct.findMany({
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
     });
+    
+    // 如果 Stripe 未配置，返回模拟数据
+    if (!this.stripe) {
+      return products.map(p => ({
+        ...p,
+        stripePriceId: null,
+      }));
+    }
+    
+    return products;
   }
 
   // 获取单个产品详情
@@ -47,10 +74,6 @@ export class PaymentService implements OnModuleInit {
       throw new Error('User not found');
     }
 
-    // 这里需要集成 Stripe
-    // 由于 Stripe 需要服务端配置，这里返回一个模拟的 session
-    // 实际使用时需要安装 stripe 包并配置
-    
     // 创建支付记录
     const payment = await this.prisma.payment.create({
       data: {
@@ -62,17 +85,108 @@ export class PaymentService implements OnModuleInit {
       },
     });
 
+    // 如果 Stripe 未配置，返回模拟数据
+    if (!this.stripe) {
+      return {
+        paymentId: payment.id,
+        sessionId: `mock_session_${payment.id}`,
+        url: `${cancelUrl}?paymentId=${payment.id}&mock=true`,
+        mock: true,
+        message: 'Stripe not configured, this is a mock payment',
+      };
+    }
+
+    // 构建 Stripe Checkout Session
+    const sessionParams: Stripe.Checkout.SessionCreateParams = {
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: product.name,
+              description: product.description || undefined,
+            },
+            unit_amount: Math.round(product.price * 100), // Stripe 使用分
+          },
+          quantity: 1,
+        },
+      ],
+      mode: product.type === 'subscription' ? 'subscription' : 'payment',
+      success_url: successUrl.replace('{CHECKOUT_SESSION_ID}', '{SESSION_ID}'),
+      cancel_url: cancelUrl,
+      metadata: {
+        paymentId: payment.id,
+        userId: userId,
+        productId: productId,
+      },
+      // 为订阅添加客户邮箱
+      customer_email: user.email,
+    };
+
+    const session = await this.stripe.checkout.sessions.create(sessionParams);
+
+    // 更新支付记录的 Stripe Session ID
+    await this.prisma.payment.update({
+      where: { id: payment.id },
+      data: { stripeSessionId: session.id },
+    });
+
     return {
       paymentId: payment.id,
-      sessionId: `session_${payment.id}`,
-      url: `${cancelUrl}?paymentId=${payment.id}`,
-      // 实际 Stripe checkout URL（需要配置 Stripe）
-      // checkoutUrl: 'https://checkout.stripe.com/...',
+      sessionId: session.id,
+      url: session.url,
     };
   }
 
   // 处理支付回调（Stripe Webhook）
-  async handlePaymentCallback(paymentId: string, stripePaymentId: string, status: string) {
+  async handleWebhook(body: any, signature: string) {
+    if (!this.stripe) {
+      throw new Error('Stripe not configured');
+    }
+
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      throw new Error('Stripe webhook secret not configured');
+    }
+
+    let event: Stripe.Event;
+
+    try {
+      event = this.stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    } catch (err) {
+      throw new Error(`Webhook signature verification failed: ${err.message}`);
+    }
+
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const paymentId = session.metadata?.paymentId;
+        
+        if (paymentId) {
+          await this.processPaymentSuccess(paymentId, session.id, 'completed');
+        }
+        break;
+      }
+      
+      case 'payment_intent.succeeded': {
+        const paymentIntent = event.data.object as Stripe.PaymentIntent;
+        // 可以通过 paymentIntent.metadata 找到对应的 payment 记录
+        break;
+      }
+      
+      case 'payment_intent.payment_failed': {
+        const paymentIntent = event.data.object as Stripe.PaymentIntent;
+        // 处理支付失败
+        break;
+      }
+    }
+
+    return { received: true };
+  }
+
+  // 处理支付成功
+  async processPaymentSuccess(paymentId: string, stripePaymentId?: string, status?: string) {
     const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
       include: { product: true },
@@ -82,18 +196,23 @@ export class PaymentService implements OnModuleInit {
       throw new Error('Payment not found');
     }
 
+    // 如果已经处理过，跳过
+    if (payment.status === 'completed') {
+      return payment;
+    }
+
     // 更新支付状态
     const updatedPayment = await this.prisma.payment.update({
       where: { id: paymentId },
       data: {
         stripePaymentId,
-        status: status === 'succeeded' ? 'completed' : 'failed',
-        completedAt: status === 'succeeded' ? new Date() : null,
+        status: 'completed',
+        completedAt: new Date(),
       },
     });
 
-    // 如果支付成功，添加积分
-    if (status === 'succeeded' && payment.points > 0) {
+    // 1. 如果是积分产品，添加积分
+    if (payment.points > 0) {
       await this.pointsService.awardPoints(
         payment.userId,
         payment.points,
@@ -102,7 +221,27 @@ export class PaymentService implements OnModuleInit {
       );
     }
 
+    // 2. 如果是订阅产品，更新用户会员状态
+    if (payment.product.type === 'subscription') {
+      const periodDays = payment.product.periodDays || 30;
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + periodDays);
+
+      // 更新用户会员状态
+      await this.prisma.user.update({
+        where: { id: payment.userId },
+        data: {
+          membership: payment.product.code.includes('vip') ? 'vip' : 'premium',
+        },
+      });
+    }
+
     return updatedPayment;
+  }
+
+  // 模拟支付成功（用于测试）
+  async mockPaymentSuccess(paymentId: string) {
+    return this.processPaymentSuccess(paymentId, `mock_${paymentId}`, 'completed');
   }
 
   // 获取用户支付历史

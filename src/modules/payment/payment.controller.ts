@@ -1,10 +1,18 @@
-import { Controller, Get, Post, Body, Param, Query, Req, UseGuards, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('payment')
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
+
+  // 获取 Stripe 配置状态
+  @Get('status')
+  getPaymentStatus() {
+    return {
+      stripeConfigured: this.paymentService.isStripeConfigured(),
+    };
+  }
 
   // 获取所有可用的支付产品
   @Get('products')
@@ -43,33 +51,31 @@ export class PaymentController {
 
   // Stripe Webhook 回调
   @Post('webhook')
-  async handleWebhook(
-    @Body() body: any,
-    @Headers('stripe-signature') signature: string,
-  ) {
-    // 这里需要验证 Stripe webhook 签名
-    // 实际使用时需要配置 Stripe webhook secret
+  async handleWebhook(@Req() req: any) {
+    const signature = req.headers['stripe-signature'];
+    const rawBody = req.rawBody;
     
-    const event = body;
-    
-    switch (event.type) {
-      case 'checkout.session.completed':
-        const session = event.data.object;
-        // 处理支付完成
-        // 需要从 session 中获取 paymentId
-        // 这里简化处理
-        break;
-      case 'payment_intent.succeeded':
-        const paymentIntent = event.data.object;
-        // 处理支付成功
-        break;
-      case 'payment_intent.payment_failed':
-        const failedPayment = event.data.object;
-        // 处理支付失败
-        break;
+    if (!rawBody) {
+      return { received: true, message: 'No raw body' };
     }
-    
-    return { received: true };
+
+    try {
+      return await this.paymentService.handleWebhook(rawBody, signature);
+    } catch (error) {
+      console.error('Webhook error:', error.message);
+      return { received: false, error: error.message };
+    }
+  }
+
+  // 模拟支付成功（仅用于测试）
+  @Post('mock-payment/:paymentId')
+  async mockPayment(@Param('paymentId') paymentId: string) {
+    try {
+      const result = await this.paymentService.mockPaymentSuccess(paymentId);
+      return { success: true, payment: result };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   }
 
   // 获取用户支付历史

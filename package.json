@@ -40,7 +40,8 @@
     "rxjs": "^7.8.1",
     "sharp": "^0.34.5",
     "smtp-server": "^3.18.1",
-    "socks": "^2.8.7"
+    "socks": "^2.8.7",
+    "stripe": "^20.4.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
