@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, Req, UseGuards, Headers } fr
 import { PaymentService } from './payment.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
-@Controller('api/payment')
+@Controller('payment')
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 
