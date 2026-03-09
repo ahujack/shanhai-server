@@ -4,6 +4,8 @@ import { PointsService } from '../points/points.service';
 import Stripe from 'stripe';
 import axios from 'axios';
 
+// Creem 支付服务 - 版本 2.0 (硬编码 Product ID)
+
 @Injectable()
 export class PaymentService implements OnModuleInit {
   private stripe: Stripe | null = null;
