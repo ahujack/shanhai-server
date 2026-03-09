@@ -106,9 +106,4 @@ export class PaymentController {
     );
   }
 
-  // 更新产品 Creem Price ID（临时管理端点）
-  @Post('admin/update-products')
-  async updateProductsCreemPriceId() {
-    return this.paymentService.updateProductsCreemPriceId();
-  }
 }
