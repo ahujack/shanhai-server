@@ -429,7 +429,7 @@ export class PaymentService implements OnModuleInit {
       { code: 'vip_yearly', creemPriceId: 'prod_2ZTZ5wbQQz0QUhxr1saAB7' },
     ];
 
-    const results = [];
+    const results: any[] = [];
     for (const update of updates) {
       const product = await this.prisma.paymentProduct.update({
         where: { code: update.code },
