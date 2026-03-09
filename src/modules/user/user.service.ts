@@ -47,6 +47,17 @@ interface VerificationCode {
 export class UserService {
   private verificationCodes: Map<string, VerificationCode> = new Map();
 
+  // 中国传统特色头像 - 使用Emoji作为头像
+  private readonly traditionalAvatars = [
+    '🐲', '🦊', '🐉', '🐺', '🦁', '🐻',
+    '🐯', '🦅', '🦄', '🐢', '🦉', '🦋',
+    '🐍', '🐉', '🦄', '🐢', '🦅', '🦉',
+    '⚜️', '🧿', '🔮', '🕯️', '📿', '🏮',
+    '🌙', '⭐', '☯️', '🎋', '🎏', '🧧',
+    '🐉', '🦁', '🐯', '🦅', '🐺', '🦊',
+    '🐍', '🐢', '🦄', '🐉', '🦅', '🦉',
+  ];
+
   // 验证码有效期：5分钟
   private readonly CODE_EXPIRE_TIME = 5 * 60 * 1000;
 
@@ -110,6 +121,7 @@ export class UserService {
         email,
         name: name || email.split('@')[0],
         password: await this.hashPassword(password),
+        avatar: this.getRandomAvatar(), // 随机分配中国传统特色头像
         timezone: 'Asia/Shanghai',
         role: 'user',
         membership: 'free',
@@ -256,6 +268,12 @@ export class UserService {
     });
   }
 
+  // 获取随机中国传统特色头像
+  private getRandomAvatar(): string {
+    const index = Math.floor(Math.random() * this.traditionalAvatars.length);
+    return this.traditionalAvatars[index];
+  }
+
   // 存储验证码
   storeCode(identifier: string, code: string): void {
     this.verificationCodes.set(identifier, {
@@ -346,10 +364,10 @@ export class UserService {
     const data: Prisma.UserCreateInput = {
       email: userInfo?.email || `${socialId}@${provider}.com`,
       name: userInfo?.name || `${provider}用户`,
+      avatar: this.getRandomAvatar(), // 随机分配中国传统特色头像
       timezone: 'Asia/Shanghai',
       role: 'user',
       membership: 'free',
-      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(userInfo?.name || provider)}&background=random`,
     };
 
     if (provider === 'google') {
