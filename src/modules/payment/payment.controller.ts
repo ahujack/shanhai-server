@@ -6,11 +6,12 @@ import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 
-  // 获取 Stripe 配置状态
+  // 获取支付配置状态
   @Get('status')
   getPaymentStatus() {
     return {
       stripeConfigured: this.paymentService.isStripeConfigured(),
+      creemConfigured: this.paymentService.isCreemConfigured(),
     };
   }
 
@@ -63,6 +64,17 @@ export class PaymentController {
       return await this.paymentService.handleWebhook(rawBody, signature);
     } catch (error) {
       console.error('Webhook error:', error.message);
+      return { received: false, error: error.message };
+    }
+  }
+
+  // Creem Webhook 回调
+  @Post('webhook/creem')
+  async handleCreemWebhook(@Body() body: any) {
+    try {
+      return await this.paymentService.handleCreemWebhook(body);
+    } catch (error) {
+      console.error('Creem Webhook error:', error.message);
       return { received: false, error: error.message };
     }
   }

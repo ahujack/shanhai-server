@@ -290,6 +290,9 @@ model PaymentProduct {
   // Stripe相关
   stripePriceId  String?   // Stripe Price ID
   
+  // Creem相关
+  creemPriceId   String?   // Creem Price ID
+  
   // 状态
   isActive        Boolean   @default(true)
   sortOrder       Int       @default(0)
@@ -323,6 +326,10 @@ model Payment {
   // Stripe相关
   stripePaymentId String?   // Stripe Payment Intent ID
   stripeSessionId String?   // Stripe Checkout Session ID
+  
+  // Creem相关
+  creemCheckoutId String?   // Creem Checkout ID
+  
   status          String    @default("pending") // pending, completed, failed, refunded
   
   // 支付方式

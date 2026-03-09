@@ -2,10 +2,13 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { PointsService } from '../points/points.service';
 import Stripe from 'stripe';
+import axios from 'axios';
 
 @Injectable()
 export class PaymentService implements OnModuleInit {
   private stripe: Stripe | null = null;
+  private creemApiKey: string | null = null;
+  private creemApiUrl = 'https://api.creem.io/v1';
 
   constructor(
     private prisma: PrismaService,
@@ -22,6 +25,14 @@ export class PaymentService implements OnModuleInit {
       console.log('Stripe not configured, using mock payment');
     }
 
+    // 初始化 Creem
+    this.creemApiKey = process.env.CREEM_API_KEY || null;
+    if (this.creemApiKey) {
+      console.log('Creem initialized successfully');
+    } else {
+      console.log('Creem not configured');
+    }
+
     // 初始化支付产品
     await this.seedPaymentProducts();
   }
@@ -29,6 +40,11 @@ export class PaymentService implements OnModuleInit {
   // 检查 Stripe 是否可用
   isStripeConfigured(): boolean {
     return this.stripe !== null;
+  }
+
+  // 检查 Creem 是否可用
+  isCreemConfigured(): boolean {
+    return this.creemApiKey !== null;
   }
 
   // 获取所有可用的支付产品
@@ -85,6 +101,11 @@ export class PaymentService implements OnModuleInit {
       },
     });
 
+    // 如果 Creem 已配置，优先使用 Creem
+    if (this.creemApiKey && product.creemPriceId) {
+      return this.createCreemCheckout(userId, payment.id, product.creemPriceId, successUrl, cancelUrl);
+    }
+
     // 如果 Stripe 未配置，返回模拟数据
     if (!this.stripe) {
       return {
@@ -137,6 +158,70 @@ export class PaymentService implements OnModuleInit {
       sessionId: session.id,
       url: session.url,
     };
+  }
+
+  // 创建 Creem Checkout
+  private async createCreemCheckout(
+    userId: string,
+    paymentId: string,
+    creemPriceId: string,
+    successUrl: string,
+    cancelUrl: string,
+  ) {
+    try {
+      const response = await axios.post(
+        `${this.creemApiUrl}/checkouts`,
+        {
+          price_id: creemPriceId,
+          success_url: `${successUrl}?paymentId=${paymentId}`,
+          cancel_url: `${cancelUrl}?paymentId=${paymentId}`,
+          metadata: {
+            paymentId,
+            userId,
+          },
+        },
+        {
+          headers: {
+            'x-api-key': this.creemApiKey,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      const checkout = response.data;
+
+      // 更新支付记录的 Creem Checkout ID
+      await this.prisma.payment.update({
+        where: { id: paymentId },
+        data: { creemCheckoutId: checkout.id },
+      });
+
+      return {
+        paymentId,
+        sessionId: checkout.id,
+        url: checkout.url,
+        provider: 'creem',
+      };
+    } catch (error) {
+      console.error('Creem checkout error:', error.response?.data || error.message);
+      throw new Error(`Creem checkout failed: ${error.message}`);
+    }
+  }
+
+  // 处理 Creem Webhook
+  async handleCreemWebhook(body: any) {
+    const event = body;
+    
+    if (event.event === 'checkout.completed') {
+      const checkout = event.data;
+      const paymentId = checkout.metadata?.paymentId;
+      
+      if (paymentId) {
+        await this.processPaymentSuccess(paymentId, checkout.id, 'completed');
+      }
+    }
+    
+    return { received: true };
   }
 
   // 处理支付回调（Stripe Webhook）
@@ -309,6 +394,7 @@ export class PaymentService implements OnModuleInit {
         points: 0,
         periodDays: 30,
         features: JSON.stringify(['无限AI对话', '高级命盘解读', '优先客服', '专属主题']),
+        creemPriceId: 'prod_5na6qH1CfbI4w7Rump4qXA',
         sortOrder: 10,
       },
       {
@@ -320,6 +406,7 @@ export class PaymentService implements OnModuleInit {
         points: 0,
         periodDays: 365,
         features: JSON.stringify(['无限AI对话', '高级命盘解读', '优先客服', '专属主题', '年费专属优惠']),
+        creemPriceId: 'prod_2ZTZ5wbQQz0QUhxr1saAB7',
         sortOrder: 11,
       },
     ];
