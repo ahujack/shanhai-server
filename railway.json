@@ -3,12 +3,12 @@
   "build": {
     "builder": "NIXPACKS",
     "buildCommand": "npm install && npm run build",
-    "startCommand": "node fix-migration.js && node dist/main.js"
+    "startCommand": "node dist/main.js"
   },
   "deploy": {
     "numReplicas": 1,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10,
-    "preDeployCommand": "node fix-migration.js"
+    "preDeployCommand": "npx prisma migrate deploy"
   }
 }
