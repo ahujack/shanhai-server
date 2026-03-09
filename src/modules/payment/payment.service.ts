@@ -345,6 +345,15 @@ export class PaymentService implements OnModuleInit {
     const existingProducts = await this.prisma.paymentProduct.count();
     
     if (existingProducts > 0) {
+      // 产品已存在，但需要确保订阅产品的 creemPriceId 是最新的
+      await this.prisma.paymentProduct.updateMany({
+        where: { code: 'vip_monthly' },
+        data: { creemPriceId: 'prod_5na6qH1CfbI4w7Rump4qXA' },
+      });
+      await this.prisma.paymentProduct.updateMany({
+        where: { code: 'vip_yearly' },
+        data: { creemPriceId: 'prod_2ZTZ5wbQQz0QUhxr1saAB7' },
+      });
       return;
     }
 
