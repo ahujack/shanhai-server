@@ -101,9 +101,14 @@ export class PaymentService implements OnModuleInit {
       },
     });
 
-    // 如果 Creem 已配置，优先使用 Creem
-    if (this.creemApiKey && product.creemPriceId) {
-      return this.createCreemCheckout(userId, payment.id, product.creemPriceId, successUrl, cancelUrl);
+    // 如果 Creem 已配置，使用硬编码的 Creem Price ID
+    const CREEM_PRICE_IDS: Record<string, string> = {
+      'vip_monthly': 'prod_5na6qH1CfbI4w7Rump4qXA',
+      'vip_yearly': 'prod_2ZTZ5wbQQz0QUhxr1saAB7',
+    };
+    
+    if (this.creemApiKey && CREEM_PRICE_IDS[product.code]) {
+      return this.createCreemCheckout(userId, payment.id, CREEM_PRICE_IDS[product.code], successUrl, cancelUrl);
     }
 
     // 如果 Stripe 未配置，返回模拟数据
@@ -345,15 +350,6 @@ export class PaymentService implements OnModuleInit {
     const existingProducts = await this.prisma.paymentProduct.count();
     
     if (existingProducts > 0) {
-      // 产品已存在，但需要确保订阅产品的 creemPriceId 是最新的
-      await this.prisma.paymentProduct.updateMany({
-        where: { code: 'vip_monthly' },
-        data: { creemPriceId: 'prod_5na6qH1CfbI4w7Rump4qXA' },
-      });
-      await this.prisma.paymentProduct.updateMany({
-        where: { code: 'vip_yearly' },
-        data: { creemPriceId: 'prod_2ZTZ5wbQQz0QUhxr1saAB7' },
-      });
       return;
     }
 
