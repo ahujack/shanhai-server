@@ -13,6 +13,8 @@ const user_controller_1 = require("./user.controller");
 const auth_controller_1 = require("./auth.controller");
 const user_service_1 = require("./user.service");
 const mail_module_1 = require("../mail/mail.module");
+const points_module_1 = require("../points/points.module");
+const achievement_module_1 = require("../achievement/achievement.module");
 let UserModule = class UserModule {
 };
 exports.UserModule = UserModule;
@@ -25,6 +27,8 @@ exports.UserModule = UserModule = __decorate([
                 signOptions: { expiresIn: '7d' },
             }),
             mail_module_1.MailModule,
+            (0, common_1.forwardRef)(() => points_module_1.PointsModule),
+            (0, common_1.forwardRef)(() => achievement_module_1.AchievementModule),
         ],
         controllers: [user_controller_1.UserController, auth_controller_1.AuthController],
         providers: [user_service_1.UserService],

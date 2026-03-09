@@ -41,21 +41,39 @@ var __importStar = (this && this.__importStar) || (function () {
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../prisma.service");
 const mail_service_1 = require("../mail/mail.service");
+const points_service_1 = require("../points/points.service");
+const achievement_service_1 = require("../achievement/achievement.service");
 const bcrypt = __importStar(require("bcryptjs"));
 let UserService = class UserService {
     prisma;
     mailService;
+    pointsService;
+    achievementService;
     verificationCodes = new Map();
+    traditionalAvatars = [
+        '🐲', '🦊', '🐉', '🐺', '🦁', '🐻',
+        '🐯', '🦅', '🦄', '🐢', '🦉', '🦋',
+        '🐍', '🐉', '🦄', '🐢', '🦅', '🦉',
+        '⚜️', '🧿', '🔮', '🕯️', '📿', '🏮',
+        '🌙', '⭐', '☯️', '🎋', '🎏', '🧧',
+        '🐉', '🦁', '🐯', '🦅', '🐺', '🦊',
+        '🐍', '🐢', '🦄', '🐉', '🦅', '🦉',
+    ];
     CODE_EXPIRE_TIME = 5 * 60 * 1000;
     BCRYPT_ROUNDS = 10;
-    constructor(prisma, mailService) {
+    constructor(prisma, mailService, pointsService, achievementService) {
         this.prisma = prisma;
         this.mailService = mailService;
+        this.pointsService = pointsService;
+        this.achievementService = achievementService;
     }
     async hashPassword(password) {
         return bcrypt.hash(password, this.BCRYPT_ROUNDS);
@@ -69,23 +87,64 @@ let UserService = class UserService {
         });
         return !!user;
     }
-    async registerWithEmail(email, password, name) {
+    async registerWithEmail(email, password, name, referralCode) {
         const existingUser = await this.prisma.user.findUnique({
             where: { email },
         });
         if (existingUser) {
             throw new common_1.BadRequestException('该邮箱已注册');
         }
+        const userReferralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+        let referredBy = null;
+        if (referralCode) {
+            const referrer = await this.prisma.user.findFirst({
+                where: { referralCode },
+            });
+            if (referrer) {
+                referredBy = referrer.id;
+            }
+        }
         const user = await this.prisma.user.create({
             data: {
                 email,
                 name: name || email.split('@')[0],
                 password: await this.hashPassword(password),
+                avatar: this.getRandomAvatar(),
                 timezone: 'Asia/Shanghai',
                 role: 'user',
                 membership: 'free',
+                referralCode: userReferralCode,
+                referredBy,
             },
         });
+        if (referredBy) {
+            try {
+                if (this.pointsService) {
+                    await this.pointsService.awardPoints(user.id, 50, 'referral_bonus', '新用户注册奖励');
+                    await this.pointsService.awardPoints(referredBy, 50, 'referral_reward', '推荐好友奖励');
+                }
+                if (this.achievementService) {
+                    await this.achievementService.unlockAchievementByCode(user.id, 'login_1');
+                    await this.achievementService.unlockAchievementByCode(referredBy, 'invite_1');
+                }
+            }
+            catch (e) {
+                console.error('推荐奖励发放失败:', e);
+            }
+        }
+        else {
+            try {
+                if (this.pointsService) {
+                    await this.pointsService.awardPoints(user.id, 20, 'register_bonus', '新用户注册奖励');
+                }
+                if (this.achievementService) {
+                    await this.achievementService.unlockAchievementByCode(user.id, 'login_1');
+                }
+            }
+            catch (e) {
+                console.error('注册奖励发放失败:', e);
+            }
+        }
         return this.formatUser(user);
     }
     async loginWithPassword(email, password) {
@@ -166,6 +225,10 @@ let UserService = class UserService {
             where: { id },
         });
     }
+    getRandomAvatar() {
+        const index = Math.floor(Math.random() * this.traditionalAvatars.length);
+        return this.traditionalAvatars[index];
+    }
     storeCode(identifier, code) {
         this.verificationCodes.set(identifier, {
             code,
@@ -232,10 +295,10 @@ let UserService = class UserService {
         const data = {
             email: userInfo?.email || `${socialId}@${provider}.com`,
             name: userInfo?.name || `${provider}用户`,
+            avatar: this.getRandomAvatar(),
             timezone: 'Asia/Shanghai',
             role: 'user',
             membership: 'free',
-            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(userInfo?.name || provider)}&background=random`,
         };
         if (provider === 'google') {
             data.googleId = socialId;
@@ -275,7 +338,11 @@ let UserService = class UserService {
 exports.UserService = UserService;
 exports.UserService = UserService = __decorate([
     (0, common_1.Injectable)(),
+    __param(2, (0, common_1.Inject)((0, common_1.forwardRef)(() => points_service_1.PointsService))),
+    __param(3, (0, common_1.Inject)((0, common_1.forwardRef)(() => achievement_service_1.AchievementService))),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        mail_service_1.MailService])
+        mail_service_1.MailService,
+        points_service_1.PointsService,
+        achievement_service_1.AchievementService])
 ], UserService);
 //# sourceMappingURL=user.service.js.map

@@ -421,4 +421,23 @@ export class PaymentService implements OnModuleInit {
 
     console.log('Payment products seeded successfully');
   }
+
+  // 更新产品的 Creem Price ID
+  async updateProductsCreemPriceId() {
+    const updates = [
+      { code: 'vip_monthly', creemPriceId: 'prod_5na6qH1CfbI4w7Rump4qXA' },
+      { code: 'vip_yearly', creemPriceId: 'prod_2ZTZ5wbQQz0QUhxr1saAB7' },
+    ];
+
+    const results = [];
+    for (const update of updates) {
+      const product = await this.prisma.paymentProduct.update({
+        where: { code: update.code },
+        data: { creemPriceId: update.creemPriceId },
+      });
+      results.push(product);
+    }
+
+    return { success: true, products: results };
+  }
 }
