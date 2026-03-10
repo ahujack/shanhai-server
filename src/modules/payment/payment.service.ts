@@ -321,7 +321,11 @@ export class PaymentService implements OnModuleInit {
     for (const product of products) {
       await this.prisma.paymentProduct.upsert({
         where: { code: product.code },
-        update: {},
+        update: {
+          // 更新现有产品的缺失字段
+          periodDays: product.periodDays,
+          creemPriceId: product.creemPriceId,
+        },
         create: product,
       });
     }
