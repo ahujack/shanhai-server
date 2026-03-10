@@ -1,16 +1,20 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { PointsService } from '../points/points.service';
-import Stripe from 'stripe';
 import axios from 'axios';
 
-// Creem 支付服务 - 版本 2.0 (硬编码 Product ID)
+// Creem 支付服务 - 仅使用 Creem
 
 @Injectable()
 export class PaymentService implements OnModuleInit {
-  private stripe: Stripe | null = null;
   private creemApiKey: string | null = null;
   private creemApiUrl = 'https://api.creem.io/v1';
+
+  // Creem Price ID 映射
+  private readonly CREEM_PRICE_IDS: Record<string, string> = {
+    'vip_monthly': 'prod_5na6qH1CfbI4w7Rump4qXA',
+    'vip_yearly': 'prod_2ZTZ5wbQQz0QUhxr1saAB7',
+  };
 
   constructor(
     private prisma: PrismaService,
@@ -18,35 +22,26 @@ export class PaymentService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    // 初始化 Stripe
-    const stripeKey = process.env.STRIPE_SECRET_KEY;
-    if (stripeKey) {
-      this.stripe = new Stripe(stripeKey);
-      console.log('Stripe initialized successfully');
-    } else {
-      console.log('Stripe not configured, using mock payment');
-    }
-
     // 初始化 Creem
     this.creemApiKey = process.env.CREEM_API_KEY || null;
     if (this.creemApiKey) {
       console.log('Creem initialized successfully');
     } else {
-      console.log('Creem not configured');
+      console.log('Creem not configured - payment will use mock mode');
     }
 
     // 初始化支付产品
     await this.seedPaymentProducts();
   }
 
-  // 检查 Stripe 是否可用
-  isStripeConfigured(): boolean {
-    return this.stripe !== null;
-  }
-
   // 检查 Creem 是否可用
   isCreemConfigured(): boolean {
     return this.creemApiKey !== null;
+  }
+
+  // 检查 Stripe（总是返回 false）
+  isStripeConfigured(): boolean {
+    return false;
   }
 
   // 获取所有可用的支付产品
@@ -55,14 +50,6 @@ export class PaymentService implements OnModuleInit {
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
     });
-    
-    // 如果 Stripe 未配置，返回模拟数据
-    if (!this.stripe) {
-      return products.map(p => ({
-        ...p,
-        stripePriceId: null,
-      }));
-    }
     
     return products;
   }
@@ -74,7 +61,7 @@ export class PaymentService implements OnModuleInit {
     });
   }
 
-  // 创建 Stripe Checkout Session
+  // 创建支付会话（使用 Creem）
   async createCheckoutSession(userId: string, productId: string, successUrl: string, cancelUrl: string) {
     const product = await this.prisma.paymentProduct.findUnique({
       where: { id: productId },
@@ -103,68 +90,22 @@ export class PaymentService implements OnModuleInit {
       },
     });
 
-    // 如果 Creem 已配置，使用硬编码的 Creem Price ID
-    const CREEM_PRICE_IDS: Record<string, string> = {
-      'vip_monthly': 'prod_5na6qH1CfbI4w7Rump4qXA',
-      'vip_yearly': 'prod_2ZTZ5wbQQz0QUhxr1saAB7',
-    };
+    // 检查是否有 Creem Price ID
+    const creemPriceId = product.creemPriceId || this.CREEM_PRICE_IDS[product.code];
     
-    if (this.creemApiKey && CREEM_PRICE_IDS[product.code]) {
-      return this.createCreemCheckout(userId, payment.id, CREEM_PRICE_IDS[product.code], successUrl, cancelUrl);
-    }
-
-    // 如果 Stripe 未配置，返回模拟数据
-    if (!this.stripe) {
+    // 如果没有配置 Creem，返回模拟支付
+    if (!this.creemApiKey || !creemPriceId) {
       return {
         paymentId: payment.id,
         sessionId: `mock_session_${payment.id}`,
         url: `${cancelUrl}?paymentId=${payment.id}&mock=true`,
         mock: true,
-        message: 'Stripe not configured, this is a mock payment',
+        message: 'Creem not configured, this is a mock payment',
       };
     }
 
-    // 构建 Stripe Checkout Session
-    const sessionParams: Stripe.Checkout.SessionCreateParams = {
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: product.name,
-              description: product.description || undefined,
-            },
-            unit_amount: Math.round(product.price * 100), // Stripe 使用分
-          },
-          quantity: 1,
-        },
-      ],
-      mode: product.type === 'subscription' ? 'subscription' : 'payment',
-      success_url: successUrl.replace('{CHECKOUT_SESSION_ID}', '{SESSION_ID}'),
-      cancel_url: cancelUrl,
-      metadata: {
-        paymentId: payment.id,
-        userId: userId,
-        productId: productId,
-      },
-      // 为订阅添加客户邮箱
-      customer_email: user.email,
-    };
-
-    const session = await this.stripe.checkout.sessions.create(sessionParams);
-
-    // 更新支付记录的 Stripe Session ID
-    await this.prisma.payment.update({
-      where: { id: payment.id },
-      data: { stripeSessionId: session.id },
-    });
-
-    return {
-      paymentId: payment.id,
-      sessionId: session.id,
-      url: session.url,
-    };
+    // 使用 Creem 创建支付会话
+    return this.createCreemCheckout(userId, payment.id, creemPriceId, successUrl, cancelUrl);
   }
 
   // 创建 Creem Checkout
@@ -231,54 +172,13 @@ export class PaymentService implements OnModuleInit {
     return { received: true };
   }
 
-  // 处理支付回调（Stripe Webhook）
+  // 处理 Stripe Webhook（不再支持）
   async handleWebhook(body: any, signature: string) {
-    if (!this.stripe) {
-      throw new Error('Stripe not configured');
-    }
-
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-    if (!webhookSecret) {
-      throw new Error('Stripe webhook secret not configured');
-    }
-
-    let event: Stripe.Event;
-
-    try {
-      event = this.stripe.webhooks.constructEvent(body, signature, webhookSecret);
-    } catch (err) {
-      throw new Error(`Webhook signature verification failed: ${err.message}`);
-    }
-
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const paymentId = session.metadata?.paymentId;
-        
-        if (paymentId) {
-          await this.processPaymentSuccess(paymentId, session.id, 'completed');
-        }
-        break;
-      }
-      
-      case 'payment_intent.succeeded': {
-        const paymentIntent = event.data.object as Stripe.PaymentIntent;
-        // 可以通过 paymentIntent.metadata 找到对应的 payment 记录
-        break;
-      }
-      
-      case 'payment_intent.payment_failed': {
-        const paymentIntent = event.data.object as Stripe.PaymentIntent;
-        // 处理支付失败
-        break;
-      }
-    }
-
-    return { received: true };
+    throw new Error('Stripe is no longer supported. Please use Creem webhooks instead.');
   }
 
   // 处理支付成功
-  async processPaymentSuccess(paymentId: string, stripePaymentId?: string, status?: string) {
+  async processPaymentSuccess(paymentId: string, providerPaymentId?: string, status?: string) {
     const payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
       include: { product: true },
@@ -297,7 +197,7 @@ export class PaymentService implements OnModuleInit {
     const updatedPayment = await this.prisma.payment.update({
       where: { id: paymentId },
       data: {
-        stripePaymentId,
+        creemCheckoutId: providerPaymentId,
         status: 'completed',
         completedAt: new Date(),
       },
