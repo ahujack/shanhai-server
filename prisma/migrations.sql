@@ -63,3 +63,54 @@ CREATE INDEX IF NOT EXISTS "Achievement_category_idx" ON "Achievement"(category)
 CREATE INDEX IF NOT EXISTS "UserAchievement_userId_idx" ON "UserAchievement"("userId");
 CREATE INDEX IF NOT EXISTS "PointRecord_userId_idx" ON "PointRecord"("userId");
 CREATE INDEX IF NOT EXISTS "PointRecord_createdAt_idx" ON "PointRecord"("createdAt");
+
+-- 支付产品/套餐表
+CREATE TABLE IF NOT EXISTS "PaymentProduct" (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+    code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    type TEXT DEFAULT 'points',
+    price DOUBLE PRECISION NOT NULL,
+    points INTEGER DEFAULT 0,
+    "periodDays" INTEGER,
+    features TEXT,
+    "stripePriceId" TEXT,
+    "creemPriceId" TEXT,
+    "isActive" BOOLEAN DEFAULT true,
+    "sortOrder" INTEGER DEFAULT 0,
+    "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- 支付记录表
+CREATE TABLE IF NOT EXISTS "Payment" (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+    "userId" TEXT NOT NULL,
+    "productId" TEXT NOT NULL,
+    amount DOUBLE PRECISION NOT NULL,
+    currency TEXT DEFAULT 'usd',
+    points INTEGER NOT NULL,
+    "stripePaymentId" TEXT,
+    "stripeSessionId" TEXT,
+    "creemCheckoutId" TEXT,
+    status TEXT DEFAULT 'pending',
+    "paymentMethod" TEXT,
+    "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "completedAt" TIMESTAMP
+);
+
+-- 支付表索引
+CREATE INDEX IF NOT EXISTS "Payment_userId_idx" ON "Payment"("userId");
+CREATE INDEX IF NOT EXISTS "Payment_status_idx" ON "Payment"(status);
+CREATE INDEX IF NOT EXISTS "Payment_createdAt_idx" ON "Payment"("createdAt");
+
+-- 插入支付产品数据
+INSERT INTO "PaymentProduct" (code, name, description, type, price, points, "periodDays", features, "creemPriceId", "sortOrder") VALUES
+('points_100', '100 积分', '100 积分，用于解锁高级功能', 'points', 0.99, 100, NULL, NULL, NULL, 1),
+('points_500', '500 积分', '500 积分，享受9折优惠', 'points', 4.49, 500, NULL, NULL, NULL, 2),
+('points_1000', '1000 积分', '1000 积分，享受85折优惠', 'points', 7.99, 1000, NULL, NULL, NULL, 3),
+('points_3000', '3000 积分', '3000 积分，享受8折优惠', 'points', 19.99, 3000, NULL, NULL, NULL, 4),
+('vip_monthly', 'VIP 月卡', '解锁所有VIP功能，包括无限AI对话、高级命盘解读等', 'subscription', 4.99, 0, 30, '["无限AI对话", "高级命盘解读", "优先客服", "专属主题"]', 'prod_5na6qH1CfbI4w7Rump4qXA', 10),
+('vip_yearly', 'VIP 年卡', '解锁所有VIP功能，享受年卡优惠', 'subscription', 39.99, 0, 365, '["无限AI对话", "高级命盘解读", "优先客服", "专属主题", "年费专属优惠"]', 'prod_2ZTZ5wbQQz0QUhxr1saAB7', 11)
+ON CONFLICT (code) DO NOTHING;
