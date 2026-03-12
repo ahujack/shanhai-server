@@ -1,4 +1,11 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  Logger,
+  BadRequestException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { PointsService } from '../points/points.service';
 import axios from 'axios';
@@ -65,14 +72,25 @@ export class PaymentService implements OnModuleInit {
   // 创建支付会话（使用 Creem）
   async createCheckoutSession(userId: string, productId: string, successUrl: string, cancelUrl: string) {
     this.logger.log(`Creating checkout - userId: ${userId}, productId: ${productId}`);
-    
-    const product = await this.prisma.paymentProduct.findUnique({
-      where: { id: productId },
+
+    if (!userId) {
+      throw new BadRequestException('缺少用户信息，请重新登录后重试');
+    }
+
+    if (!productId) {
+      throw new BadRequestException('缺少商品参数');
+    }
+
+    // 兼容前端传 product.id 或 product.code
+    const product = await this.prisma.paymentProduct.findFirst({
+      where: {
+        OR: [{ id: productId }, { code: productId }],
+      },
     });
 
     if (!product) {
       this.logger.error(`Product not found: ${productId}`);
-      throw new Error('Product not found');
+      throw new NotFoundException('商品不存在或已下架');
     }
 
     const user = await this.prisma.user.findUnique({
@@ -81,7 +99,7 @@ export class PaymentService implements OnModuleInit {
 
     if (!user) {
       this.logger.error(`User not found: ${userId}`);
-      throw new Error('User not found');
+      throw new NotFoundException('用户不存在');
     }
 
     // 创建支付记录
@@ -106,7 +124,7 @@ export class PaymentService implements OnModuleInit {
       return {
         paymentId: payment.id,
         sessionId: `mock_session_${payment.id}`,
-        url: `${cancelUrl}?paymentId=${payment.id}&mock=true`,
+        url: `${this.appendQueryParam(cancelUrl, 'paymentId', payment.id)}&mock=true`,
         mock: true,
         message: 'Creem not configured, this is a mock payment',
       };
@@ -125,11 +143,15 @@ export class PaymentService implements OnModuleInit {
     cancelUrl: string,
   ) {
     try {
+      const successCallbackUrl = this.appendQueryParam(successUrl, 'paymentId', paymentId);
+      const cancelCallbackUrl = this.appendQueryParam(cancelUrl, 'paymentId', paymentId);
+
       const response = await axios.post(
         `${this.creemApiUrl}/checkouts`,
         {
           product_id: creemProductId,
-          success_url: `${successUrl}?paymentId=${paymentId}`,
+          success_url: successCallbackUrl,
+          cancel_url: cancelCallbackUrl,
           metadata: {
             paymentId,
             userId,
@@ -157,9 +179,20 @@ export class PaymentService implements OnModuleInit {
         url: checkout.url,
         provider: 'creem',
       };
-    } catch (error) {
-      console.error('Creem checkout error:', error.response?.data || error.message);
-      throw new Error(`Creem checkout failed: ${error.message}`);
+    } catch (error: any) {
+      const providerError = error?.response?.data;
+      const providerStatus = error?.response?.status;
+      const providerMessage =
+        providerError?.message ||
+        providerError?.error ||
+        error?.message ||
+        'unknown error';
+      this.logger.error(`Creem checkout error: ${providerMessage}`);
+      this.logger.error(`Creem checkout detail: ${JSON.stringify(providerError || {})}`);
+      if (typeof providerStatus === 'number' && providerStatus >= 400 && providerStatus < 500) {
+        throw new BadRequestException(`创建支付会话失败：${providerMessage}`);
+      }
+      throw new InternalServerErrorException(`创建支付会话失败：${providerMessage}`);
     }
   }
 
@@ -181,7 +214,7 @@ export class PaymentService implements OnModuleInit {
 
   // 处理 Stripe Webhook（不再支持）
   async handleWebhook(body: any, signature: string) {
-    throw new Error('Stripe is no longer supported. Please use Creem webhooks instead.');
+    throw new BadRequestException('Stripe 已停用，请使用 Creem webhook');
   }
 
   // 处理支付成功
@@ -192,7 +225,7 @@ export class PaymentService implements OnModuleInit {
     });
 
     if (!payment) {
-      throw new Error('Payment not found');
+      throw new NotFoundException('支付记录不存在');
     }
 
     // 如果已经处理过，跳过
@@ -338,5 +371,10 @@ export class PaymentService implements OnModuleInit {
     }
 
     console.log('Payment products seeded successfully');
+  }
+
+  private appendQueryParam(url: string, key: string, value: string): string {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}${key}=${encodeURIComponent(value)}`;
   }
 }
