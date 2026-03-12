@@ -106,7 +106,7 @@ export class PaymentService implements OnModuleInit {
     const payment = await this.prisma.payment.create({
       data: {
         userId,
-        productId,
+        productId: product.id,
         amount: product.price,
         points: product.points,
         status: 'pending',
@@ -115,7 +115,9 @@ export class PaymentService implements OnModuleInit {
     this.logger.log(`Payment record created: ${payment.id}, amount: ${payment.amount}`);
 
     // 检查是否有 Creem Price ID
-    const creemPriceId = product.creemPriceId || this.CREEM_PRICE_IDS[product.code];
+    // 优先使用代码内固定映射，避免数据库中历史错误ID导致下单失败
+    const mappedCreemProductId = this.CREEM_PRICE_IDS[product.code];
+    const creemPriceId = mappedCreemProductId || product.creemPriceId;
     this.logger.log(`Product code: ${product.code}, creemPriceId: ${creemPriceId}, creemApiKey set: ${!!this.creemApiKey}`);
     
     // 如果没有配置 Creem，返回模拟支付
@@ -287,12 +289,6 @@ export class PaymentService implements OnModuleInit {
 
   // 初始化支付产品数据
   private async seedPaymentProducts() {
-    const existingProducts = await this.prisma.paymentProduct.count();
-    
-    if (existingProducts > 0) {
-      return;
-    }
-
     const products = [
       {
         code: 'points_100',
@@ -360,7 +356,14 @@ export class PaymentService implements OnModuleInit {
       await this.prisma.paymentProduct.upsert({
         where: { code: product.code },
         update: {
-          // 更新现有产品的缺失字段
+          // 保证历史数据也会被修正到最新配置
+          name: product.name,
+          description: product.description,
+          type: product.type,
+          price: product.price,
+          points: product.points,
+          sortOrder: product.sortOrder,
+          features: product.features,
           periodDays: product.periodDays,
           creemPriceId: product.creemPriceId,
         },
