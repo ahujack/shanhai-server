@@ -114,7 +114,7 @@ export class AuthController {
     const user = await this.userService.registerWithEmail(email, password, name || email.split('@')[0], referralCode);
 
     // 生成 JWT Token
-    const payload = { sub: user.id, email: user.email };
+    const payload = { sub: user.id, id: user.id, email: user.email };
     const token = this.jwtService
       ? this.jwtService.sign(payload)
       : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
@@ -151,7 +151,7 @@ export class AuthController {
 
       // 生成 JWT Token
       const user: UserProfile = loggedInUser;
-      const payload = { sub: user.id, email: user.email };
+      const payload = { sub: user.id, id: user.id, email: user.email };
       const token = this.jwtService
         ? this.jwtService.sign(payload)
         : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
@@ -177,7 +177,7 @@ export class AuthController {
       const user = await this.userService.findOrCreateByEmail(email);
 
       // 生成 JWT Token
-      const payload = { sub: user.id, email: user.email };
+      const payload = { sub: user.id, id: user.id, email: user.email };
       const token = this.jwtService
         ? this.jwtService.sign(payload)
         : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
@@ -220,7 +220,7 @@ export class AuthController {
     const user = await this.userService.findOrCreateBySocial(dto.provider, dto.idToken, userInfo);
 
     // 生成 JWT Token
-    const payload = { sub: user.id, email: user.email, provider: dto.provider };
+    const payload = { sub: user.id, id: user.id, email: user.email, provider: dto.provider };
     const token = this.jwtService
       ? this.jwtService.sign(payload)
       : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
@@ -320,7 +320,7 @@ export class AuthController {
 
       const user = await this.userService.findOne(userId);
 
-      const payload = { sub: user.id, email: user.email };
+      const payload = { sub: user.id, id: user.id, email: user.email };
       const newToken = this.jwtService
         ? this.jwtService.sign(payload)
         : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
