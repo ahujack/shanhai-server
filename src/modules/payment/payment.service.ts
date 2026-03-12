@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { PointsService } from '../points/points.service';
 import axios from 'axios';
@@ -7,6 +7,7 @@ import axios from 'axios';
 
 @Injectable()
 export class PaymentService implements OnModuleInit {
+  private readonly logger = new Logger(PaymentService.name);
   private creemApiKey: string | null = null;
   private creemApiUrl = 'https://api.creem.io/v1';
 
@@ -63,11 +64,14 @@ export class PaymentService implements OnModuleInit {
 
   // 创建支付会话（使用 Creem）
   async createCheckoutSession(userId: string, productId: string, successUrl: string, cancelUrl: string) {
+    this.logger.log(`Creating checkout - userId: ${userId}, productId: ${productId}`);
+    
     const product = await this.prisma.paymentProduct.findUnique({
       where: { id: productId },
     });
 
     if (!product) {
+      this.logger.error(`Product not found: ${productId}`);
       throw new Error('Product not found');
     }
 
@@ -76,6 +80,7 @@ export class PaymentService implements OnModuleInit {
     });
 
     if (!user) {
+      this.logger.error(`User not found: ${userId}`);
       throw new Error('User not found');
     }
 
@@ -89,12 +94,15 @@ export class PaymentService implements OnModuleInit {
         status: 'pending',
       },
     });
+    this.logger.log(`Payment record created: ${payment.id}, amount: ${payment.amount}`);
 
     // 检查是否有 Creem Price ID
     const creemPriceId = product.creemPriceId || this.CREEM_PRICE_IDS[product.code];
+    this.logger.log(`Product code: ${product.code}, creemPriceId: ${creemPriceId}, creemApiKey set: ${!!this.creemApiKey}`);
     
     // 如果没有配置 Creem，返回模拟支付
     if (!this.creemApiKey || !creemPriceId) {
+      this.logger.warn('Creem not configured, returning mock payment');
       return {
         paymentId: payment.id,
         sessionId: `mock_session_${payment.id}`,

@@ -25,11 +25,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message = exceptionResponse as string;
       }
     } else if (exception instanceof Error) {
-      // 记录未预期的错误
+      // 记录未预期的错误（生产环境也要记录详细日志）
       this.logger.error(`未预期的错误: ${exception.message}`, exception.stack);
-      message = process.env.NODE_ENV === 'production' 
-        ? '服务暂时不可用，请稍后重试' 
-        : exception.message;
+      message = '服务暂时不可用，请稍后重试';
     }
 
     const errorResponse: Record<string, unknown> = {

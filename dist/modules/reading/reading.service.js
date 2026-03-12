@@ -513,7 +513,12 @@ let ReadingService = class ReadingService {
             else
                 lines.push('6');
         }
-        const original = this.linesToHexagram(lines.map(l => l === '6' || l === '9' ? '0' : (parseInt(l) % 2 === 1 ? '1' : '0')));
+        const toBinary = (l) => {
+            if (l === '6' || l === '9')
+                return '0';
+            return l === '7' ? '1' : '0';
+        };
+        const original = this.linesToHexagram(lines.map(toBinary));
         const changedLines = lines.map(l => {
             if (l === '9')
                 return '6';
@@ -521,7 +526,7 @@ let ReadingService = class ReadingService {
                 return '9';
             return l;
         });
-        const changed = this.linesToHexagram(changedLines.map(l => l === '6' || l === '9' ? '0' : (parseInt(l) % 2 === 1 ? '1' : '0')));
+        const changed = this.linesToHexagram(changedLines.map(toBinary));
         return { original, changed, lines };
     }
     linesToHexagram(binaryLines) {
@@ -539,17 +544,17 @@ let ReadingService = class ReadingService {
     getHexagramName(index) {
         const names = {
             0: '坤为地', 1: '地雷复', 2: '地水师', 3: '地山谦',
-            4: '地天泰', 5: '地火明夷', 6: '地泽临', 7: '地天决',
+            4: '地天泰', 5: '地火明夷', 6: '地泽临', 7: '地天夬',
             8: '地风升', 9: '地火晋',
             10: '雷地豫', 11: '震为雷', 12: '雷水解', 13: '雷山小过',
-            14: '雷天大壮', 15: '雷火丰', 16: '雷泽归妹', 17: '雷天夬',
-            18: '雷风恒', 19: '雷水解',
+            14: '雷天大壮', 15: '雷火丰', 16: '雷泽归妹', 17: '雷风恒',
+            18: '雷泽随', 19: '雷天无妄',
             20: '水地比', 21: '水雷屯', 22: '坎为水', 23: '水山蹇',
             24: '水天需', 25: '水火既济', 26: '水泽节', 27: '水天讼',
             28: '水风井', 29: '水火未济',
             30: '山地剥', 31: '山雷颐', 32: '山水蒙', 33: '艮为山',
-            34: '山天大畜', 35: '山火贲', 36: '山泽损', 37: '山天咸',
-            38: '山风蛊', 39: '山天大畜',
+            34: '山天大畜', 35: '山火贲', 36: '山泽损', 37: '山风蛊',
+            38: '山天大过', 39: '山天遯',
             40: '天地否', 41: '天雷无妄', 42: '天水讼', 43: '天山遯',
             44: '乾为天', 45: '天火同人', 46: '天泽履', 47: '天风姤',
             48: '天雷无妄', 49: '天火同人',
@@ -557,9 +562,9 @@ let ReadingService = class ReadingService {
             54: '火天大有', 55: '离为火', 56: '火泽睽', 57: '火风鼎',
             58: '火水未济', 59: '火天大有',
             60: '泽地萃', 61: '泽雷随', 62: '泽水困', 63: '泽山咸',
-            64: '泽风大过', 65: '泽天夬',
         };
-        return names[index] || `卦象${index}` || '天地否';
+        const safeIndex = Math.max(0, Math.min(63, index));
+        return names[safeIndex] || '天地否';
     }
     getYaoDescription(yao) {
         const map = {
