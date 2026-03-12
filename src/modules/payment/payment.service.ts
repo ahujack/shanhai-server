@@ -144,14 +144,12 @@ export class PaymentService implements OnModuleInit {
   ) {
     try {
       const successCallbackUrl = this.appendQueryParam(successUrl, 'paymentId', paymentId);
-      const cancelCallbackUrl = this.appendQueryParam(cancelUrl, 'paymentId', paymentId);
 
       const response = await axios.post(
         `${this.creemApiUrl}/checkouts`,
         {
           product_id: creemProductId,
           success_url: successCallbackUrl,
-          cancel_url: cancelCallbackUrl,
           metadata: {
             paymentId,
             userId,
