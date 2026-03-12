@@ -205,6 +205,12 @@ export class PaymentService implements OnModuleInit {
       );
 
       const checkout = response.data;
+      const checkoutUrl =
+        checkout?.url ||
+        checkout?.checkout_url ||
+        checkout?.hosted_checkout_url ||
+        checkout?.hosted_url ||
+        null;
 
       // 更新支付记录的 Creem Checkout ID
       await this.prisma.payment.update({
@@ -215,7 +221,7 @@ export class PaymentService implements OnModuleInit {
       return {
         paymentId,
         sessionId: checkout.id,
-        url: checkout.url,
+        url: checkoutUrl,
         provider: 'creem',
       };
     } catch (error: any) {

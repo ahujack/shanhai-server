@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, Req, UseGuards, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Req, UseGuards, NotFoundException, HttpCode, HttpStatus } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -41,6 +41,7 @@ export class PaymentController {
 
   // 创建支付会话（返回 Stripe Checkout URL）
   @Post('checkout')
+  @HttpCode(HttpStatus.OK)
   @UseGuards(RequireAuthGuard)
   async createCheckout(
     @Body() body: { productId: string },
