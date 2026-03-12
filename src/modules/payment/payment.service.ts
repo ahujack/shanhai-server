@@ -10,10 +10,10 @@ export class PaymentService implements OnModuleInit {
   private creemApiKey: string | null = null;
   private creemApiUrl = 'https://api.creem.io/v1';
 
-  // Creem Price ID 映射
+  // Creem Product ID 映射
   private readonly CREEM_PRICE_IDS: Record<string, string> = {
-    'vip_monthly': 'prod_5na6qH1CfbI4w7Rump4qXA',
-    'vip_yearly': 'prod_2ZTZ5wbQQz0QUhxr1saAB7',
+    'vip_monthly': 'prod_78ZYwOA5jnKNJ8ub1Xwtra',
+    'vip_yearly': 'prod_2mQYQ2Hl5ylTkRKgEhVvbG',
   };
 
   constructor(
@@ -300,7 +300,7 @@ export class PaymentService implements OnModuleInit {
         points: 0,
         periodDays: 30,
         features: JSON.stringify(['无限AI对话', '高级命盘解读', '优先客服', '专属主题']),
-        creemPriceId: 'prod_5na6qH1CfbI4w7Rump4qXA',
+        creemPriceId: 'prod_78ZYwOA5jnKNJ8ub1Xwtra',
         sortOrder: 10,
       },
       {
@@ -312,7 +312,7 @@ export class PaymentService implements OnModuleInit {
         points: 0,
         periodDays: 365,
         features: JSON.stringify(['无限AI对话', '高级命盘解读', '优先客服', '专属主题', '年费专属优惠']),
-        creemPriceId: 'prod_2ZTZ5wbQQz0QUhxr1saAB7',
+        creemPriceId: 'prod_2mQYQ2Hl5ylTkRKgEhVvbG',
         sortOrder: 11,
       },
     ];
