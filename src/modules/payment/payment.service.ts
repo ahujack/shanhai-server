@@ -112,7 +112,7 @@ export class PaymentService implements OnModuleInit {
   private async createCreemCheckout(
     userId: string,
     paymentId: string,
-    creemPriceId: string,
+    creemProductId: string,
     successUrl: string,
     cancelUrl: string,
   ) {
@@ -120,9 +120,8 @@ export class PaymentService implements OnModuleInit {
       const response = await axios.post(
         `${this.creemApiUrl}/checkouts`,
         {
-          price_id: creemPriceId,
+          product_id: creemProductId,
           success_url: `${successUrl}?paymentId=${paymentId}`,
-          cancel_url: `${cancelUrl}?paymentId=${paymentId}`,
           metadata: {
             paymentId,
             userId,
