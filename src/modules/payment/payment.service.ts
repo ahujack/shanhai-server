@@ -52,6 +52,45 @@ export class PaymentService implements OnModuleInit {
     return false;
   }
 
+  // 获取 Creem 调试信息（仅用于排查环境问题）
+  async getCreemDebugInfo(targetProductId?: string) {
+    const products = await this.prisma.paymentProduct.findMany({
+      where: {
+        ...(targetProductId
+          ? {
+              OR: [{ id: targetProductId }, { code: targetProductId }],
+            }
+          : { type: 'subscription' }),
+      },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    const key = this.creemApiKey || '';
+    const keyFingerprint = key
+      ? `${key.slice(0, 6)}...${key.slice(-4)} (len=${key.length})`
+      : null;
+
+    return {
+      creemConfigured: !!this.creemApiKey,
+      creemApiUrl: this.creemApiUrl,
+      keyFingerprint,
+      productCount: products.length,
+      products: products.map((product) => {
+        const mappedCreemProductId = this.CREEM_PRICE_IDS[product.code] || null;
+        const resolvedCreemProductId = mappedCreemProductId || product.creemPriceId || null;
+        return {
+          id: product.id,
+          code: product.code,
+          type: product.type,
+          dbCreemProductId: product.creemPriceId,
+          mappedCreemProductId,
+          resolvedCreemProductId,
+          source: mappedCreemProductId ? 'mapping' : product.creemPriceId ? 'database' : 'none',
+        };
+      }),
+    };
+  }
+
   // 获取所有可用的支付产品
   async getPaymentProducts() {
     const products = await this.prisma.paymentProduct.findMany({

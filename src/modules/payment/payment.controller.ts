@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Req, UseGuards, NotFoundException } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -13,6 +13,18 @@ export class PaymentController {
       stripeConfigured: this.paymentService.isStripeConfigured(),
       creemConfigured: this.paymentService.isCreemConfigured(),
     };
+  }
+
+  // Creem 调试信息（仅开发/测试环境）
+  @Get('debug/creem')
+  @UseGuards(RequireAuthGuard)
+  async getCreemDebugInfo(@Query('productId') productId?: string) {
+    const env = (process.env.NODE_ENV || '').toLowerCase();
+    const allowDebug = env !== 'production' || process.env.ENABLE_PAYMENT_DEBUG === 'true';
+    if (!allowDebug) {
+      throw new NotFoundException('Not Found');
+    }
+    return this.paymentService.getCreemDebugInfo(productId);
   }
 
   // 获取所有可用的支付产品
