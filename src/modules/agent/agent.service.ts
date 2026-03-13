@@ -5,7 +5,6 @@ import { PersonaService, PersonaSchema } from '../persona/persona.service';
 import { ReadingService, DivinationCategory } from '../reading/reading.service';
 import { FortuneService } from '../fortune/fortune.service';
 import { ChartService } from '../chart/chart.service';
-import { ZiService, ZiResult } from '../zi/zi.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
@@ -20,7 +19,6 @@ export class AgentService {
     private readonly readingService: ReadingService,
     private readonly fortuneService: FortuneService,
     private readonly chartService: ChartService,
-    private readonly ziService: ZiService,
   ) {}
 
   async handleChat(dto: AgentChatDto) {
@@ -105,19 +103,11 @@ export class AgentService {
     // 测字功能
     if (intent === 'zi') {
       const ziChar = this.extractZiFromMessage(dto.message);
-      if (ziChar) {
-        try {
-          const ziResult = await this.ziService.analyze(ziChar);
-          artifacts = { zi: ziResult };
-          actions.push({
-            type: 'view_zi',
-            label: '查看测字详情',
-          });
-        } catch (error) {
-          this.logger.error(`测字分析失败: ${error.message}`);
-          artifacts = { zi: null };
-        }
-      }
+      artifacts = { ziSuggestion: { zi: ziChar } };
+      actions.push({
+        type: 'view_zi',
+        label: '进入测字页面',
+      });
     }
 
     const reply = await this.composeReply(persona, intent, dto.message, artifacts, userChart, dto);
@@ -459,16 +449,11 @@ ${contextInfo}
     userChart: any,
     dto: AgentChatDto,
   ): Promise<string> {
-    // 测字回复 - 使用冷读术风格
-    if (intent === 'zi' && artifacts.zi) {
-      const zi = artifacts.zi as ZiResult;
-      if (!zi) {
-        return `${persona.name}：抱歉，测字服务暂时不可用，请稍后再试。`;
-      }
-      const coldRead = zi.coldReadings[0];
-      const advice = zi.interpretation.advice[0];
-      
-      return `${persona.name}：${coldRead}\n\n🔍 拆解："${zi.zi.zi}"字\n📦 部件：${zi.zi.components.join(' + ')}\n💡 联想：${zi.zi.associativeMeaning}\n\n📋 建议：${advice}\n\n${zi.handwriting.stabilityInterpretation}\n\n点击「查看测字详情」可获得完整分析。`;
+    // 测字回复：只引导去测字页，不在对话内直接出结果
+    if (intent === 'zi') {
+      const suggestedZi = (artifacts as any)?.ziSuggestion?.zi;
+      const ziHint = suggestedZi ? `（可先用「${suggestedZi}」起测）` : '';
+      return `${persona.name}：可以，我们去测字页面做更完整的仪式化解读。${ziHint}\n\n建议你先静心10秒，心里只想着这件事，再写下一个字，这样解读会更聚焦。\n\n点击下方「进入测字页面」开始。`;
     }
 
     // 占卜回复
