@@ -31,6 +31,7 @@ export declare class AgentService {
     private buildMeditation;
     private generateAIReply;
     private getDefaultChatReply;
+    private fetchRecentChatMemory;
     private composeReply;
 }
 export {};

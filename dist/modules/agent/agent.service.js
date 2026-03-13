@@ -153,6 +153,7 @@ let AgentService = AgentService_1 = class AgentService {
             const contextInfo = userChart
                 ? `\n用户八字：${userChart.yearGanZhi}年 ${userChart.monthGanZhi}月 ${userChart.dayGanZhi}日 ${userChart.hourGanZhi}时`
                 : '\n用户尚未建立命盘';
+            const contextLines = (dto.context || []).slice(-6).join('\n');
             const response = await axios_1.default.post(process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions', {
                 model,
                 temperature: 0,
@@ -173,6 +174,12 @@ let AgentService = AgentService_1 = class AgentService {
 
 ${contextInfo}`,
                     },
+                    contextLines
+                        ? {
+                            role: 'system',
+                            content: `最近对话（由近到远）：\n${contextLines}\n\n请优先结合这些上下文来判断意图，不要只看最后一句。`,
+                        }
+                        : null,
                     {
                         role: 'user',
                         content: JSON.stringify({
@@ -182,7 +189,7 @@ ${contextInfo}`,
                             hasChart: !!userChart,
                         }),
                     },
-                ],
+                ].filter(Boolean),
             }, {
                 headers: {
                     Authorization: `Bearer ${apiKey}`,
@@ -285,6 +292,9 @@ ${contextInfo}`,
         if (!apiKey) {
             return this.getDefaultChatReply(persona, userChart);
         }
+        const recentMemory = dto.userId ? await this.fetchRecentChatMemory(dto.userId) : [];
+        const contextLines = (dto.context || []).slice(-8);
+        const conversationContext = [...recentMemory, ...contextLines].slice(-12).join('\n');
         try {
             let contextInfo = '';
             if (userChart) {
@@ -313,6 +323,8 @@ ${contextInfo}
 - 理解用户的情感需求，给予温暖、有智慧的回应
 - 每次回复控制在100-200字之间，保持简洁有力
 - 如果用户提到命理相关内容，可以适当引用用户的八字信息给出个性化建议
+- 绝对不要输出"角色名："前缀，不要输出舞台动作括号（如“（轻抚长须）”）
+- 先回应用户当前语句的真实语义；如果信息不足，可温和追问，不要自说自话
 
 注意：
 - 用户可能只是在倾诉，不要急着给出建议，先表达理解和共情
@@ -324,8 +336,14 @@ ${contextInfo}
                 max_tokens: 300,
                 messages: [
                     { role: 'system', content: systemPrompt },
+                    conversationContext
+                        ? {
+                            role: 'system',
+                            content: `以下是近期对话上下文（由近到远）：\n${conversationContext}\n\n请在回复中自然承接上下文，不要重复已确认的信息。`,
+                        }
+                        : null,
                     { role: 'user', content: message },
-                ],
+                ].filter(Boolean),
             }, {
                 headers: {
                     Authorization: `Bearer ${apiKey}`,
@@ -335,7 +353,7 @@ ${contextInfo}
             });
             const reply = response.data?.choices?.[0]?.message?.content?.trim();
             if (reply) {
-                return `${persona.name}：${reply}`;
+                return reply.replace(/^[^：:\n]{1,12}[：:]\s*/u, '').trim();
             }
             return this.getDefaultChatReply(persona, userChart);
         }
@@ -346,10 +364,10 @@ ${contextInfo}
     }
     getDefaultChatReply(persona, userChart) {
         const defaultReplies = [
-            `${persona.name}：我听到了你的心声。山海之间，万物有灵，愿你能在这纷扰的世界找到片刻宁静。`,
-            `${persona.name}：所言甚是。命运如河，有时平静有时汹涌，保持内心的定力最为重要。`,
-            `${persona.name}：你今天的困惑，我已记下。若想更深入了解，不妨与我聊聊你的近况，或者去抽支签、测个字，看看天意如何。`,
-            `${persona.name}：人生如逆旅，我亦是行人。在这山海之间相逢，便是有缘。有什么想说的，尽管道来。`,
+            `我听到了你的心声。山海之间，万物有灵，愿你在这纷扰里也能有一处安稳。`,
+            `你这句话很真。命运有起伏，但你并不孤单，我们可以一点点理清。`,
+            `你的困惑我记下了。若你愿意，我们可以先从最让你在意的一点开始聊。`,
+            `人生如逆旅，你愿意说出来，已经是很重要的一步。我们慢慢来。`,
         ];
         if (userChart) {
             const wxNames = {
@@ -358,45 +376,67 @@ ${contextInfo}
             const dominantWx = Object.entries(userChart.wuxingStrength)
                 .sort((a, b) => b[1] - a[1])[0];
             const personalizedReplies = [
-                `${persona.name}：从你的八字来看，你的${wxNames[dominantWx[0]]}性较强。或许最近可以考虑做一些${wxNames[dominantWx[0]]}属性的事情来平衡身心。`,
-                `${persona.name}：我注意到你的日主是${userChart.dayGanZhi}，这注定你是一个有独特气质的人。有什么心事不妨说说。`,
+                `从你的八字看，你的${wxNames[dominantWx[0]]}性较强。最近可以做些对应属性的事情，先把状态稳住。`,
+                `我注意到你的日主是${userChart.dayGanZhi}。你有自己独特的节奏，有心事可以慢慢讲。`,
             ];
             return personalizedReplies[Math.floor(Math.random() * personalizedReplies.length)];
         }
         return defaultReplies[Math.floor(Math.random() * defaultReplies.length)];
     }
+    async fetchRecentChatMemory(userId) {
+        try {
+            const rows = await this.prisma.chatMessage.findMany({
+                where: { userId },
+                orderBy: { createdAt: 'desc' },
+                take: 6,
+                select: { message: true, reply: true },
+            });
+            return rows.flatMap((row) => {
+                const lines = [];
+                if (row.message)
+                    lines.push(`用户：${row.message}`);
+                if (row.reply)
+                    lines.push(`助手：${row.reply}`);
+                return lines;
+            });
+        }
+        catch (error) {
+            this.logger.warn(`读取近期聊天记忆失败: ${error.message}`);
+            return [];
+        }
+    }
     async composeReply(persona, intent, message, artifacts, userChart, dto) {
         if (intent === 'zi') {
             const suggestedZi = artifacts?.ziSuggestion?.zi;
             const ziHint = suggestedZi ? `（可先用「${suggestedZi}」起测）` : '';
-            return `${persona.name}：可以，我们去测字页面做更完整的仪式化解读。${ziHint}\n\n建议你先静心10秒，心里只想着这件事，再写下一个字，这样解读会更聚焦。\n\n点击下方「进入测字页面」开始。`;
+            return `可以，我们去测字页面做更完整的仪式化解读。${ziHint}\n\n建议你先静心10秒，心里只想着这件事，再写下一个字，这样解读会更聚焦。\n\n点击下方「进入测字页面」开始。`;
         }
         if (intent === 'divination' && artifacts.reading) {
             const reading = artifacts.reading;
             if (!reading) {
-                return `${persona.name}：抱歉，占卜服务暂时不可用，请稍后再试。`;
+                return `抱歉，占卜服务暂时不可用，请稍后再试。`;
             }
-            return `${persona.name}：你的问题我已感知。\n\n🙏 所得卦象：${reading.hexagram.originalName}\n📖 解读：${reading.interpretation.overall}\n\n${persona.name}建议你：${reading.recommendations[0]}\n\n若想查看完整解读，可点击下方按钮。`;
+            return `你的问题我已感知。\n\n🙏 所得卦象：${reading.hexagram.originalName}\n📖 解读：${reading.interpretation.overall}\n\n建议你：${reading.recommendations[0]}\n\n若想查看完整解读，可点击下方按钮。`;
         }
         if (intent === 'meditation') {
-            return `${persona.name}：我感受到你内心的不静。\n\n让我们一起做几次深呼吸，放下那些困扰你的事情。\n\n我为你准备了一段冥想引导，点击下方「开始冥想」即可。`;
+            return `我感受到你内心的不静。\n\n让我们一起做几次深呼吸，放下那些困扰你的事情。\n\n我为你准备了一段冥想引导，点击下方「开始冥想」即可。`;
         }
         if (intent === 'fortune' && artifacts.fortune) {
             const fortune = artifacts.fortune;
-            return `${persona.name}：今日与你有缘。\n\n✨ 今日签诗：${fortune.poem.title}\n💫 运势：${fortune.day}\n\n幸运数字：${fortune.lucky.number} | 幸运颜色：${fortune.lucky.color}\n\n${persona.name}：${fortune.advice[0]}`;
+            return `今日与你有缘。\n\n✨ 今日签诗：${fortune.poem.title}\n💫 运势：${fortune.day}\n\n幸运数字：${fortune.lucky.number} | 幸运颜色：${fortune.lucky.color}\n\n建议：${fortune.advice[0]}`;
         }
         if (intent === 'chart') {
             if (userChart) {
-                return `${persona.name}：你的命盘已在此。\n\n🔮 八字：${userChart.dayGanZhi}（日主）\n🌟 五行：木${userChart.wuxingStrength.wood}% 火${userChart.wuxingStrength.fire}% 土${userChart.wuxingStrength.earth}% 金${userChart.wuxingStrength.metal}% 水${userChart.wuxingStrength.water}%\n\n📝 性格特点：${userChart.personalityTraits.slice(0, 2).join('、')}\n\n💼 事业：${userChart.fortuneSummary.career}\n💕 感情：${userChart.fortuneSummary.love}`;
+                return `你的命盘已在此。\n\n🔮 八字：${userChart.dayGanZhi}（日主）\n🌟 五行：木${userChart.wuxingStrength.wood}% 火${userChart.wuxingStrength.fire}% 土${userChart.wuxingStrength.earth}% 金${userChart.wuxingStrength.metal}% 水${userChart.wuxingStrength.water}%\n\n📝 性格特点：${userChart.personalityTraits.slice(0, 2).join('、')}\n\n💼 事业：${userChart.fortuneSummary.career}\n💕 感情：${userChart.fortuneSummary.love}`;
             }
             else {
-                return `${persona.name}：你还没有建立命盘呢。\n\n若想了解自己的八字命盘，可以先去「我的」页面输入出生信息，我会为你生成专属命盘分析。`;
+                return `你还没有建立命盘呢。\n\n若想了解自己的八字命盘，可以先去「我的」页面输入出生信息，我会为你生成专属命盘分析。`;
             }
         }
         if (intent === 'chat') {
             return await this.generateAIReply(message, persona, userChart, dto);
         }
-        return `${persona.name}：我听到了你的心绪。若想更进一步，可告诉我需要抽签、静坐还是查看命盘，我都在。`;
+        return `我听到了你的心绪。若想更进一步，可告诉我需要抽签、静坐还是查看命盘，我都在。`;
     }
 };
 exports.AgentService = AgentService;
