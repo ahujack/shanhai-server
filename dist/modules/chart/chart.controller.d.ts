@@ -7,13 +7,13 @@ export declare class ChartController {
     generate(userId: string, body: {
         gender: 'male' | 'female';
     }): Promise<import("./chart.service").BaziChart>;
-    findOne(userId: string): {
+    findOne(userId: string): Promise<{
         message: string;
         hasChart: boolean;
         chart?: undefined;
     } | {
         hasChart: boolean;
-        chart: Promise<import("./chart.service").BaziChart | null>;
+        chart: import("./chart.service").BaziChart;
         message?: undefined;
-    };
+    }>;
 }

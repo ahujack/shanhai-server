@@ -24,8 +24,8 @@ export class ChartController {
   }
 
   @Get(':userId')
-  findOne(@Param('userId') userId: string) {
-    const chart = this.chartService.findOne(userId);
+  async findOne(@Param('userId') userId: string) {
+    const chart = await this.chartService.findOne(userId);
     if (!chart) {
       return { message: '请先创建命盘', hasChart: false };
     }

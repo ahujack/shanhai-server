@@ -469,12 +469,14 @@ let ReadingService = class ReadingService {
         const now = Date.now();
         const seed = this.buildSeed(dto.question, dto.category, dto.userId);
         const { original, changed, lines } = this.generateHexagram(seed);
+        const movingLines = lines.filter((line) => line === '6' || line === '9').length;
         const originalName = this.getHexagramName(original);
         const changedName = this.getHexagramName(changed);
         const result = {
             id: `reading_${now}`,
             question: dto.question,
             category: dto.category ?? 'general',
+            conclusion: this.buildConclusion(originalName, dto.category, movingLines),
             hexagram: {
                 original: String(original),
                 originalName,
@@ -667,6 +669,24 @@ let ReadingService = class ReadingService {
             return '时机偏守，先做准备动作，等待外部条件改善后再发力。';
         }
         return '时机中性，宜小步快跑，用反馈修正方向。';
+    }
+    buildConclusion(name, category, movingLines) {
+        const confidence = Math.max(60, Math.min(92, 90 - movingLines * 6));
+        const emotionalTone = movingLines >= 3 ? '波动中可调节' : '稳定中可推进';
+        const categoryTip = {
+            general: '先稳住节奏，再决定是否加速。',
+            career: '先做小范围验证，再谈大动作。',
+            love: '先把真实感受说清楚，再谈关系走向。',
+            wealth: '先守现金流，再做收益优化。',
+            health: '先修复作息和压力，再谈强度提升。',
+            growth: '先聚焦一个最重要目标，避免分散。',
+        };
+        return {
+            verdict: `当前更接近「${name}」之势：宜先稳后进。`,
+            confidence,
+            emotionalTone,
+            nextStep: categoryTip[category || 'general'],
+        };
     }
 };
 exports.ReadingService = ReadingService;

@@ -3,6 +3,12 @@ export interface DivinationResult {
     id: string;
     question: string;
     category: DivinationCategory;
+    conclusion: {
+        verdict: string;
+        confidence: number;
+        emotionalTone: string;
+        nextStep: string;
+    };
     hexagram: {
         original: string;
         originalName: string;
@@ -46,4 +52,5 @@ export declare class ReadingService {
     private buildOverallInterpretation;
     private buildGuidance;
     private getTimingSuggestion;
+    private buildConclusion;
 }

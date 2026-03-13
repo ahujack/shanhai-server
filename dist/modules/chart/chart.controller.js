@@ -27,8 +27,8 @@ let ChartController = class ChartController {
         const user = await this.userService.findOne(userId);
         return await this.chartService.generateChart(userId, user.birthDate || '1990-01-01', user.birthTime || '00:00', body.gender);
     }
-    findOne(userId) {
-        const chart = this.chartService.findOne(userId);
+    async findOne(userId) {
+        const chart = await this.chartService.findOne(userId);
         if (!chart) {
             return { message: '请先创建命盘', hasChart: false };
         }
@@ -49,7 +49,7 @@ __decorate([
     __param(0, (0, common_1.Param)('userId')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], ChartController.prototype, "findOne", null);
 exports.ChartController = ChartController = __decorate([
     (0, common_1.Controller)('charts'),

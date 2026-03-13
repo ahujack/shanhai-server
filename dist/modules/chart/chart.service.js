@@ -34,6 +34,8 @@ let ChartService = class ChartService {
         const personalityTraits = this.analyzePersonality(dayMaster, wuxingStrength);
         const fortuneSummary = this.analyzeFortune(dayMaster, wuxingStrength, gender);
         const suggestions = this.generateSuggestions(dayMaster, wuxingStrength);
+        const tenGods = this.calculateTenGods(yearGZ, monthGZ, dayGZ, hourGZ, dayMaster);
+        const conclusion = this.generateConclusion(dayMaster, wuxingStrength, tenGods);
         const chart = {
             userId,
             birthDate,
@@ -44,12 +46,14 @@ let ChartService = class ChartService {
             dayGanZhi: dayGZ,
             hourGanZhi: hourGZ,
             dayMaster,
+            tenGods,
             sun: this.getSunSign(month, day),
             moon: this.getMoonSign(month),
             wuxingStrength: wuxingStrength,
             personalityTraits,
             fortuneSummary,
             suggestions,
+            conclusion,
         };
         await this.prisma.baziChart.upsert({
             where: { userId },
@@ -110,12 +114,14 @@ let ChartService = class ChartService {
             dayGanZhi: chart.dayGanZhi,
             hourGanZhi: chart.hourGanZhi,
             dayMaster: chart.dayMaster,
+            tenGods: this.calculateTenGods(chart.yearGanZhi, chart.monthGanZhi, chart.dayGanZhi, chart.hourGanZhi, chart.dayMaster),
             sun: chart.sun,
             moon: chart.moon,
             wuxingStrength: JSON.parse(chart.wuxingStrength),
             personalityTraits: JSON.parse(chart.personalityTraits),
             fortuneSummary: JSON.parse(chart.fortuneSummary),
             suggestions: JSON.parse(chart.suggestions),
+            conclusion: this.generateConclusion(chart.dayMaster, JSON.parse(chart.wuxingStrength), this.calculateTenGods(chart.yearGanZhi, chart.monthGanZhi, chart.dayGanZhi, chart.hourGanZhi, chart.dayMaster)),
         };
     }
     calculateYearGanZhi(year) {
@@ -277,6 +283,75 @@ let ChartService = class ChartService {
         };
         suggestions.push(`养生重点：${healthMap[wx]}`);
         return suggestions;
+    }
+    calculateTenGods(yearGZ, monthGZ, dayGZ, hourGZ, dayMaster) {
+        const yearStem = yearGZ.charAt(0);
+        const monthStem = monthGZ.charAt(0);
+        const dayStem = dayGZ.charAt(0);
+        const hourStem = hourGZ.charAt(0);
+        const yearGod = this.getTenGod(dayMaster, yearStem);
+        const monthGod = this.getTenGod(dayMaster, monthStem);
+        const dayGod = '日主';
+        const hourGod = this.getTenGod(dayMaster, hourStem);
+        const summary = [
+            `年柱见${yearGod}，早年环境与原生家庭对你影响较深。`,
+            `月柱见${monthGod}，工作方式与社会角色会更偏向这种能量。`,
+            `时柱见${hourGod}，中后期发展与长期目标会往这个方向生长。`,
+        ];
+        return { year: yearGod, month: monthGod, day: dayGod, hour: hourGod, summary };
+    }
+    getTenGod(dayMaster, targetStem) {
+        const stemMeta = {
+            '甲': { element: 'wood', polarity: 'yang' },
+            '乙': { element: 'wood', polarity: 'yin' },
+            '丙': { element: 'fire', polarity: 'yang' },
+            '丁': { element: 'fire', polarity: 'yin' },
+            '戊': { element: 'earth', polarity: 'yang' },
+            '己': { element: 'earth', polarity: 'yin' },
+            '庚': { element: 'metal', polarity: 'yang' },
+            '辛': { element: 'metal', polarity: 'yin' },
+            '壬': { element: 'water', polarity: 'yang' },
+            '癸': { element: 'water', polarity: 'yin' },
+        };
+        const generateMap = {
+            wood: 'fire',
+            fire: 'earth',
+            earth: 'metal',
+            metal: 'water',
+            water: 'wood',
+        };
+        const controlMap = {
+            wood: 'earth',
+            fire: 'metal',
+            earth: 'water',
+            metal: 'wood',
+            water: 'fire',
+        };
+        const master = stemMeta[dayMaster];
+        const target = stemMeta[targetStem];
+        if (!master || !target)
+            return '平衡';
+        const samePolarity = master.polarity === target.polarity;
+        if (master.element === target.element)
+            return samePolarity ? '比肩' : '劫财';
+        if (generateMap[master.element] === target.element)
+            return samePolarity ? '食神' : '伤官';
+        if (generateMap[target.element] === master.element)
+            return samePolarity ? '偏印' : '正印';
+        if (controlMap[master.element] === target.element)
+            return samePolarity ? '偏财' : '正财';
+        if (controlMap[target.element] === master.element)
+            return samePolarity ? '七杀' : '正官';
+        return '平衡';
+    }
+    generateConclusion(dayMaster, wuxing, tenGods) {
+        const dominant = Object.entries(wuxing).sort((a, b) => b[1] - a[1])[0]?.[0] || 'earth';
+        const weakness = Object.entries(wuxing).sort((a, b) => a[1] - b[1])[0]?.[0] || 'water';
+        const keyGod = tenGods.month;
+        return {
+            overall: `你是${dayMaster}日主，当前命盘核心呈现“${keyGod}”气质，主轴是先稳住内核，再扩展外部机会。`,
+            mindset: `五行以${dominant}偏旺、${weakness}偏弱，建议以“长期主义 + 节奏感”来做人生决策，避免情绪化硬冲。`,
+        };
     }
 };
 exports.ChartService = ChartService;

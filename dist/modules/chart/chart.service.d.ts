@@ -9,6 +9,13 @@ export interface BaziChart {
     dayGanZhi: string;
     hourGanZhi: string;
     dayMaster: string;
+    tenGods: {
+        year: string;
+        month: string;
+        day: string;
+        hour: string;
+        summary: string[];
+    };
     sun: string;
     moon: string;
     wuxingStrength: {
@@ -26,6 +33,10 @@ export interface BaziChart {
         health: string;
     };
     suggestions: string[];
+    conclusion: {
+        overall: string;
+        mindset: string;
+    };
 }
 export declare class ChartService {
     private prisma;
@@ -45,4 +56,7 @@ export declare class ChartService {
     private analyzePersonality;
     private analyzeFortune;
     private generateSuggestions;
+    private calculateTenGods;
+    private getTenGod;
+    private generateConclusion;
 }

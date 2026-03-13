@@ -14,6 +14,7 @@ export interface UserProfile {
   gender?: 'male' | 'female' | 'other';
   timezone?: string;
   location?: string;
+  focusGod?: string;
   phone?: string;
   email?: string;
   password?: string;
@@ -36,6 +37,7 @@ export interface CreateUserDto {
   gender?: 'male' | 'female' | 'other';
   timezone?: string;
   location?: string;
+  focusGod?: string;
 }
 
 interface VerificationCode {
