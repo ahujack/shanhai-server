@@ -332,6 +332,34 @@ export class PaymentService implements OnModuleInit {
     });
   }
 
+  // 查询支付状态（用于前端轮询支付完成）
+  async getPaymentStatusForUser(userId: string, paymentId: string) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { product: true },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('支付记录不存在');
+    }
+    if (payment.userId !== userId) {
+      throw new BadRequestException('无权查看该支付记录');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { membership: true },
+    });
+
+    return {
+      paymentId: payment.id,
+      status: payment.status,
+      productType: payment.product.type,
+      membership: user?.membership || 'free',
+      completedAt: payment.completedAt,
+    };
+  }
+
   // 初始化支付产品数据
   private async seedPaymentProducts() {
     const products = [

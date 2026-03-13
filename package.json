@@ -44,6 +44,7 @@
     "sharp": "^0.34.5",
     "smtp-server": "^3.18.1",
     "socks": "^2.8.7",
+    "solarlunar": "^3.1.0",
     "stripe": "^20.4.1"
   },
   "devDependencies": {

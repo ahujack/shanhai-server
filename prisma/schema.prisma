@@ -20,6 +20,11 @@ model User {
   phone         String?
   birthDate     String?
   birthTime     String?
+  calendarType  String    @default("solar") // solar | lunar
+  isLeapMonth   Boolean   @default(false)
+  birthLocation String?
+  birthLongitude Float?
+  birthLatitude  Float?
   gender        String?
   timezone      String    @default("Asia/Shanghai")
   location      String?

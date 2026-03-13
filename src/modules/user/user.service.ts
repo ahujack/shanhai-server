@@ -11,6 +11,11 @@ export interface UserProfile {
   name: string;
   birthDate?: string;
   birthTime?: string;
+  calendarType?: 'solar' | 'lunar';
+  isLeapMonth?: boolean;
+  birthLocation?: string;
+  birthLongitude?: number;
+  birthLatitude?: number;
   gender?: 'male' | 'female' | 'other';
   timezone?: string;
   location?: string;
@@ -34,6 +39,11 @@ export interface CreateUserDto {
   email?: string;
   birthDate?: string;
   birthTime?: string;
+  calendarType?: 'solar' | 'lunar';
+  isLeapMonth?: boolean;
+  birthLocation?: string;
+  birthLongitude?: number;
+  birthLatitude?: number;
   gender?: 'male' | 'female' | 'other';
   timezone?: string;
   location?: string;
@@ -212,12 +222,17 @@ export class UserService {
         name: dto.name,
         birthDate: dto.birthDate,
         birthTime: dto.birthTime,
+        calendarType: dto.calendarType || 'solar',
+        isLeapMonth: dto.isLeapMonth || false,
+        birthLocation: dto.birthLocation,
+        birthLongitude: dto.birthLongitude,
+        birthLatitude: dto.birthLatitude,
         gender: dto.gender,
         timezone: dto.timezone ?? 'Asia/Shanghai',
         location: dto.location,
         role: 'user',
         membership: 'free',
-      },
+      } as any,
     });
 
     return this.formatUser(user);
@@ -249,7 +264,7 @@ export class UserService {
       data: {
         ...dto,
         updatedAt: new Date(),
-      },
+      } as any,
     });
 
     return this.formatUser(user);

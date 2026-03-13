@@ -19,13 +19,24 @@ export class ChartController {
       userId,
       user.birthDate || '1990-01-01',
       user.birthTime || '00:00',
-      body.gender
+      body.gender,
+      {
+        calendarType: user.calendarType || 'solar',
+        isLeapMonth: user.isLeapMonth || false,
+        birthLongitude: user.birthLongitude,
+        timezone: user.timezone,
+        membership: (user.membership as 'free' | 'premium' | 'vip') || 'free',
+      },
     );
   }
 
   @Get(':userId')
   async findOne(@Param('userId') userId: string) {
-    const chart = await this.chartService.findOne(userId);
+    const user = await this.userService.findOne(userId);
+    const chart = await this.chartService.findOne(
+      userId,
+      (user.membership as 'free' | 'premium' | 'vip') || 'free',
+    );
     if (!chart) {
       return { message: '请先创建命盘', hasChart: false };
     }

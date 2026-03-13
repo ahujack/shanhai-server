@@ -119,4 +119,15 @@ export class PaymentController {
     );
   }
 
+  // 查询支付状态（用于支付后前端轮询）
+  @Get('status/:paymentId')
+  @UseGuards(RequireAuthGuard)
+  async getPaymentByIdStatus(
+    @Req() req: any,
+    @Param('paymentId') paymentId: string,
+  ) {
+    const userId = req.user.id;
+    return this.paymentService.getPaymentStatusForUser(userId, paymentId);
+  }
+
 }
