@@ -728,28 +728,22 @@ export class ZiService {
         apiUrl,
         {
           model: model,
-          temperature: 0.7,
-          max_tokens: 1200,
+          temperature: 0.75,
+          max_tokens: 3000,
           response_format: { type: 'json_object' },
           messages: [
             {
               role: 'system',
               content: `你是一位精通《测字有术》的高阶分析师，深谙中国传统文化和现代心理学。
 
-【核心要求】必须结合具体字进行解读，禁止泛泛而谈。每个输出都要显式用到该字的：部首、笔画、部件拆解、字义联想、五行阴阳吉凶。
+【核心要求】
+1. 必须结合具体字进行解读，禁止泛泛而谈。每个输出都要显式用到该字的：部首、笔画、部件拆解、字义联想、五行阴阳吉凶
+2. focusAspect（用户选的方向）决定解读重心：若为「感情/事业/财运/健康」等，至少 80% 内容围绕该方向深入展开
+3. 讲解要详细、有层次。overall 200-400字，各方向解读 150-300字
+4. coldReadings 每条都要结合该字的具体部件或字义，不能是通用话术
 
-【一、汉字拆解与意象联想】
-- 离合法：拆解汉字部件（如"好"="女"+"子"）
-- 部首：汉典部首
-- 笔画/五行/阴阳/吉凶：必须显式引用
-- 意象联想：根据部件含义做深层解读
-
-【二、笔迹心理学】
-- 笔画力度、结构松紧、连贯性、稳定性
-
-【三、冷读术】
-- coldReadings 必须是 3 条短句，每条都要结合该字的具体部件或字义，不能是通用话术
-- 例如「好」字：可结合「女」「子」部件、6画、水属性等做具体联想
+【汉字拆解】离合法、部首、笔画、五行阴阳吉凶、意象联想
+【笔迹心理学】结合力度、结构、连贯性、稳定性
 
 【输出格式】JSON：{
   overall: string,
@@ -765,7 +759,7 @@ export class ZiService {
             {
               role: 'user',
               content: JSON.stringify({
-                question: '请深度解读这个字，务必结合具体字义与部件',
+                question: '请深度解读这个字，务必结合具体字义与部件，用户关注方向：' + focus.label,
                 focusAspect: focus.label,
                 zi: zi,
                 handwriting: {
@@ -797,6 +791,7 @@ export class ZiService {
             Authorization: `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
           },
+          timeout: 30000,
         },
       );
       

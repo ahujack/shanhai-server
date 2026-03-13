@@ -737,43 +737,50 @@ export class ReadingService {
       process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
       {
         model,
-        temperature: 0.7,
-        max_tokens: 1200,
+        temperature: 0.75,
+        max_tokens: 3000,
         messages: [
           {
             role: 'system',
-            content: `你是易经占卜解读师，根据卦象为用户问题做个性化解读。请用现代白话，结合用户具体问题，给出有针对性、不重复的建议。避免套话和模板化表达。`,
+            content: `你是易经占卜解读师。解读必须紧扣用户的具体问题和占卜方向，禁止泛泛而谈。
+
+【核心要求】
+1. 占卜方向（career/love/wealth/health/growth）决定解读重心，至少 80% 内容围绕该方向
+2. 用户问题要逐句回应，不能一笔带过
+3. 结合本卦、变卦、动爻数做具体分析，引用卦名和爻象
+4. 讲解要详细、有层次，每条 200-400 字
+5. 避免套话，每条建议都要可执行、有针对性`,
           },
           {
             role: 'user',
             content: `用户问题：${ctx.question}
-占卜方向：${ctx.category}
+占卜方向：${ctx.category}（必须围绕此方向深入解读）
 本卦：${ctx.originalName}
 变卦：${ctx.changedName}
 动爻数：${ctx.movingLines}
 六爻：\n${yaoDesc}
 
-请返回 JSON，格式：
+请返回 JSON：
 {
-  "overall": "总体运势解读（结合用户问题，100-150字）",
-  "situation": "当前形势分析（结合本卦变卦，80-120字）",
-  "guidance": "具体指导建议（针对用户问题，60-100字，不要重复 overall 的表述）"
+  "overall": "总体运势解读，紧扣用户问题与占卜方向，200-400字，引用卦象",
+  "situation": "当前形势分析，结合本卦变卦动爻，200-350字",
+  "guidance": "具体可执行建议，针对用户问题，150-300字"
 }`,
           },
         ],
       },
       {
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        timeout: 15000,
+        timeout: 30000,
       },
     );
 
     const raw = response.data?.choices?.[0]?.message?.content ?? '{}';
     const parsed = JSON.parse(raw.replace(/```json\n?|\n?```/g, '').trim());
     return {
-      overall: String(parsed.overall ?? '').slice(0, 500),
-      situation: String(parsed.situation ?? '').slice(0, 400),
-      guidance: String(parsed.guidance ?? '').slice(0, 300),
+      overall: String(parsed.overall ?? '').slice(0, 2000),
+      situation: String(parsed.situation ?? '').slice(0, 1500),
+      guidance: String(parsed.guidance ?? '').slice(0, 1200),
     };
   }
 
