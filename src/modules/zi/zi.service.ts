@@ -265,6 +265,8 @@ export class ZiService {
     process.env.ORACLE_BONE_IMAGE_BASE_URL ||
     'https://raw.githubusercontent.com/Chinese-Traditional-Culture/JiaGuWen/master/i/';
   private readonly oracleBoneCacheMs = 24 * 60 * 60 * 1000;
+  // 测试阶段默认全放开；如需恢复分层，将环境变量设为 false
+  private readonly unlockAllForTest = process.env.ZI_UNLOCK_ALL_FOR_TEST !== 'false';
   
   /**
    * 测字主入口
@@ -861,6 +863,12 @@ export class ZiService {
     interpretation: ZiResult['interpretation'],
     membership: MembershipTier,
   ): ZiResult['interpretation'] {
+    if (this.unlockAllForTest) {
+      return {
+        ...interpretation,
+        premiumHint: undefined,
+      };
+    }
     if (membership === 'premium' || membership === 'vip') {
       return {
         ...interpretation,
@@ -992,6 +1000,7 @@ export class ZiService {
       '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
       '人': 2, '入': 2, '大': 3, '小': 3, '口': 3, '山': 3, '水': 4, '火': 4, '心': 4,
       '木': 4, '金': 8, '土': 3, '王': 4, '天': 4, '地': 6, '日': 4, '月': 4, '目': 5,
+      '走': 7, '回': 6, '问': 6, '運': 13, '运': 7, '開': 12, '开': 4,
     };
     return bihuaMap[zi] || 4;
   }
@@ -1136,7 +1145,7 @@ export class ZiService {
   private buildOracleBoneInsight(zi: string, parts: string[], membership: MembershipTier): ZiAnalysis['oracleBone'] {
     const candidates = this.normalizeOracleLookupChars(zi, parts);
     const fullImages = this.findOracleImagesByCandidates(candidates).slice(0, 3);
-    const isPaid = membership === 'premium' || membership === 'vip';
+    const isPaid = this.unlockAllForTest || membership === 'premium' || membership === 'vip';
     const images = isPaid ? fullImages : fullImages.slice(0, 1);
     const previewLocked = !isPaid && fullImages.length > images.length;
     const xiang = this.getXiangxingMeaning(zi);
