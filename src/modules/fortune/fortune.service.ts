@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import axios from 'axios';
 import { PrismaService } from '../../prisma.service';
 
 export interface FortuneSlip {
@@ -371,6 +372,8 @@ const socialLines = [
 
 @Injectable()
 export class FortuneService {
+  private readonly logger = new Logger(FortuneService.name);
+
   constructor(private prisma: PrismaService) {}
 
   private lastUserId: string | null = null;
@@ -468,8 +471,61 @@ export class FortuneService {
     };
   }
 
+  private async enhanceWithLLM(slip: FortuneSlip): Promise<FortuneSlip> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) return slip;
+    try {
+      const poemText = `${slip.poem.title}：${slip.poem.line1} ${slip.poem.line2} ${slip.poem.line3} ${slip.poem.line4}`;
+      const res = await axios.post(
+        process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
+        {
+          model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
+          temperature: 0.8,
+          max_tokens: 2000,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: `你是签诗解读师。根据签诗内容，为 overall/love/career/wealth/health 各生成 80-150 字的个性化解读，advice 生成 3-4 条可执行建议。每条必须不同、结合签诗意象，禁止雷同和套话。`,
+            },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                签诗: poemText,
+                原解读: slip.interpretation,
+                签运: slip.fortuneRank,
+              }),
+            },
+          ],
+        },
+        {
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 20000,
+        },
+      );
+      const raw = res.data?.choices?.[0]?.message?.content ?? '{}';
+      const parsed = JSON.parse(String(raw).replace(/```json\n?|\n?```/g, '').trim());
+      return {
+        ...slip,
+        interpretation: {
+          overall: String(parsed.overall ?? slip.interpretation.overall).slice(0, 500),
+          love: String(parsed.love ?? slip.interpretation.love).slice(0, 300),
+          career: String(parsed.career ?? slip.interpretation.career).slice(0, 300),
+          wealth: String(parsed.wealth ?? slip.interpretation.wealth).slice(0, 300),
+          health: String(parsed.health ?? slip.interpretation.health).slice(0, 300),
+        },
+        advice: Array.isArray(parsed.advice) && parsed.advice.length
+          ? parsed.advice.slice(0, 4).map((a: unknown) => String(a ?? '').slice(0, 80))
+          : slip.advice,
+      };
+    } catch (err) {
+      this.logger.warn(`抽签 LLM 增强失败: ${(err as Error).message}`);
+      return slip;
+    }
+  }
+
   // 获取今日运势
-  getDailyFortune(userId?: string): FortuneSlip {
+  async getDailyFortune(userId?: string): Promise<FortuneSlip> {
     const today = new Date().toISOString().split('T')[0];
     
     // 同一用户同一天返回相同签
@@ -483,13 +539,14 @@ export class FortuneService {
     const rng = this.createRng(seed);
     
     const index = seed % fortuneSlips.length;
-    const slip = this.decorateSlip(fortuneSlips[index], rng, seedKey);
-    
+    let slip = this.decorateSlip(fortuneSlips[index], rng, seedKey);
+    slip = await this.enhanceWithLLM(slip);
+
     // 缓存
     this.lastUserId = userId || null;
     this.lastDate = today;
     this.cachedSlip = slip;
-    
+
     return slip;
   }
 
@@ -499,7 +556,7 @@ export class FortuneService {
   }
 
   // 随机抽签
-  drawRandomSlip(): FortuneSlip {
+  async drawRandomSlip(): Promise<FortuneSlip> {
     const nowSeed = `${Date.now()}_${Math.random()}`;
     const seed = this.hashString(nowSeed);
     const rng = this.createRng(seed);
@@ -516,6 +573,7 @@ export class FortuneService {
     );
     const rankedPool = decoratedPool.filter((slip) => slip.fortuneRank === preferredRank);
     const pickPool = rankedPool.length ? rankedPool : decoratedPool;
-    return this.pick(pickPool, rng);
+    const slip = this.pick(pickPool, rng);
+    return this.enhanceWithLLM(slip);
   }
 }

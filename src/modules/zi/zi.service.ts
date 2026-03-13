@@ -309,40 +309,34 @@ export class ZiService {
       // 2. 汉字拆解分析
       const ziAnalysis = this.analyzeZi(char, membership);
       
-      // 3. 生成冷读话术（优先 LLM 结合具体字，失败则用模板）
+      // 3. 优先用 LLM 生成全部解读（overall/career/love/wealth/health/advice/coldReadings/focusReading）
       let coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
-      
-      // 4. 生成综合解读
-      const interpretation = this.generateInterpretation(handwriting, ziAnalysis, focus);
-      
-      // 5. 生成后续问题
+      let interpretation = this.generateInterpretation(handwriting, ziAnalysis, focus);
       const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis, focus);
-      
-      // 6. 尝试使用 LLM 增强（解读 + 冷读，必须结合具体字的部首/笔画/部件/字义）
+
       try {
-        const llmEnhancement = await this.getLLMEnhancement(char, handwriting, ziAnalysis, focus);
-        if (llmEnhancement) {
-          interpretation.overall = llmEnhancement.overall || interpretation.overall;
-          interpretation.career = llmEnhancement.career || interpretation.career;
-          interpretation.wealth = llmEnhancement.wealth || interpretation.wealth;
-          interpretation.love = llmEnhancement.love || interpretation.love;
-          interpretation.health = llmEnhancement.health || interpretation.health;
-          if (llmEnhancement.advice) {
-            interpretation.advice = [...interpretation.advice, ...llmEnhancement.advice].slice(0, 5);
-          }
-          if (llmEnhancement.focusReading && interpretation.focusReading) {
+        const llmResult = await this.getLLMEnhancement(char, handwriting, ziAnalysis, focus);
+        if (llmResult) {
+          interpretation = {
+            ...interpretation,
+            overall: llmResult.overall || interpretation.overall,
+            career: llmResult.career || interpretation.career,
+            love: llmResult.love || interpretation.love,
+            wealth: llmResult.wealth || interpretation.wealth,
+            health: llmResult.health || interpretation.health,
+            advice: (llmResult.advice?.length ? llmResult.advice : interpretation.advice).slice(0, 5),
+          };
+          if (llmResult.coldReadings?.length) coldReadings = llmResult.coldReadings.slice(0, 3);
+          if (llmResult.focusReading && interpretation.focusReading) {
             interpretation.focusReading = {
               ...interpretation.focusReading,
-              ...llmEnhancement.focusReading,
+              ...llmResult.focusReading,
               llmEnhanced: true,
             };
           }
-          if (llmEnhancement.coldReadings?.length) {
-            coldReadings = llmEnhancement.coldReadings.slice(0, 3);
-          }
         }
       } catch (error) {
-        this.logger.warn('LLM增强失败，使用本地分析', error);
+        this.logger.warn('LLM 解读失败，使用模板', error);
       }
       
       const layeredInterpretation = this.applyMembershipInterpretation(interpretation, membership);
@@ -745,16 +739,18 @@ export class ZiService {
 【汉字拆解】离合法、部首、笔画、五行阴阳吉凶、意象联想
 【笔迹心理学】结合力度、结构、连贯性、稳定性
 
-【输出格式】JSON：{
+【输出格式】JSON，以下字段必须全部返回且每条不同、结合该字：
+{
   overall: string,
-  career?: string,
-  love?: string,
-  wealth?: string,
-  health?: string,
+  career: string,
+  love: string,
+  wealth: string,
+  health: string,
   advice: string[],
-  coldReadings: string[];
-  focusReading?: { summary: string, anchors: string[], riskSignals: string[], actionPlan: string[] }
-}`,
+  coldReadings: string[],
+  focusReading?: { focus: string, summary: string, anchors: string[], riskSignals: string[], actionPlan: string[] }
+}
+career/love/wealth/health 每条 100-200 字，必须结合该字部首/部件/字义，禁止雷同。`,
             },
             {
               role: 'user',

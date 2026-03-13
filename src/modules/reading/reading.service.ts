@@ -533,10 +533,11 @@ export class ReadingService {
     const originalName = this.getHexagramName(original);
     const changedName = this.getHexagramName(changed);
     
-    // 优先用大模型生成解读，失败则回退模板
+    // 优先用大模型生成解读+建议，失败则回退模板
     let interpretation: DivinationResult['interpretation'];
+    let llmRecommendations: string[] | undefined;
     try {
-      interpretation = await this.generateInterpretationWithLLM({
+      const llmResult = await this.generateInterpretationWithLLM({
         question: dto.question,
         category: dto.category ?? 'general',
         originalName,
@@ -546,6 +547,12 @@ export class ReadingService {
         lines,
         movingLines,
       });
+      interpretation = {
+        overall: llmResult.overall,
+        situation: llmResult.situation,
+        guidance: llmResult.guidance,
+      };
+      llmRecommendations = llmResult.recommendations;
     } catch (err) {
       this.logger.warn(`LLM 解读失败，使用模板: ${(err as Error).message}`);
       interpretation = {
@@ -574,7 +581,7 @@ export class ReadingService {
       
       interpretation,
       
-      recommendations: this.generateRecommendations(original, changed, dto.category),
+      recommendations: (llmRecommendations?.length ? llmRecommendations : this.generateRecommendations(original, changed, dto.category)).slice(0, 5),
       
       timing: {
         suitable: this.getTimingSuggestion(originalName),
@@ -725,7 +732,7 @@ export class ReadingService {
     changed: number;
     lines: string[];
     movingLines: number;
-  }): Promise<DivinationResult['interpretation']> {
+  }): Promise<DivinationResult['interpretation'] & { recommendations?: string[] }> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
     if (!apiKey) throw new Error('DEEPSEEK_API_KEY 未配置');
@@ -764,8 +771,10 @@ export class ReadingService {
 {
   "overall": "总体运势解读，紧扣用户问题与占卜方向，200-400字，引用卦象",
   "situation": "当前形势分析，结合本卦变卦动爻，200-350字",
-  "guidance": "具体可执行建议，针对用户问题，150-300字"
-}`,
+  "guidance": "具体可执行建议，针对用户问题，150-300字",
+  "recommendations": ["建议1，针对用户问题，可执行", "建议2", "建议3"]
+}
+recommendations 必须紧扣用户问题和占卜方向，每条不同、可执行，禁止泛泛而谈。`,
           },
         ],
       },
@@ -777,10 +786,14 @@ export class ReadingService {
 
     const raw = response.data?.choices?.[0]?.message?.content ?? '{}';
     const parsed = JSON.parse(raw.replace(/```json\n?|\n?```/g, '').trim());
+    const recs = parsed.recommendations;
     return {
       overall: String(parsed.overall ?? '').slice(0, 2000),
       situation: String(parsed.situation ?? '').slice(0, 1500),
       guidance: String(parsed.guidance ?? '').slice(0, 1200),
+      recommendations: Array.isArray(recs) && recs.length >= 2
+        ? recs.slice(0, 5).map((r: unknown) => String(r ?? '').slice(0, 150))
+        : undefined,
     };
   }
 
