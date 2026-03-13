@@ -1189,7 +1189,7 @@ export class ChartService {
       };
 
       const apiUrl = process.env.BAZI_LLM_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
-      const model = process.env.BAZI_LLM_MODEL || 'deepseek-reasoner';
+      const model = process.env.BAZI_LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
       const response = await axios.post(
         apiUrl,
         {

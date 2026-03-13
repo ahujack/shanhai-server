@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import axios from 'axios';
 
 export type DivinationCategory = 'career' | 'love' | 'wealth' | 'health' | 'growth' | 'general';
 
@@ -50,6 +51,8 @@ export interface DivinationResult {
 
 @Injectable()
 export class ReadingService {
+  private readonly logger = new Logger(ReadingService.name);
+
   // 六十四卦数据
   private hexagrams: Record<string, {
     name: string;
@@ -530,6 +533,28 @@ export class ReadingService {
     const originalName = this.getHexagramName(original);
     const changedName = this.getHexagramName(changed);
     
+    // 优先用大模型生成解读，失败则回退模板
+    let interpretation: DivinationResult['interpretation'];
+    try {
+      interpretation = await this.generateInterpretationWithLLM({
+        question: dto.question,
+        category: dto.category ?? 'general',
+        originalName,
+        changedName,
+        original,
+        changed,
+        lines,
+        movingLines,
+      });
+    } catch (err) {
+      this.logger.warn(`LLM 解读失败，使用模板: ${(err as Error).message}`);
+      interpretation = {
+        overall: this.buildOverallInterpretation(originalName, dto.category, dto.question),
+        situation: this.analyzeSituation(original, changed, dto.question),
+        guidance: this.buildGuidance(originalName, dto.category),
+      };
+    }
+
     const result: DivinationResult = {
       id: `reading_${now}`,
       question: dto.question,
@@ -547,11 +572,7 @@ export class ReadingService {
         ),
       },
       
-      interpretation: {
-        overall: this.buildOverallInterpretation(originalName, dto.category, dto.question),
-        situation: this.analyzeSituation(original, changed, dto.question),
-        guidance: this.buildGuidance(originalName, dto.category),
-      },
+      interpretation,
       
       recommendations: this.generateRecommendations(original, changed, dto.category),
       
@@ -591,63 +612,43 @@ export class ReadingService {
       if (l === '7' || l === '9') return '1';
       return '0';
     };
-    const toChangedBinary = (l: string): string => {
-      if (l === '9') return '0';
-      if (l === '6') return '1';
-      return l === '7' ? '1' : '0';
-    };
 
     const original = this.linesToHexagram(lines.map(toOriginalBinary));
 
-    // 变卦：老阳变阴，老阴变阳
+    // 变卦：老阳9变阴、老阴6变阳，变卦的二进制用变后的爻值（7/9=阳=1, 6/8=阴=0）
     const changedLines = lines.map(l => {
       if (l === '9') return '6'; // 老阳变老阴
       if (l === '6') return '9'; // 老阴变老阳
       return l;
     });
-    const changed = this.linesToHexagram(changedLines.map(toChangedBinary));
+    const changed = this.linesToHexagram(changedLines.map(toOriginalBinary));
 
     return { original, changed, lines };
   }
 
-  // 爻转换为卦 - 返回0-63的数字索引
+  // 爻转换为卦 - 返回0-63的数字索引（标准：上爻为最高位，初爻为最低位）
   private linesToHexagram(binaryLines: string[]): number {
-    let lower = 0, upper = 0;
-    for (let i = 0; i < 3; i++) {
-      if (binaryLines[i] === '1') lower += Math.pow(2, 2 - i);
+    let index = 0;
+    for (let i = 0; i < 6; i++) {
+      if (binaryLines[i] === '1') index += Math.pow(2, 5 - i);
     }
-    for (let i = 3; i < 6; i++) {
-      if (binaryLines[i] === '1') upper += Math.pow(2, 5 - i);
-    }
-    return lower * 8 + upper;
+    return index;
   }
 
-  // 获取64卦名称
+  // 获取64卦名称（标准二进制映射：0=坤, 63=乾，参考先天八卦次序）
   private getHexagramName(index: number): string {
     const names: Record<number, string> = {
-      0: '坤为地', 1: '地雷复', 2: '地水师', 3: '地山谦',
-      4: '地天泰', 5: '地火明夷', 6: '地泽临', 7: '地天夬',
-      8: '地风升', 9: '地火晋',
-      10: '雷地豫', 11: '震为雷', 12: '雷水解', 13: '雷山小过',
-      14: '雷天大壮', 15: '雷火丰', 16: '雷泽归妹', 17: '雷风恒',
-      18: '雷泽随', 19: '雷天无妄',
-      20: '水地比', 21: '水雷屯', 22: '坎为水', 23: '水山蹇',
-      24: '水天需', 25: '水火既济', 26: '水泽节', 27: '水天讼',
-      28: '水风井', 29: '水火未济',
-      30: '山地剥', 31: '山雷颐', 32: '山水蒙', 33: '艮为山',
-      34: '山天大畜', 35: '山火贲', 36: '山泽损', 37: '山风蛊',
-      38: '山天大过', 39: '山天遯',
-      40: '天地否', 41: '天雷无妄', 42: '天水讼', 43: '天山遯',
-      44: '乾为天', 45: '天火同人', 46: '天泽履', 47: '天风姤',
-      48: '天雷无妄', 49: '天火同人',
-      50: '火地晋', 51: '火雷噬嗑', 52: '火水未济', 53: '火山旅',
-      54: '火天大有', 55: '离为火', 56: '火泽睽', 57: '火风鼎',
-      58: '火水未济', 59: '火天大有',
-      60: '泽地萃', 61: '泽雷随', 62: '泽水困', 63: '泽山咸',
+      0: '坤为地', 1: '地雷复', 2: '地水师', 3: '地泽临', 4: '地山谦', 5: '地火明夷', 6: '地风升', 7: '地天泰',
+      8: '雷地豫', 9: '震为雷', 10: '雷水解', 11: '雷泽归妹', 12: '雷山小过', 13: '雷火丰', 14: '雷风恒', 15: '雷天大壮',
+      16: '水地比', 17: '水雷屯', 18: '坎为水', 19: '水泽节', 20: '水山蹇', 21: '水火既济', 22: '水风井', 23: '水天需',
+      24: '泽地萃', 25: '泽雷随', 26: '泽水困', 27: '兑为泽', 28: '泽山咸', 29: '泽火革', 30: '泽风大过', 31: '泽天夬',
+      32: '山地剥', 33: '山雷颐', 34: '山水蒙', 35: '山泽损', 36: '艮为山', 37: '山火贲', 38: '山风蛊', 39: '山天大畜',
+      40: '火地晋', 41: '火雷噬嗑', 42: '火水未济', 43: '火泽睽', 44: '火山旅', 45: '离为火', 46: '火风鼎', 47: '火天大有',
+      48: '风地观', 49: '风雷益', 50: '风水涣', 51: '风泽中孚', 52: '风山渐', 53: '风火家人', 54: '巽为风', 55: '风天小畜',
+      56: '天地否', 57: '天雷无妄', 58: '天水讼', 59: '天泽履', 60: '天山遁', 61: '天火同人', 62: '天风姤', 63: '乾为天',
     };
-    // 确保索引在有效范围内
     const safeIndex = Math.max(0, Math.min(63, index));
-    return names[safeIndex] || '天地否';
+    return names[safeIndex] ?? '天地否';
   }
 
   // 获取爻描述
@@ -672,11 +673,11 @@ export class ReadingService {
   // 获取注意事项
   private getCaution(original: number, changed: number): string {
     const cautions: Record<number, string> = {
-      42: '避免与人争执，诉讼之事需慎重',
-      43: '退避不是逃避，是蓄势待发',
+      58: '避免与人争执，诉讼之事需慎重',
+      60: '退避不是逃避，是蓄势待发',
       45: '此时宜韬光养晦，不可锋芒毕露',
       62: '坚守正道，耐心等待转机',
-      30: '防止损失扩大，保护根本为上',
+      32: '防止损失扩大，保护根本为上',
     };
     return cautions[original] ?? '顺势而为，切勿强求';
   }
@@ -713,6 +714,67 @@ export class ReadingService {
     }
     
     return recommendations.slice(0, 3);
+  }
+
+  private async generateInterpretationWithLLM(ctx: {
+    question: string;
+    category: DivinationCategory;
+    originalName: string;
+    changedName: string;
+    original: number;
+    changed: number;
+    lines: string[];
+    movingLines: number;
+  }): Promise<DivinationResult['interpretation']> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
+    if (!apiKey) throw new Error('DEEPSEEK_API_KEY 未配置');
+
+    const yaoLabels = ['初', '二', '三', '四', '五', '上'];
+    const yaoDesc = ctx.lines.map((l, i) => `${yaoLabels[i]}：${this.getYaoDescription(l)}`).join('\n');
+
+    const response = await axios.post(
+      process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
+      {
+        model,
+        temperature: 0.7,
+        max_tokens: 1200,
+        messages: [
+          {
+            role: 'system',
+            content: `你是易经占卜解读师，根据卦象为用户问题做个性化解读。请用现代白话，结合用户具体问题，给出有针对性、不重复的建议。避免套话和模板化表达。`,
+          },
+          {
+            role: 'user',
+            content: `用户问题：${ctx.question}
+占卜方向：${ctx.category}
+本卦：${ctx.originalName}
+变卦：${ctx.changedName}
+动爻数：${ctx.movingLines}
+六爻：\n${yaoDesc}
+
+请返回 JSON，格式：
+{
+  "overall": "总体运势解读（结合用户问题，100-150字）",
+  "situation": "当前形势分析（结合本卦变卦，80-120字）",
+  "guidance": "具体指导建议（针对用户问题，60-100字，不要重复 overall 的表述）"
+}`,
+          },
+        ],
+      },
+      {
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 15000,
+      },
+    );
+
+    const raw = response.data?.choices?.[0]?.message?.content ?? '{}';
+    const parsed = JSON.parse(raw.replace(/```json\n?|\n?```/g, '').trim());
+    return {
+      overall: String(parsed.overall ?? '').slice(0, 500),
+      situation: String(parsed.situation ?? '').slice(0, 400),
+      guidance: String(parsed.guidance ?? '').slice(0, 300),
+    };
   }
 
   private buildSeed(question: string, category?: DivinationCategory, userId?: string): number {

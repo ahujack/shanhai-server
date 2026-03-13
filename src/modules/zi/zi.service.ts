@@ -309,8 +309,8 @@ export class ZiService {
       // 2. 汉字拆解分析
       const ziAnalysis = this.analyzeZi(char, membership);
       
-      // 3. 生成冷读话术
-      const coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
+      // 3. 生成冷读话术（优先 LLM 结合具体字，失败则用模板）
+      let coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
       
       // 4. 生成综合解读
       const interpretation = this.generateInterpretation(handwriting, ziAnalysis, focus);
@@ -318,7 +318,7 @@ export class ZiService {
       // 5. 生成后续问题
       const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis, focus);
       
-      // 6. 尝试使用 LLM 增强（如果可用）
+      // 6. 尝试使用 LLM 增强（解读 + 冷读，必须结合具体字的部首/笔画/部件/字义）
       try {
         const llmEnhancement = await this.getLLMEnhancement(char, handwriting, ziAnalysis, focus);
         if (llmEnhancement) {
@@ -336,6 +336,9 @@ export class ZiService {
               ...llmEnhancement.focusReading,
               llmEnhanced: true,
             };
+          }
+          if (llmEnhancement.coldReadings?.length) {
+            coldReadings = llmEnhancement.coldReadings.slice(0, 3);
           }
         }
       } catch (error) {
@@ -704,6 +707,7 @@ export class ZiService {
     love?: string;
     wealth?: string;
     health?: string;
+    coldReadings?: string[];
     focusReading?: {
       summary?: string;
       anchors?: string[];
@@ -717,61 +721,51 @@ export class ZiService {
     }
     
     try {
-      const apiUrl = process.env.LLM_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.apiyi.com/v1/chat/completions';
-      const model = process.env.LLM_MODEL || process.env.DEEPSEEK_MODEL || 'gemini-1.5-flash-002';
+      const apiUrl = process.env.DEEPSEEK_API_URL || process.env.LLM_API_URL || 'https://api.deepseek.com/chat/completions';
+      const model = process.env.DEEPSEEK_MODEL || process.env.LLM_MODEL || 'deepseek-chat';
       
       const response = await axios.post(
         apiUrl,
         {
           model: model,
           temperature: 0.7,
-          max_tokens: 900,
+          max_tokens: 1200,
           response_format: { type: 'json_object' },
           messages: [
             {
               role: 'system',
-              content: `你是一位精通《测字有术》的高阶分析师，深谙中国传统文化和现代心理学。你融合了以下三大核心技术：
+              content: `你是一位精通《测字有术》的高阶分析师，深谙中国传统文化和现代心理学。
 
-【一、笔迹心理学】
-- 笔画力度：轻重反映潜意识能量和情绪状态
-- 结构松紧：紧凑或松散反映自我认知和决断力
-- 连贯性：断笔/涂改反映决策时的犹豫程度
-- 稳定性：抖动反映焦虑程度
+【核心要求】必须结合具体字进行解读，禁止泛泛而谈。每个输出都要显式用到该字的：部首、笔画、部件拆解、字义联想、五行阴阳吉凶。
 
-【二、巴纳姆效应与冷读术】
-- 学会说"既像废话又像真话"的模糊预测
-- 利用巴纳姆效应：几乎适用于任何处于压力下的现代人
-- 通过观察（如果有用户画像信息）进行概率推断
-- 用试探性语言"套"信息，必要时用反问策略
+【一、汉字拆解与意象联想】
+- 离合法：拆解汉字部件（如"好"="女"+"子"）
+- 部首：汉典部首
+- 笔画/五行/阴阳/吉凶：必须显式引用
+- 意象联想：根据部件含义做深层解读
 
-【三、汉字拆解与意象联想】
-- 离合法：拆解汉字部件（如"安"="宀"+"女"）
-- 象形法：根据部件形状联想到具体事物（如"十"像十字路口/医院，"八"像分道扬镳）
-- 五行属性：结合金木水火土进行解读
-- 意象联想：根据部件含义进行深层解读
+【二、笔迹心理学】
+- 笔画力度、结构松紧、连贯性、稳定性
 
-【输出要求】
-1. 先进行笔迹分析（如果有效）
-2. 再进行汉字拆解和意象解读
-3. 融入冷读术技巧，让解读"神准"但不失真诚
-4. 给出实用心理建议
-5. 必要时可以反问用户获取更多信息
-6. 必须结合并显式使用：bihua(笔画)、wuxing(五行)、yinyang(阴阳)、jixiong(吉凶)四类锚点
-7. 若给出focusAspect，输出必须至少80%围绕该方向，避免泛泛而谈
-8. 输出JSON格式：{
+【三、冷读术】
+- coldReadings 必须是 3 条短句，每条都要结合该字的具体部件或字义，不能是通用话术
+- 例如「好」字：可结合「女」「子」部件、6画、水属性等做具体联想
+
+【输出格式】JSON：{
   overall: string,
   career?: string,
   love?: string,
   wealth?: string,
   health?: string,
   advice: string[],
+  coldReadings: string[];
   focusReading?: { summary: string, anchors: string[], riskSignals: string[], actionPlan: string[] }
 }`,
             },
             {
               role: 'user',
               content: JSON.stringify({
-                question: '请深度解读这个字',
+                question: '请深度解读这个字，务必结合具体字义与部件',
                 focusAspect: focus.label,
                 zi: zi,
                 handwriting: {
@@ -784,14 +778,15 @@ export class ZiService {
                 },
                 ziAnalysis: {
                   components: ziAnalysis.components,
-                  meanings: ziAnalysis.componentMeanings,
+                  componentMeanings: ziAnalysis.componentMeanings,
+                  bushou: ziAnalysis.bushou,
+                  bihua: ziAnalysis.bihua,
                   wuxing: ziAnalysis.wuxing,
                   yinyang: ziAnalysis.yinyang,
                   jixiong: ziAnalysis.jixiong,
-                  bihua: ziAnalysis.bihua,
-                  // 额外的解读信息
-                  xiangxing: this.getXiangxingMeaning(zi),
-                  tianGanDiZhi: this.getTianganDizhi(zi),
+                  associativeMeaning: ziAnalysis.associativeMeaning,
+                  lihefa: ziAnalysis.lihefa,
+                  tianziGe: ziAnalysis.tianziGe,
                 },
               }),
             },
