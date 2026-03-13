@@ -23,6 +23,7 @@ const ocr_service_1 = require("../ocr/ocr.service");
 class AnalyzeZiDto {
     zi;
     handwriting;
+    focusAspect;
     userId;
 }
 exports.AnalyzeZiDto = AnalyzeZiDto;
@@ -30,6 +31,11 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], AnalyzeZiDto.prototype, "zi", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], AnalyzeZiDto.prototype, "focusAspect", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),
@@ -46,6 +52,7 @@ __decorate([
 class AnalyzeHandwritingDto {
     image;
     userId;
+    focusAspect;
 }
 exports.AnalyzeHandwritingDto = AnalyzeHandwritingDto;
 __decorate([
@@ -57,6 +64,11 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], AnalyzeHandwritingDto.prototype, "userId", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], AnalyzeHandwritingDto.prototype, "focusAspect", void 0);
 let ZiController = ZiController_1 = class ZiController {
     ziService;
     ocrService;
@@ -66,7 +78,8 @@ let ZiController = ZiController_1 = class ZiController {
         this.ocrService = ocrService;
     }
     async analyze(dto) {
-        const result = await this.ziService.analyze(dto.zi, dto.handwriting);
+        const membership = await this.getMembership(dto.userId);
+        const result = await this.ziService.analyze(dto.zi, dto.handwriting, membership, dto.focusAspect);
         if (dto.userId) {
             try {
                 await this.prisma.ziAnalysis.create({
@@ -113,7 +126,8 @@ let ZiController = ZiController_1 = class ZiController {
                     error: '未能识别出汉字',
                 };
             }
-            const analysis = await this.ziService.analyze(zi);
+            const membership = await this.getMembership(dto.userId);
+            const analysis = await this.ziService.analyze(zi, undefined, membership, dto.focusAspect);
             if (dto.userId) {
                 try {
                     await this.prisma.ziAnalysis.create({
@@ -154,6 +168,23 @@ let ZiController = ZiController_1 = class ZiController {
                 error: error.message || '服务器错误',
             };
         }
+    }
+    async getMembership(userId) {
+        if (!userId)
+            return 'free';
+        try {
+            const user = await this.prisma.user.findUnique({
+                where: { id: userId },
+                select: { membership: true },
+            });
+            const membership = user?.membership;
+            if (membership === 'premium' || membership === 'vip')
+                return membership;
+        }
+        catch (error) {
+            common_2.Logger.warn(`读取用户会员失败: ${error.message}`, ZiController_1.name);
+        }
+        return 'free';
     }
 };
 exports.ZiController = ZiController;

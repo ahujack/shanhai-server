@@ -3,6 +3,7 @@ import { OcrService } from '../ocr/ocr.service';
 export declare class AnalyzeZiDto {
     zi: string;
     handwriting?: Partial<HandwritingAnalysis>;
+    focusAspect?: string;
     userId?: string;
 }
 export declare class RecognizeDto {
@@ -11,6 +12,7 @@ export declare class RecognizeDto {
 export declare class AnalyzeHandwritingDto {
     image: string;
     userId?: string;
+    focusAspect?: string;
 }
 export declare class ZiController {
     private readonly ziService;
@@ -33,4 +35,5 @@ export declare class ZiController {
         confidence?: undefined;
         analysis?: undefined;
     }>;
+    private getMembership;
 }

@@ -22,7 +22,22 @@ export interface ZiAnalysis {
     components: string[];
     componentMeanings: string[];
     associativeMeaning: string;
+    lihefa: string[];
+    tianziGe: string[];
+    imageryInference: string;
+    probingQuestion: string;
+    oracleBone: {
+        exists: boolean;
+        source: string;
+        imageUrls: string[];
+        totalImages: number;
+        shownImages: number;
+        previewLocked: boolean;
+        interpretation: string;
+        note: string;
+    };
 }
+type MembershipTier = 'free' | 'premium' | 'vip';
 export interface ZiResult {
     handwriting: HandwritingAnalysis;
     zi: ZiAnalysis;
@@ -33,6 +48,15 @@ export interface ZiResult {
         wealth: string;
         health: string;
         advice: string[];
+        focusReading?: {
+            focus: string;
+            summary: string;
+            anchors: string[];
+            riskSignals: string[];
+            actionPlan: string[];
+            llmEnhanced?: boolean;
+        };
+        premiumHint?: string;
     };
     coldReadings: string[];
     followUpQuestions: string[];
@@ -43,7 +67,14 @@ export interface ZiResult {
 }
 export declare class ZiService {
     private readonly logger;
-    analyze(zi: string, handwritingData?: Partial<HandwritingAnalysis>): Promise<ZiResult>;
+    private oracleBoneLexicon;
+    private oracleBoneLexiconLoading;
+    private oracleBoneLexiconLoadedAt;
+    private readonly oracleBoneIndexUrl;
+    private readonly oracleBoneImageBaseUrl;
+    private readonly oracleBoneCacheMs;
+    private readonly unlockAllForTest;
+    analyze(zi: string, handwritingData?: Partial<HandwritingAnalysis>, membership?: MembershipTier, focusAspect?: string): Promise<ZiResult>;
     private getDefaultResult;
     private analyzeHandwriting;
     private analyzeZi;
@@ -51,6 +82,15 @@ export declare class ZiService {
     private generateInterpretation;
     private generateFollowUpQuestions;
     private getLLMEnhancement;
+    private normalizeFocusAspect;
+    private applyFocusInterpretation;
+    private applyMembershipInterpretation;
+    private getFocusAdvice;
+    private getFocusFollowUpQuestion;
+    private getFocusRiskSignals;
+    private getFocusActionPlan;
+    private hashSeed;
+    private pickBySeed;
     private countBihua;
     private getBushou;
     private inferWuxing;
@@ -59,8 +99,19 @@ export declare class ZiService {
     private getGuaXiang;
     private breakDown;
     private getComponentMeanings;
+    private ensureOracleBoneLexicon;
+    private createOracleBoneMap;
+    private getOracleFallbackMap;
+    private buildOracleBoneInsight;
+    private normalizeOracleLookupChars;
+    private findOracleImagesByCandidates;
+    private buildLihefa;
+    private buildTianziGe;
+    private buildImageryInference;
+    private buildProbingQuestion;
     private getCareerByWuxing;
     private getHealthByWuxing;
     private getXiangxingMeaning;
     private getTianganDizhi;
 }
+export {};

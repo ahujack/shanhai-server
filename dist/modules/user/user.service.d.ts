@@ -7,6 +7,11 @@ export interface UserProfile {
     name: string;
     birthDate?: string;
     birthTime?: string;
+    calendarType?: 'solar' | 'lunar';
+    isLeapMonth?: boolean;
+    birthLocation?: string;
+    birthLongitude?: number;
+    birthLatitude?: number;
     gender?: 'male' | 'female' | 'other';
     timezone?: string;
     location?: string;
@@ -29,6 +34,11 @@ export interface CreateUserDto {
     email?: string;
     birthDate?: string;
     birthTime?: string;
+    calendarType?: 'solar' | 'lunar';
+    isLeapMonth?: boolean;
+    birthLocation?: string;
+    birthLongitude?: number;
+    birthLatitude?: number;
     gender?: 'male' | 'female' | 'other';
     timezone?: string;
     location?: string;

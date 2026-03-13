@@ -25,10 +25,17 @@ let ChartController = class ChartController {
     }
     async generate(userId, body) {
         const user = await this.userService.findOne(userId);
-        return await this.chartService.generateChart(userId, user.birthDate || '1990-01-01', user.birthTime || '00:00', body.gender);
+        return await this.chartService.generateChart(userId, user.birthDate || '1990-01-01', user.birthTime || '00:00', body.gender, {
+            calendarType: user.calendarType || 'solar',
+            isLeapMonth: user.isLeapMonth || false,
+            birthLongitude: user.birthLongitude,
+            timezone: user.timezone,
+            membership: user.membership || 'free',
+        });
     }
     async findOne(userId) {
-        const chart = await this.chartService.findOne(userId);
+        const user = await this.userService.findOne(userId);
+        const chart = await this.chartService.findOne(userId, user.membership || 'free');
         if (!chart) {
             return { message: '请先创建命盘', hasChart: false };
         }
