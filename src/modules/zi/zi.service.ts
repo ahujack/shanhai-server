@@ -1,6 +1,25 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as path from 'path';
+import * as fs from 'fs';
 import axios from 'axios';
 import { ORACLE_BONE_SNAPSHOT } from './oracle-bone.snapshot';
+
+// 汉典笔画部首数据（zdic），懒加载
+let zdicData: Record<string, [string, number]> | null = null;
+function getZdicData(): Record<string, [string, number]> {
+  if (!zdicData) {
+    try {
+      const jsonPath = path.join(
+        process.cwd(),
+        'node_modules/@vearvip/hanzi-radical-stroke-counts/src/dataSource/zdic_radical_stroke_counts.json',
+      );
+      zdicData = JSON.parse(fs.readFileSync(jsonPath, 'utf8')) as Record<string, [string, number]>;
+    } catch {
+      zdicData = {} as Record<string, [string, number]>;
+    }
+  }
+  return zdicData!;
+}
 
 // ========== 笔迹心理学分析 ==========
 export interface HandwritingAnalysis {
@@ -996,24 +1015,24 @@ export class ZiService {
   // ========== 辅助方法 ==========
   
   private countBihua(zi: string): number {
-    const bihuaMap: Record<string, number> = {
+    const zdic = getZdicData();
+    const entry = zdic[zi];
+    if (entry && Array.isArray(entry) && typeof entry[1] === 'number') {
+      return entry[1];
+    }
+    const fallback: Record<string, number> = {
       '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
-      '人': 2, '入': 2, '大': 3, '小': 3, '口': 3, '山': 3, '水': 4, '火': 4, '心': 4,
-      '木': 4, '金': 8, '土': 3, '王': 4, '天': 4, '地': 6, '日': 4, '月': 4, '目': 5,
-      '走': 7, '回': 6, '问': 6, '運': 13, '运': 7, '開': 12, '开': 4,
     };
-    return bihuaMap[zi] || 4;
+    return fallback[zi] ?? 4;
   }
   
   private getBushou(zi: string): string {
-    const map: Record<string, string> = {
-      '安': '宀', '定': '宀', '福': '示', '家': '宀', '守': '宀',
-      '想': '木', '困': '囗', '林': '木', '森': '木',
-      '情': '忄', '性': '忄', '怕': '忄', '恭': '心',
-      '爱': '爪', '采': '爪', '爵': '爪',
-      '财': '贝', '贵': '贝', '货': '贝',
-    };
-    return map[zi] || '其他';
+    const zdic = getZdicData();
+    const entry = zdic[zi];
+    if (entry && Array.isArray(entry) && typeof entry[0] === 'string') {
+      return entry[0];
+    }
+    return '其他';
   }
   
   private inferWuxing(zi: string): string {
