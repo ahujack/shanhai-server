@@ -13,6 +13,10 @@ export class AnalyzeZiDto {
 
   @IsOptional()
   @IsString()
+  focusAspect?: string;
+
+  @IsOptional()
+  @IsString()
   userId?: string;
 }
 
@@ -28,6 +32,10 @@ export class AnalyzeHandwritingDto {
   @IsOptional()
   @IsString()
   userId?: string;
+
+  @IsOptional()
+  @IsString()
+  focusAspect?: string;
 }
 
 @Controller('zi')
@@ -42,7 +50,7 @@ export class ZiController {
   @Post('analyze')
   async analyze(@Body() dto: AnalyzeZiDto) {
     const membership = await this.getMembership(dto.userId);
-    const result = await this.ziService.analyze(dto.zi, dto.handwriting, membership);
+    const result = await this.ziService.analyze(dto.zi, dto.handwriting, membership, dto.focusAspect);
 
     // 保存测字记录
     if (dto.userId) {
@@ -100,7 +108,7 @@ export class ZiController {
       
       // 2. 分析字义
       const membership = await this.getMembership(dto.userId);
-      const analysis = await this.ziService.analyze(zi, undefined, membership);
+      const analysis = await this.ziService.analyze(zi, undefined, membership, dto.focusAspect);
       
       // 保存测字记录
       if (dto.userId) {

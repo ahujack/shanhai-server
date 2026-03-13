@@ -144,6 +144,13 @@ interface OracleBoneEntry {
 }
 
 type MembershipTier = 'free' | 'premium' | 'vip';
+type FocusKey = 'career' | 'wealth' | 'love' | 'study' | 'health' | 'relationship' | 'general';
+
+interface FocusProfile {
+  key: FocusKey;
+  label: string;
+  custom?: string;
+}
 
 // 汉字拆解库
 const ziComponents: Record<string, { parts: string[]; meanings: string[]; association: string }> = {
@@ -258,9 +265,11 @@ export class ZiService {
     zi: string,
     handwritingData?: Partial<HandwritingAnalysis>,
     membership: MembershipTier = 'free',
+    focusAspect?: string,
   ): Promise<ZiResult> {
     try {
       const char = zi.charAt(0);
+      const focus = this.normalizeFocusAspect(focusAspect);
       await this.ensureOracleBoneLexicon();
       
       // 1. 笔迹分析
@@ -273,14 +282,14 @@ export class ZiService {
       const coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
       
       // 4. 生成综合解读
-      const interpretation = this.generateInterpretation(handwriting, ziAnalysis);
+      const interpretation = this.generateInterpretation(handwriting, ziAnalysis, focus);
       
       // 5. 生成后续问题
-      const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis);
+      const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis, focus);
       
       // 6. 尝试使用 LLM 增强（如果可用）
       try {
-        const llmEnhancement = await this.getLLMEnhancement(char, handwriting, ziAnalysis);
+        const llmEnhancement = await this.getLLMEnhancement(char, handwriting, ziAnalysis, focus);
         if (llmEnhancement) {
           interpretation.overall = llmEnhancement.overall || interpretation.overall;
           if (llmEnhancement.advice) {
@@ -524,7 +533,11 @@ export class ZiService {
   /**
    * 生成综合解读
    */
-  private generateInterpretation(handwriting: HandwritingAnalysis, zi: ZiAnalysis): ZiResult['interpretation'] {
+  private generateInterpretation(
+    handwriting: HandwritingAnalysis,
+    zi: ZiAnalysis,
+    focus: FocusProfile,
+  ): ZiResult['interpretation'] {
     const advice: string[] = [];
     
     // 基于手写特征的建议
@@ -557,7 +570,7 @@ export class ZiService {
     };
     advice.push(wuxingAdvice[zi.wuxing] || '保持良好生活习惯');
     
-    return {
+    const base: ZiResult['interpretation'] = {
       overall:
         `${handwriting.pressureInterpretation} ${handwriting.structureInterpretation} ` +
         `离合法显示「${zi.lihefa[0] || '先拆后合'}」，填字格提示「${zi.tianziGe[0] || '先看中心、再看边界'}」。` +
@@ -568,12 +581,13 @@ export class ZiService {
       health: `注意 ${this.getHealthByWuxing(zi.wuxing)}。`,
       advice: advice.slice(0, 4),
     };
+    return this.applyFocusInterpretation(base, zi, handwriting, focus);
   }
   
   /**
    * 生成后续问题（反问）
    */
-  private generateFollowUpQuestions(zi: ZiAnalysis): string[] {
+  private generateFollowUpQuestions(zi: ZiAnalysis, focus: FocusProfile): string[] {
     const questions: string[] = [];
     
     // 基于汉字生成问题
@@ -591,9 +605,13 @@ export class ZiService {
       questions.push('是关于财运还是事业？');
     }
     
-    // 通用问题
-    questions.push('最近是否有特别在意的事情？');
-    questions.push('这个字是你随意写的，还是有特别的想法？');
+    if (focus.key !== 'general') {
+      questions.unshift(this.getFocusFollowUpQuestion(focus, zi));
+    } else {
+      // 通用问题
+      questions.push('最近是否有特别在意的事情？');
+      questions.push('这个字是你随意写的，还是有特别的想法？');
+    }
     if (zi.probingQuestion) {
       questions.unshift(zi.probingQuestion);
     }
@@ -607,7 +625,8 @@ export class ZiService {
   private async getLLMEnhancement(
     zi: string, 
     handwriting: HandwritingAnalysis, 
-    ziAnalysis: ZiAnalysis
+    ziAnalysis: ZiAnalysis,
+    focus: FocusProfile,
   ): Promise<{ overall?: string; advice?: string[] } | null> {
     const apiKey = process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
@@ -654,12 +673,14 @@ export class ZiService {
 3. 融入冷读术技巧，让解读"神准"但不失真诚
 4. 给出实用心理建议
 5. 必要时可以反问用户获取更多信息
-6. 输出JSON格式：{ overall: string, advice: string[] }`,
+6. 若给出focusAspect，输出必须至少80%围绕该方向，避免泛泛而谈
+7. 输出JSON格式：{ overall: string, advice: string[] }`,
             },
             {
               role: 'user',
               content: JSON.stringify({
                 question: '请深度解读这个字',
+                focusAspect: focus.label,
                 zi: zi,
                 handwriting: {
                   pressure: handwriting.pressure,
@@ -700,6 +721,84 @@ export class ZiService {
     }
     
     return null;
+  }
+
+  private normalizeFocusAspect(raw?: string): FocusProfile {
+    const text = (raw || '').trim();
+    if (!text) return { key: 'general', label: '综合' };
+    const mapping: Array<{ key: FocusKey; label: string; patterns: RegExp[] }> = [
+      { key: 'career', label: '事业', patterns: [/事业|工作|职业|晋升|跳槽/] },
+      { key: 'wealth', label: '财运', patterns: [/财运|财富|赚钱|收入|投资/] },
+      { key: 'love', label: '婚恋', patterns: [/婚姻|感情|恋爱|伴侣|桃花/] },
+      { key: 'study', label: '学业', patterns: [/学业|考试|升学|学习/] },
+      { key: 'health', label: '健康', patterns: [/健康|身体|睡眠|压力|情绪/] },
+      { key: 'relationship', label: '人际', patterns: [/人际|关系|同事|合作|沟通/] },
+    ];
+    const hit = mapping.find((item) => item.patterns.some((pattern) => pattern.test(text)));
+    if (hit) return { key: hit.key, label: hit.label };
+    return { key: 'general', label: text, custom: text };
+  }
+
+  private applyFocusInterpretation(
+    base: ZiResult['interpretation'],
+    zi: ZiAnalysis,
+    handwriting: HandwritingAnalysis,
+    focus: FocusProfile,
+  ): ZiResult['interpretation'] {
+    if (focus.key === 'general') return base;
+
+    const focusLine = `你本次聚焦「${focus.label}」，因此本轮解读以该方向为主轴。`;
+    const focusedOverall = `${focusLine}${base.overall}`;
+    const map: Record<Exclude<FocusKey, 'general'>, string> = {
+      career: `事业主线：字中「${zi.components[0] || zi.zi}」意象偏${zi.wuxing}，建议走“${this.getCareerByWuxing(zi.wuxing)}”相关路径，先定3周内可交付结果，再争取资源位。`,
+      wealth: `财运主线：你当前更适合“稳现金流、控冲动决策”。${zi.jixiong === '吉' ? '可适度扩张' : '先守后攻'}，先做预算分层和风险上限。`,
+      love: `婚恋主线：你在关系里${zi.yinyang === '阳' ? '更主动' : '更敏感细腻'}，近期重点是“讲清边界+讲清期待”，先解决误解，再谈承诺。`,
+      study: `学业主线：字形重心显示你有持续投入能力，建议采用“短周期复盘”，以7天为一轮，先补弱项再冲高分题型。`,
+      health: `健康主线：${zi.wuxing}象偏强，近期建议把作息和恢复排在第一位，尤其注意${this.getHealthByWuxing(zi.wuxing)}相关负担，先稳睡眠再谈效率。`,
+      relationship: `人际主线：你当前更需要“少量高质量连接”，优先修复关键关系而非广撒网，表达上先共情再给结论。`,
+    };
+    const targeted = map[focus.key as Exclude<FocusKey, 'general'>] || `本轮聚焦「${focus.label}」，建议围绕这个主题做拆解与行动。`;
+    const focusAdvice = this.getFocusAdvice(focus, zi, handwriting);
+
+    return {
+      ...base,
+      overall: focusedOverall,
+      career: focus.key === 'career' ? targeted : base.career,
+      wealth: focus.key === 'wealth' ? targeted : base.wealth,
+      love: focus.key === 'love' ? targeted : base.love,
+      health: focus.key === 'health' ? targeted : base.health,
+      advice: [...focusAdvice, ...base.advice].slice(0, 5),
+    };
+  }
+
+  private getFocusAdvice(focus: FocusProfile, zi: ZiAnalysis, handwriting: HandwritingAnalysis): string[] {
+    const common = [`本轮建议只围绕「${focus.label}」，先做一件最小可执行动作。`];
+    const detailMap: Record<Exclude<FocusKey, 'general'>, string> = {
+      career: '把接下来7天的关键任务写成可量化目标，并给自己一个截止时间。',
+      wealth: '把支出分成“必要/可延后/可取消”三类，先完成现金流盘点。',
+      love: '先说感受再说诉求，避免在情绪高点做关系决定。',
+      study: '用番茄钟法做2轮深度学习，结束后立刻复盘错因。',
+      health: `近期优先修复作息，重点关注${this.getHealthByWuxing(zi.wuxing)}相关信号。`,
+      relationship: '先找一个关键对象做一次高质量沟通，避免信息堆积误解。',
+    };
+    const detail = detailMap[focus.key as Exclude<FocusKey, 'general'>];
+    if (!detail) return common;
+    if (handwriting.stability === 'shaky') {
+      return [...common, '先稳情绪再行动，避免在焦虑时做重大决策。', detail];
+    }
+    return [...common, detail];
+  }
+
+  private getFocusFollowUpQuestion(focus: FocusProfile, zi: ZiAnalysis): string {
+    const map: Record<Exclude<FocusKey, 'general'>, string> = {
+      career: `围绕事业看，「${zi.zi}」这个字最像你当前哪种职场状态：卡点、转折，还是冲刺？`,
+      wealth: `围绕财运看，你最近最想改善的是“收入增长”还是“支出控制”？`,
+      love: `围绕婚恋看，你更想先解决“沟通方式”还是“关系定位”？`,
+      study: `围绕学业看，你当前最大的阻碍是专注力、方法，还是时间管理？`,
+      health: `围绕健康看，你最明显的信号是睡眠、情绪，还是身体疲劳？`,
+      relationship: `围绕人际看，你最想先修复哪一段关系？`,
+    };
+    return map[focus.key as Exclude<FocusKey, 'general'>] || `围绕「${focus.label}」，你最想先突破的具体问题是什么？`;
   }
   
   // ========== 辅助方法 ==========
