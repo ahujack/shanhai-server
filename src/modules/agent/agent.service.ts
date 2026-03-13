@@ -21,6 +21,102 @@ export class AgentService {
     private readonly chartService: ChartService,
   ) {}
 
+  async *handleChatStream(dto: AgentChatDto): AsyncGenerator<Record<string, unknown>> {
+    if (!dto.message || dto.message.trim().length === 0) {
+      yield { type: 'error', message: '消息不能为空' };
+      return;
+    }
+    if (dto.message.length > 500) {
+      yield { type: 'error', message: '消息长度不能超过500字符' };
+      return;
+    }
+
+    const persona = this.resolvePersona(dto.personaId);
+    let userChart: any = null;
+    if (dto.userId) {
+      try {
+        userChart = await this.chartService.findOne(dto.userId);
+      } catch {
+        // ignore
+      }
+    }
+
+    const { intent, category, mood } = await this.classifyWithDeepSeek(dto, persona, userChart);
+    const actions: Array<{ type: string; label: string }> = [];
+    let artifacts: Record<string, unknown> = {};
+    let divinationCategory = category === 'emotion' ? 'love' : category;
+    divinationCategory = this.inferCategoryFromContext(dto) || divinationCategory;
+
+    if (intent === 'divination') {
+      try {
+        const reading = await this.readingService.generate({
+          question: dto.message,
+          category: divinationCategory as DivinationCategory || this.inferCategory(dto.message),
+          userId: dto.userId,
+        });
+        artifacts = { reading };
+        actions.push({ type: 'view_reading', label: '查看完整解读' });
+      } catch {
+        artifacts = { reading: null };
+      }
+    }
+    if (intent === 'meditation') {
+      artifacts = { meditation: this.buildMeditation({ ...dto, mood }) };
+      actions.push({ type: 'start_meditation', label: '开始冥想' });
+    }
+    if (intent === 'fortune') {
+      artifacts = { fortune: this.fortuneService.getDailyFortune(dto.userId) };
+      actions.push({ type: 'view_fortune', label: '查看今日运势' });
+    }
+    if (intent === 'chart') {
+      artifacts = { chart: userChart, hasChart: !!userChart };
+      if (userChart) actions.push({ type: 'view_chart', label: '查看命盘详情' });
+    }
+    if (intent === 'zi') {
+      const ziChar = this.extractZiFromMessage(dto.message);
+      artifacts = { ziSuggestion: { zi: ziChar } };
+      actions.push({ type: 'view_zi', label: '进入测字页面' });
+    }
+
+    let reply = '';
+    if (intent === 'chat') {
+      for await (const chunk of this.generateAIReplyStream(dto.message, persona, userChart, dto)) {
+        reply += chunk;
+        yield { type: 'chunk', content: chunk };
+      }
+    } else {
+      reply = await this.composeReply(persona, intent, dto.message, artifacts, userChart, dto);
+      yield { type: 'chunk', content: reply };
+    }
+    if (dto.userId) {
+      try {
+        await this.prisma.chatMessage.create({
+          data: {
+            userId: dto.userId,
+            message: dto.message,
+            reply,
+            intent,
+            personaId: dto.personaId,
+            mood: dto.mood || undefined,
+            artifacts: JSON.stringify(artifacts),
+          },
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    yield {
+      type: 'done',
+      persona: persona.id,
+      intent,
+      reply,
+      actions,
+      artifacts,
+      hasChart: !!userChart,
+    };
+  }
+
   async handleChat(dto: AgentChatDto) {
     // 验证输入
     if (!dto.message || dto.message.trim().length === 0) {
@@ -49,13 +145,15 @@ export class AgentService {
     let artifacts: Record<string, unknown> = {};
 
     // map emotion to wealth for divination
-    const divinationCategory = category === 'emotion' ? 'love' : category;
+    let divinationCategory = category === 'emotion' ? 'love' : category;
+    // 结合上下文修正 category：若用户问正缘/婚姻等，必须用 love
+    divinationCategory = this.inferCategoryFromContext(dto) || divinationCategory;
 
     if (intent === 'divination') {
       try {
         const reading = await this.readingService.generate({
           question: dto.message,
-          category: category as DivinationCategory || divinationCategory as DivinationCategory || this.inferCategory(dto.message),
+          category: divinationCategory as DivinationCategory || this.inferCategory(dto.message),
           userId: dto.userId,
         });
         artifacts = { reading };
@@ -181,7 +279,7 @@ export class AgentService {
           messages: [
             {
               role: 'system',
-              content: `你是一个山海灵境的 AI 助手，负责在"聊天/占卜/冥想/命盘/运势/测字"之间选择最合适的工具。请只返回 JSON，不要夹杂其它文字。
+              content: `你是一个山海灵境的 AI 助手，负责在"聊天/占卜/冥想/命盘/运势/测字"之间选择最合适的工具。请只返回 JSON，格式：{ "intent": "xxx", "category": "xxx" }。
 
 可选意图：
 - chat: 日常聊天、情绪倾诉、心理疏导、表达迷茫/困惑/纠结（优先选 chat，先多聊）
@@ -191,14 +289,21 @@ export class AgentService {
 - fortune: 用户想看今日运势、抽签
 - zi: 用户写了一个字要测字、问这个字怎么样
 
-重要：若用户只是在倾诉、说「迷茫」「困惑」「不知道怎么办」等，没有明确要占卜/问卦的意图，必须选 chat，先多聊一聊，不要占卜。
+当 intent 为 divination 时，必须根据用户问题（含上下文）返回 category：
+- love: 正缘、婚姻、伴侣、桃花、遇见、缘分、感情、恋爱
+- career: 工作、事业、职业、升职
+- wealth: 财运、财富、投资
+- health: 健康、身体
+- growth: 个人成长、迷茫、方向（仅当不涉及上述具体领域时）
+
+重要：结合上下文判断。若用户问「正缘在哪里」「什么时候遇见」等，category 必须为 love，不是 growth。
 
 ${contextInfo}`,
             },
             contextLines
               ? {
                   role: 'system',
-                  content: `最近对话（由近到远）：\n${contextLines}\n\n请优先结合这些上下文来判断意图，不要只看最后一句。`,
+                  content: `最近对话（由近到远）：\n${contextLines}\n\n请优先结合这些上下文来判断意图和 category，不要只看最后一句。若上下文显示用户在问婚姻/正缘，category 必须为 love。`,
                 }
               : null,
             {
@@ -208,6 +313,7 @@ ${contextInfo}`,
                 mood: dto.mood,
                 persona: { id: persona.id, name: persona.name },
                 hasChart: !!userChart,
+                context: contextLines || undefined,
               }),
             },
           ].filter(Boolean),
@@ -289,6 +395,20 @@ ${contextInfo}`,
     return 'growth';
   }
 
+  /** 结合上下文推断占卜方向，优先识别 love（正缘/婚姻等） */
+  private inferCategoryFromContext(dto: AgentChatDto): DivinationCategory | undefined {
+    const fullText = [
+      dto.message,
+      ...(dto.context || []),
+    ].join(' ');
+    const loveKeywords = ['正缘', '婚姻', '伴侣', '桃花', '遇见', '缘分', '恋爱', '对象', '脱单'];
+    if (loveKeywords.some((k) => fullText.includes(k))) return 'love';
+    if (fullText.includes('工作') || fullText.includes('事业') || fullText.includes('职业')) return 'career';
+    if (fullText.includes('财运') || fullText.includes('财富') || fullText.includes('钱')) return 'wealth';
+    if (fullText.includes('健康') || fullText.includes('身体')) return 'health';
+    return undefined;
+  }
+
   private resolvePersona(personaId?: string) {
     if (!personaId) {
       return this.personaService.findAll()[0];
@@ -328,6 +448,126 @@ ${contextInfo}`,
       mood: dto.mood ?? 'calm',
       script,
     };
+  }
+
+  /**
+   * 流式生成 AI 回复（仅 chat 意图使用）
+   */
+  private async *generateAIReplyStream(
+    message: string,
+    persona: PersonaSchema,
+    userChart: any,
+    dto: AgentChatDto,
+  ): AsyncGenerator<string> {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
+    if (!apiKey) {
+      yield this.getDefaultChatReply(persona, userChart);
+      return;
+    }
+
+    const recentMemory = dto.userId ? await this.fetchRecentChatMemory(dto.userId) : [];
+    const contextLines = (dto.context || []).slice(-8);
+    const conversationContext = [...recentMemory, ...contextLines].slice(-12).join('\n');
+
+    let contextInfo = '';
+    if (userChart) {
+      const wxNames: Record<string, string> = {
+        wood: '木', fire: '火', earth: '土', metal: '金', water: '水',
+      };
+      const dominantWx = Object.entries(userChart.wuxingStrength as Record<string, number>)
+        .sort((a, b) => b[1] - a[1])[0];
+      contextInfo = `
+用户命盘信息：
+- 八字：${userChart.yearGanZhi}年 ${userChart.monthGanZhi}月 ${userChart.dayGanZhi}日 ${userChart.hourGanZhi}时
+- 日主：${userChart.dayGanZhi}
+- 最强的五行：${wxNames[dominantWx[0]]}性 (${dominantWx[1]}%)
+- 性格特点：${userChart.personalityTraits.slice(0, 3).join('、')}
+`;
+    }
+
+    const systemPrompt = `${persona.description}
+
+你是${persona.name}，${persona.title}。
+${contextInfo}
+
+你的回复风格：
+- toneTags: ${persona.toneTags.join('、')}
+- 以现代白话为主，自然亲切，偶尔用一两句雅致词汇点缀即可
+- 不要刻意堆砌古文、诗词典故，避免「庚金之性」「子水桃花」等过于晦涩的表达
+- 理解用户的情感需求，给予温暖、有智慧的回应
+- 每次回复控制在100-200字之间，保持简洁有力
+- 绝对不要输出"角色名："前缀，不要输出舞台动作括号
+- 先回应用户当前语句的真实语义；如果信息不足，可温和追问
+
+注意：用户可能只是在倾诉，不要急着给出建议，先表达理解和共情。`;
+
+    const messages: Array<{ role: string; content: string }> = [
+      { role: 'system', content: systemPrompt },
+      ...(conversationContext
+        ? [{ role: 'system' as const, content: `近期对话：\n${conversationContext}\n\n请自然承接上下文。` }]
+        : []),
+      { role: 'user', content: message },
+    ];
+
+    try {
+      const apiUrl = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions';
+      const res = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.8,
+          max_tokens: 300,
+          stream: true,
+          messages,
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        yield this.getDefaultChatReply(persona, userChart);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullContent = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed?.choices?.[0]?.delta?.content;
+              if (content) {
+                fullContent += content;
+                yield content;
+              }
+            } catch {
+              // ignore parse errors
+            }
+          }
+        }
+      }
+
+      if (!fullContent.trim()) {
+        yield this.getDefaultChatReply(persona, userChart);
+      }
+    } catch (error) {
+      this.logger.error(`DeepSeek 流式生成失败: ${(error as Error).message}`);
+      yield this.getDefaultChatReply(persona, userChart);
+    }
   }
 
   /**
@@ -378,8 +618,8 @@ ${contextInfo}
 
 你的回复风格：
 - toneTags: ${persona.toneTags.join('、')}
-- 文字可稍带古风，用词雅致（如「缘」「心绪」「暮色」「明灯」等），但不要过于晦涩
-- 适当引用诗词典故增添文化韵味
+- 以现代白话为主，自然亲切，偶尔用一两句雅致词汇点缀即可
+- 不要刻意堆砌古文、诗词典故，避免「庚金之性」「子水桃花」等过于晦涩的表达
 - 理解用户的情感需求，给予温暖、有智慧的回应
 - 每次回复控制在100-200字之间，保持简洁有力
 - 如果用户提到命理相关内容，可以适当引用用户的八字信息给出个性化建议
