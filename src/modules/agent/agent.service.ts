@@ -282,12 +282,18 @@ export class AgentService {
               content: `你是一个山海灵境的 AI 助手，负责在"聊天/占卜/冥想/命盘/运势/测字"之间选择最合适的工具。请只返回 JSON，格式：{ "intent": "xxx", "category": "xxx" }。
 
 可选意图：
-- chat: 日常聊天、情绪倾诉、心理疏导、表达迷茫/困惑/纠结（优先选 chat，先多聊）
-- divination: 仅当用户明确说想占卜、问卦、起卦、算命、算一卦时
+- chat: 日常聊天、情绪倾诉、心理疏导、表达迷茫/困惑/纠结、追问、附和、简短回复（优先选 chat，先多聊）
+- divination: 仅当用户明确说出「占卜」「问卦」「起卦」「算一卦」「帮我算一卦」「我想问卦」等词时
 - meditation: 用户焦虑、失眠、想静心
 - chart: 用户想查看命盘、八字、个人分析
 - fortune: 用户想看今日运势、抽签
 - zi: 用户写了一个字要测字、问这个字怎么样
+
+【占卜触发极严格】以下情况一律选 chat，绝不选 divination：
+- 追问、附和：然后呢、那怎么办、你觉得呢、嗯、好的、谢谢、继续
+- 倾诉、表达感受：迷茫、纠结、不顺、不知道怎么办（未明确说想占卜）
+- 延续对话、简短回复
+宁可漏掉占卜（用户可再说一次），绝不要误判。有疑虑时一律选 chat。
 
 当 intent 为 divination 时，必须根据用户问题（含上下文）返回 category：
 - love: 正缘、婚姻、伴侣、桃花、遇见、缘分、感情、恋爱
@@ -303,7 +309,7 @@ ${contextInfo}`,
             contextLines
               ? {
                   role: 'system',
-                  content: `最近对话（由近到远）：\n${contextLines}\n\n请优先结合这些上下文来判断意图和 category，不要只看最后一句。若上下文显示用户在问婚姻/正缘，category 必须为 love。`,
+                  content: `最近对话（由近到远）：\n${contextLines}\n\n请结合上下文判断。若助手最近一条回复已包含「所得卦象」「卦象」等，说明刚占卜过，用户下一条（追问、那怎么办等）一律选 chat，不要再次占卜。若用户在问婚姻/正缘，category 必须为 love。`,
                 }
               : null,
             {
@@ -331,7 +337,18 @@ ${contextInfo}`,
       const parsed = JSON.parse(raw);
 
       const validIntents: AgentIntent[] = ['chat', 'divination', 'meditation', 'chart', 'fortune', 'zi'];
-      const intent: AgentIntent = validIntents.includes(parsed.intent) ? parsed.intent : 'chat';
+      let intent: AgentIntent = validIntents.includes(parsed.intent) ? parsed.intent : 'chat';
+
+      // 若上下文显示刚占卜过，用户下一条一律 chat，避免连续弹卦象
+      const contextStr = (dto.context || []).join('');
+      const followUpPatterns = /然后呢|那怎么办|你觉得呢|嗯|好的|谢谢|继续|还有呢|然后呢/;
+      if (
+        intent === 'divination' &&
+        (contextStr.includes('所得卦象') || contextStr.includes('卦象')) &&
+        (dto.message.length <= 15 || followUpPatterns.test(dto.message.trim()))
+      ) {
+        intent = 'chat';
+      }
 
       return {
         intent,
