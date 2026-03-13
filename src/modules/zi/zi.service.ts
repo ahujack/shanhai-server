@@ -228,6 +228,15 @@ export interface ZiResult {
     wealth: string;
     health: string;
     advice: string[];
+    focusReading?: {
+      focus: string;
+      summary: string;
+      anchors: string[];
+      riskSignals: string[];
+      actionPlan: string[];
+      llmEnhanced?: boolean;
+    };
+    premiumHint?: string;
   };
   
   // 冷读话术
@@ -292,18 +301,30 @@ export class ZiService {
         const llmEnhancement = await this.getLLMEnhancement(char, handwriting, ziAnalysis, focus);
         if (llmEnhancement) {
           interpretation.overall = llmEnhancement.overall || interpretation.overall;
+          interpretation.career = llmEnhancement.career || interpretation.career;
+          interpretation.wealth = llmEnhancement.wealth || interpretation.wealth;
+          interpretation.love = llmEnhancement.love || interpretation.love;
+          interpretation.health = llmEnhancement.health || interpretation.health;
           if (llmEnhancement.advice) {
             interpretation.advice = [...interpretation.advice, ...llmEnhancement.advice].slice(0, 5);
+          }
+          if (llmEnhancement.focusReading && interpretation.focusReading) {
+            interpretation.focusReading = {
+              ...interpretation.focusReading,
+              ...llmEnhancement.focusReading,
+              llmEnhanced: true,
+            };
           }
         }
       } catch (error) {
         this.logger.warn('LLM增强失败，使用本地分析', error);
       }
       
+      const layeredInterpretation = this.applyMembershipInterpretation(interpretation, membership);
       return {
         handwriting,
         zi: ziAnalysis,
-        interpretation,
+        interpretation: layeredInterpretation,
         coldReadings,
         followUpQuestions,
         metadata: {
@@ -370,6 +391,7 @@ export class ZiService {
         wealth: '财运平稳，需稳扎稳打。',
         health: '注意身体健康，保持良好作息。',
         advice: ['保持良好生活习惯', '注意休息', '适度运动'],
+        premiumHint: '升级会员可解锁完整方向锚点、风险信号和行动计划。',
       },
       coldReadings: ['从你的字来看，是个有想法的人。', '你很重视身边的人和事。', '你是个值得信赖的人。'],
       followUpQuestions: ['最近是否有特别在意的事情？', '这个字是你随意写的，还是有特别的想法？'],
@@ -442,6 +464,11 @@ export class ZiService {
    */
   private analyzeZi(zi: string, membership: MembershipTier): ZiAnalysis {
     const char = zi.charAt(0);
+    const bihua = this.countBihua(char);
+    const wuxing = this.inferWuxing(char);
+    const yinyang = bihua % 2 === 0 ? '阴' : '阳';
+    const jixiong = this.inferJixiong(char);
+    const yijing = this.getYijing(char);
     
     // 检查是否有预设数据
     const preset = ziComponents[char];
@@ -449,12 +476,12 @@ export class ZiService {
       return {
         zi: char,
         bushou: this.getBushou(char),
-        bihua: this.countBihua(char),
-        wuxing: this.inferWuxing(char),
-        yinyang: this.countBihua(char) % 2 === 0 ? '阴' : '阳',
-        jixiong: this.inferJixiong(char),
-        yijing: this.getYijing(char),
-        guaXiang: this.getGuaXiang(char),
+        bihua,
+        wuxing,
+        yinyang,
+        jixiong,
+        yijing,
+        guaXiang: this.getGuaXiang(yijing, { wuxing, yinyang, jixiong, bihua }),
         components: preset.parts,
         componentMeanings: preset.meanings,
         associativeMeaning: preset.association,
@@ -470,12 +497,12 @@ export class ZiService {
     return {
       zi: char,
       bushou: this.getBushou(char),
-      bihua: this.countBihua(char),
-      wuxing: this.inferWuxing(char),
-      yinyang: this.countBihua(char) % 2 === 0 ? '阴' : '阳',
-      jixiong: this.inferJixiong(char),
-      yijing: this.getYijing(char),
-      guaXiang: this.getGuaXiang(char),
+      bihua,
+      wuxing,
+      yinyang,
+      jixiong,
+      yijing,
+      guaXiang: this.getGuaXiang(yijing, { wuxing, yinyang, jixiong, bihua }),
       components: this.breakDown(char),
       componentMeanings: this.getComponentMeanings(char),
       associativeMeaning: `此字需细加品味，可从字形、字义、字音多角度联想。`,
@@ -627,7 +654,20 @@ export class ZiService {
     handwriting: HandwritingAnalysis, 
     ziAnalysis: ZiAnalysis,
     focus: FocusProfile,
-  ): Promise<{ overall?: string; advice?: string[] } | null> {
+  ): Promise<{
+    overall?: string;
+    advice?: string[];
+    career?: string;
+    love?: string;
+    wealth?: string;
+    health?: string;
+    focusReading?: {
+      summary?: string;
+      anchors?: string[];
+      riskSignals?: string[];
+      actionPlan?: string[];
+    };
+  } | null> {
     const apiKey = process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
       return null;
@@ -642,7 +682,7 @@ export class ZiService {
         {
           model: model,
           temperature: 0.7,
-          max_tokens: 500,
+          max_tokens: 900,
           response_format: { type: 'json_object' },
           messages: [
             {
@@ -673,8 +713,17 @@ export class ZiService {
 3. 融入冷读术技巧，让解读"神准"但不失真诚
 4. 给出实用心理建议
 5. 必要时可以反问用户获取更多信息
-6. 若给出focusAspect，输出必须至少80%围绕该方向，避免泛泛而谈
-7. 输出JSON格式：{ overall: string, advice: string[] }`,
+6. 必须结合并显式使用：bihua(笔画)、wuxing(五行)、yinyang(阴阳)、jixiong(吉凶)四类锚点
+7. 若给出focusAspect，输出必须至少80%围绕该方向，避免泛泛而谈
+8. 输出JSON格式：{
+  overall: string,
+  career?: string,
+  love?: string,
+  wealth?: string,
+  health?: string,
+  advice: string[],
+  focusReading?: { summary: string, anchors: string[], riskSignals: string[], actionPlan: string[] }
+}`,
             },
             {
               role: 'user',
@@ -694,6 +743,7 @@ export class ZiService {
                   components: ziAnalysis.components,
                   meanings: ziAnalysis.componentMeanings,
                   wuxing: ziAnalysis.wuxing,
+                  yinyang: ziAnalysis.yinyang,
                   jixiong: ziAnalysis.jixiong,
                   bihua: ziAnalysis.bihua,
                   // 额外的解读信息
@@ -746,19 +796,32 @@ export class ZiService {
     focus: FocusProfile,
   ): ZiResult['interpretation'] {
     if (focus.key === 'general') return base;
-
-    const focusLine = `你本次聚焦「${focus.label}」，因此本轮解读以该方向为主轴。`;
+    const anchors = [
+      `笔画锚点：${zi.bihua}画，节奏偏${zi.bihua % 2 === 0 ? '稳中求进' : '先动后稳'}`,
+      `五行锚点：${zi.wuxing}性主导，映射到「${focus.label}」议题的核心策略`,
+      `阴阳锚点：${zi.yinyang}性，决定你在该议题里的表达方式`,
+      `吉凶锚点：${zi.jixiong}，提示当前窗口更适合“${zi.jixiong === '吉' ? '推进' : zi.jixiong === '凶' ? '收敛防错' : '稳态试探'}”`,
+    ];
+    const focusLine = `你本次聚焦「${focus.label}」，以下用笔画/五行/阴阳/吉凶四锚做定向解读。`;
     const focusedOverall = `${focusLine}${base.overall}`;
     const map: Record<Exclude<FocusKey, 'general'>, string> = {
-      career: `事业主线：字中「${zi.components[0] || zi.zi}」意象偏${zi.wuxing}，建议走“${this.getCareerByWuxing(zi.wuxing)}”相关路径，先定3周内可交付结果，再争取资源位。`,
-      wealth: `财运主线：你当前更适合“稳现金流、控冲动决策”。${zi.jixiong === '吉' ? '可适度扩张' : '先守后攻'}，先做预算分层和风险上限。`,
-      love: `婚恋主线：你在关系里${zi.yinyang === '阳' ? '更主动' : '更敏感细腻'}，近期重点是“讲清边界+讲清期待”，先解决误解，再谈承诺。`,
-      study: `学业主线：字形重心显示你有持续投入能力，建议采用“短周期复盘”，以7天为一轮，先补弱项再冲高分题型。`,
-      health: `健康主线：${zi.wuxing}象偏强，近期建议把作息和恢复排在第一位，尤其注意${this.getHealthByWuxing(zi.wuxing)}相关负担，先稳睡眠再谈效率。`,
-      relationship: `人际主线：你当前更需要“少量高质量连接”，优先修复关键关系而非广撒网，表达上先共情再给结论。`,
+      career: `事业详解：${anchors[0]}；${anchors[1]}。当前更适合以${this.getCareerByWuxing(zi.wuxing)}为主轴，先拿“可验证成绩”，再谈岗位跃迁。`,
+      wealth: `财运详解：${anchors[2]}；${anchors[3]}。本阶段先稳现金流和风险边界，再做增量策略，避免情绪型投入。`,
+      love: `婚恋详解：${anchors[2]}；${anchors[1]}。关系关键在“先对齐期待，再对齐行动”，把误会和承诺拆开处理更有效。`,
+      study: `学业详解：${anchors[0]}；${anchors[3]}。建议做“7天-14天”双周期复盘，先补短板再冲刺高分区。`,
+      health: `健康详解：${anchors[1]}；${anchors[3]}。重点关注${this.getHealthByWuxing(zi.wuxing)}信号，先修复作息与恢复，再提升负荷。`,
+      relationship: `人际详解：${anchors[2]}；${anchors[0]}。优先修复关键关系，沟通用“先共情后结论”，减少对抗成本。`,
     };
-    const targeted = map[focus.key as Exclude<FocusKey, 'general'>] || `本轮聚焦「${focus.label}」，建议围绕这个主题做拆解与行动。`;
+    const targeted = map[focus.key as Exclude<FocusKey, 'general'>] || `本轮聚焦「${focus.label}」，建议围绕该主题做拆解与行动。`;
     const focusAdvice = this.getFocusAdvice(focus, zi, handwriting);
+    const focusReading: NonNullable<ZiResult['interpretation']['focusReading']> = {
+      focus: focus.label,
+      summary: targeted,
+      anchors,
+      riskSignals: this.getFocusRiskSignals(focus, zi, handwriting),
+      actionPlan: this.getFocusActionPlan(focus, zi),
+      llmEnhanced: false,
+    };
 
     return {
       ...base,
@@ -768,6 +831,36 @@ export class ZiService {
       love: focus.key === 'love' ? targeted : base.love,
       health: focus.key === 'health' ? targeted : base.health,
       advice: [...focusAdvice, ...base.advice].slice(0, 5),
+      focusReading,
+    };
+  }
+
+  private applyMembershipInterpretation(
+    interpretation: ZiResult['interpretation'],
+    membership: MembershipTier,
+  ): ZiResult['interpretation'] {
+    if (membership === 'premium' || membership === 'vip') {
+      return {
+        ...interpretation,
+        premiumHint: undefined,
+      };
+    }
+    if (!interpretation.focusReading) {
+      return {
+        ...interpretation,
+        premiumHint: '升级会员可解锁完整方向推演（关键锚点/风险信号/行动计划）。',
+      };
+    }
+    return {
+      ...interpretation,
+      focusReading: {
+        ...interpretation.focusReading,
+        anchors: interpretation.focusReading.anchors.slice(0, 1),
+        riskSignals: interpretation.focusReading.riskSignals.slice(0, 1),
+        actionPlan: interpretation.focusReading.actionPlan.slice(0, 1),
+        llmEnhanced: false,
+      },
+      premiumHint: '当前为方向简版。升级会员可查看完整锚点、风险清单和3步行动计划。',
     };
   }
 
@@ -799,6 +892,62 @@ export class ZiService {
       relationship: `围绕人际看，你最想先修复哪一段关系？`,
     };
     return map[focus.key as Exclude<FocusKey, 'general'>] || `围绕「${focus.label}」，你最想先突破的具体问题是什么？`;
+  }
+
+  private getFocusRiskSignals(
+    focus: FocusProfile,
+    zi: ZiAnalysis,
+    handwriting: HandwritingAnalysis,
+  ): string[] {
+    const common = [
+      handwriting.stability === 'shaky' ? '情绪波动会放大判断偏差。' : '当前状态可执行，但仍需定期复盘。',
+      zi.jixiong === '凶' ? '本阶段忌大跨度冒进，先守关键盘。' : '窗口偏中性/偏吉，可稳步推进。',
+    ];
+    const map: Record<Exclude<FocusKey, 'general'>, string> = {
+      career: '避免同时推进过多目标，防止产出分散。',
+      wealth: '避免高杠杆与冲动消费，先定止损线。',
+      love: '避免在高情绪时下结论，先确认事实再表达诉求。',
+      study: '避免只刷题不复盘，错因不清会反复失分。',
+      health: '避免透支作息，恢复不足会拖累全部计划。',
+      relationship: '避免冷处理拖延，关系问题会累积成本。',
+    };
+    return [...common, map[focus.key as Exclude<FocusKey, 'general'>]].slice(0, 3);
+  }
+
+  private getFocusActionPlan(focus: FocusProfile, zi: ZiAnalysis): string[] {
+    const map: Record<Exclude<FocusKey, 'general'>, string[]> = {
+      career: [
+        '列出本周1个可量化产出，48小时内开工。',
+        '把关键协作对象和时间点提前锁定。',
+        '每周复盘一次：结果、阻碍、下一步。',
+      ],
+      wealth: [
+        '先做30天现金流表，再定增收目标。',
+        '将支出分为必要/可延后/可取消三层。',
+        '设置风险上限，超过即暂停。',
+      ],
+      love: [
+        '先说感受，再说需求，最后说可执行请求。',
+        '约定一次“无打断沟通”时段。',
+        '对关键议题设一个小闭环时间点。',
+      ],
+      study: [
+        '按7天周期做计划，14天做复盘。',
+        '每天先做最难模块，再做巩固题。',
+        '错题按原因分类并回练。',
+      ],
+      health: [
+        '先把入睡时间固定，再谈训练强度。',
+        `重点观察${this.getHealthByWuxing(zi.wuxing)}相关不适并及时调整。`,
+        '每周安排至少1天低负荷恢复。',
+      ],
+      relationship: [
+        '先选一段关键关系做修复。',
+        '沟通采用“先确认对方感受，再提出诉求”。',
+        '给关系修复设置可检验节点。',
+      ],
+    };
+    return map[focus.key as Exclude<FocusKey, 'general'>] || ['围绕该方向先做一件最小可执行动作。'];
   }
   
   // ========== 辅助方法 ==========
@@ -855,12 +1004,28 @@ export class ZiService {
     return gua[zi.charCodeAt(0) % 12];
   }
   
-  private getGuaXiang(zi: string): string {
+  private getGuaXiang(
+    gua: string,
+    meta?: { wuxing: string; yinyang: string; jixiong: string; bihua: number },
+  ): string {
     const map: Record<string, string> = {
-      '乾': '天行健，君子以自强不息', '坤': '地势坤，君子以厚德载物',
-      '泰': '天地交泰，万物通顺', '否': '天地不交，闭塞不通',
+      乾: '乾卦主“健行与开创”。适合主动推进、先立目标后拿结果，但要防止刚过易折。',
+      坤: '坤卦主“承载与整合”。先稳基础、聚资源，再谈扩张，贵在耐心与持续。',
+      屯: '屯卦主“起步多阻”。眼下宜小步试错、边做边调，忌一次性押注。',
+      蒙: '蒙卦主“启蒙与修正”。先补认知盲区，找关键反馈，再进入下一轮行动。',
+      需: '需卦主“等待时机”。先蓄势与准备，窗口到了再发力，避免急推。',
+      讼: '讼卦主“争议与博弈”。遇分歧先厘清边界和证据，少情绪对抗。',
+      师: '师卦主“组织与执行”。适合建立节奏、统一动作，以纪律换结果。',
+      比: '比卦主“连接与协同”。借力关系网络更顺，但需选对合作对象。',
+      小畜: '小畜卦主“蓄力渐进”。先做可控增量，积小胜为大胜。',
+      履: '履卦主“谨慎践行”。按规则前进更稳，重细节可降风险。',
+      泰: '泰卦主“通达与顺势”。可适度加速推进，但仍需留出风险缓冲。',
+      否: '否卦主“闭塞与回撤”。当前宜收敛阵线、修内功，等待转机再扩张。',
     };
-    return map[zi] || '卦象深奥，需细加体会';
+    const base = map[gua] || '卦象偏中性，宜先稳态观察，再做关键决策。';
+    if (!meta) return base;
+    const strategy = meta.jixiong === '吉' ? '当前窗口可推进' : meta.jixiong === '凶' ? '当前窗口宜防错收敛' : '当前窗口宜稳步试探';
+    return `${base} 结合此字：${meta.bihua}画、${meta.wuxing}性、${meta.yinyang}性、${meta.jixiong}势，${strategy}。`;
   }
   
   private breakDown(zi: string): string[] {
@@ -985,8 +1150,19 @@ export class ZiService {
   }
 
   private buildTianziGe(zi: string, parts: string[]): string[] {
-    const center = parts[Math.floor(parts.length / 2)] || zi;
-    const outer = parts[0] || zi;
+    const uniqueParts = Array.from(new Set(parts.filter(Boolean)));
+    if (uniqueParts.length <= 1) {
+      const wuxing = this.inferWuxing(zi);
+      const yinyang = this.countBihua(zi) % 2 === 0 ? '阴' : '阳';
+      const jixiong = this.inferJixiong(zi);
+      return [
+        `填字格-中心位：以「${zi}」为核，主念头偏向“${wuxing}性议题”。`,
+        `填字格-边界位：${yinyang}性表达更明显，说明你处理外界时更看重“${yinyang === '阳' ? '主动推进' : '情绪与关系平衡'}”。`,
+        `填字格-落点：当前吉凶为「${jixiong}」，建议先做小步验证，再决定是否扩大行动。`,
+      ];
+    }
+    const center = uniqueParts[Math.floor(uniqueParts.length / 2)] || zi;
+    const outer = uniqueParts[0] || zi;
     return [
       `填字格-中心位：${center}，通常是你此刻最难放下的念头。`,
       `填字格-边界位：${outer}，反映你对外界规则或他人期待的顾虑。`,
