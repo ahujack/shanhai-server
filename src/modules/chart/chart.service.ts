@@ -721,10 +721,17 @@ export class ChartService {
     const dominant = Object.entries(wuxing).sort((a, b) => b[1] - a[1])[0]?.[0] || 'earth';
     const weakness = Object.entries(wuxing).sort((a, b) => a[1] - b[1])[0]?.[0] || 'water';
     const keyGod = tenGods.month;
+    const elementName: Record<string, string> = {
+      wood: '木',
+      fire: '火',
+      earth: '土',
+      metal: '金',
+      water: '水',
+    };
 
     return {
       overall: `你是${dayMaster}日主，当前命盘核心呈现“${keyGod}”气质，主轴是先稳住内核，再扩展外部机会。`,
-      mindset: `五行以${dominant}偏旺、${weakness}偏弱，建议以“长期主义 + 节奏感”来做人生决策，避免情绪化硬冲。`,
+      mindset: `五行以${elementName[dominant] || '土'}偏旺、${elementName[weakness] || '水'}偏弱，建议以“长期主义 + 节奏感”来做人生决策，避免情绪化硬冲。`,
     };
   }
 
@@ -1182,7 +1189,7 @@ export class ChartService {
       };
 
       const apiUrl = process.env.BAZI_LLM_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
-      const model = process.env.BAZI_LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+      const model = process.env.BAZI_LLM_MODEL || 'deepseek-reasoner';
       const response = await axios.post(
         apiUrl,
         {
