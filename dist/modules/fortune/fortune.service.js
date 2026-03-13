@@ -369,6 +369,16 @@ let FortuneService = class FortuneService {
             return 'health';
         return 'general';
     }
+    themeLabel(theme) {
+        const mapping = {
+            career: '事业',
+            love: '感情',
+            wealth: '财运',
+            health: '健康',
+            general: '综合',
+        };
+        return mapping[theme || 'general'];
+    }
     scoreFortune(slip, rng) {
         const text = `${slip.day} ${slip.month} ${slip.year} ${slip.interpretation.overall}`;
         let score = 62;
@@ -402,7 +412,7 @@ let FortuneService = class FortuneService {
             day: `${base.day}｜${rank} · ${luckTime}`,
             interpretation: {
                 ...base.interpretation,
-                overall: `${base.interpretation.overall}（今日主题：${theme}）`,
+                overall: `${base.interpretation.overall}（今日主题：${this.themeLabel(theme)}）`,
             },
             advice: advice.slice(0, 4),
             fortuneRank: rank,

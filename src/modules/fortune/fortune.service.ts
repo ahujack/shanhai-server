@@ -409,6 +409,17 @@ export class FortuneService {
     return 'general';
   }
 
+  private themeLabel(theme: FortuneSlip['fortuneTheme']): string {
+    const mapping: Record<NonNullable<FortuneSlip['fortuneTheme']>, string> = {
+      career: '事业',
+      love: '感情',
+      wealth: '财运',
+      health: '健康',
+      general: '综合',
+    };
+    return mapping[theme || 'general'];
+  }
+
   private scoreFortune(slip: FortuneSlip, rng: () => number): number {
     const text = `${slip.day} ${slip.month} ${slip.year} ${slip.interpretation.overall}`;
     let score = 62;
@@ -443,7 +454,7 @@ export class FortuneService {
       day: `${base.day}｜${rank} · ${luckTime}`,
       interpretation: {
         ...base.interpretation,
-        overall: `${base.interpretation.overall}（今日主题：${theme}）`,
+        overall: `${base.interpretation.overall}（今日主题：${this.themeLabel(theme)}）`,
       },
       advice: advice.slice(0, 4),
       fortuneRank: rank,

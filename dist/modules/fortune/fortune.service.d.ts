@@ -46,6 +46,7 @@ export declare class FortuneService {
     private createRng;
     private pick;
     private inferTheme;
+    private themeLabel;
     private scoreFortune;
     private rankFromScore;
     private decorateSlip;
