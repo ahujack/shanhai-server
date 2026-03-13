@@ -41,7 +41,8 @@ export class ZiController {
 
   @Post('analyze')
   async analyze(@Body() dto: AnalyzeZiDto) {
-    const result = await this.ziService.analyze(dto.zi, dto.handwriting);
+    const membership = await this.getMembership(dto.userId);
+    const result = await this.ziService.analyze(dto.zi, dto.handwriting, membership);
 
     // 保存测字记录
     if (dto.userId) {
@@ -98,7 +99,8 @@ export class ZiController {
       }
       
       // 2. 分析字义
-      const analysis = await this.ziService.analyze(zi);
+      const membership = await this.getMembership(dto.userId);
+      const analysis = await this.ziService.analyze(zi, undefined, membership);
       
       // 保存测字记录
       if (dto.userId) {
@@ -140,5 +142,20 @@ export class ZiController {
         error: error.message || '服务器错误',
       };
     }
+  }
+
+  private async getMembership(userId?: string): Promise<'free' | 'premium' | 'vip'> {
+    if (!userId) return 'free';
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { membership: true },
+      });
+      const membership = user?.membership;
+      if (membership === 'premium' || membership === 'vip') return membership;
+    } catch (error) {
+      Logger.warn(`读取用户会员失败: ${(error as Error).message}`, ZiController.name);
+    }
+    return 'free';
   }
 }

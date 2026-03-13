@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import { ORACLE_BONE_SNAPSHOT } from './oracle-bone.snapshot';
 
 // ========== 笔迹心理学分析 ==========
 export interface HandwritingAnalysis {
@@ -121,7 +122,28 @@ export interface ZiAnalysis {
   components: string[];        // 部件拆解
   componentMeanings: string[];  // 部件含义
   associativeMeaning: string;   // 联想含义
+  lihefa: string[];             // 离合法拆解
+  tianziGe: string[];           // 填字格联想
+  imageryInference: string;     // 象形投射
+  probingQuestion: string;      // 冷读反问
+  oracleBone: {
+    exists: boolean;
+    source: string;
+    imageUrls: string[];
+    totalImages: number;
+    shownImages: number;
+    previewLocked: boolean;
+    interpretation: string;
+    note: string;
+  };
 }
+
+interface OracleBoneEntry {
+  name: string;
+  image: string;
+}
+
+type MembershipTier = 'free' | 'premium' | 'vip';
 
 // 汉字拆解库
 const ziComponents: Record<string, { parts: string[]; meanings: string[]; association: string }> = {
@@ -216,21 +238,36 @@ export interface ZiResult {
 @Injectable()
 export class ZiService {
   private readonly logger = new Logger(ZiService.name);
+  private oracleBoneLexicon: Map<string, string[]> | null = null;
+  private oracleBoneLexiconLoading: Promise<void> | null = null;
+  private oracleBoneLexiconLoadedAt = 0;
+  private readonly oracleBoneIndexUrl =
+    process.env.ORACLE_BONE_INDEX_URL ||
+    'https://raw.githubusercontent.com/Chinese-Traditional-Culture/JiaGuWen/master/index.json';
+  private readonly oracleBoneImageBaseUrl =
+    process.env.ORACLE_BONE_IMAGE_BASE_URL ||
+    'https://raw.githubusercontent.com/Chinese-Traditional-Culture/JiaGuWen/master/i/';
+  private readonly oracleBoneCacheMs = 24 * 60 * 60 * 1000;
   
   /**
    * 测字主入口
    * @param zi 要测的字
    * @param handwritingData 手写特征数据（可选）
    */
-  async analyze(zi: string, handwritingData?: Partial<HandwritingAnalysis>): Promise<ZiResult> {
+  async analyze(
+    zi: string,
+    handwritingData?: Partial<HandwritingAnalysis>,
+    membership: MembershipTier = 'free',
+  ): Promise<ZiResult> {
     try {
       const char = zi.charAt(0);
+      await this.ensureOracleBoneLexicon();
       
       // 1. 笔迹分析
       const handwriting = this.analyzeHandwriting(handwritingData);
       
       // 2. 汉字拆解分析
-      const ziAnalysis = this.analyzeZi(char);
+      const ziAnalysis = this.analyzeZi(char, membership);
       
       // 3. 生成冷读话术
       const coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
@@ -302,6 +339,20 @@ export class ZiService {
         components: [char],
         componentMeanings: [`部件"${char}"`],
         associativeMeaning: '此字需细加品味',
+        lihefa: ['先离后合：把问题拆开看，再综合决策。'],
+        tianziGe: ['填字格-中心位：先看你最在意的核心。'],
+        imageryInference: '象形投射：当前状态偏保守求稳，建议先稳情绪再稳动作。',
+        probingQuestion: '你最在意的，是这件事的结果，还是关系里的感受？',
+        oracleBone: {
+          exists: false,
+          source: 'JiaGuWen 开源甲骨文字表（缓存回退）',
+          imageUrls: [],
+          totalImages: 0,
+          shownImages: 0,
+          previewLocked: false,
+          interpretation: `甲骨象形：当前未检索到「${char}」图像，先按部件与意象做近似推断。`,
+          note: '该字可能缺少已公开甲骨文释读或图像样本。',
+        },
       },
       interpretation: {
         overall: '你写的字结构匀称，整体给人稳重的感觉。',
@@ -380,7 +431,7 @@ export class ZiService {
   /**
    * 分析汉字结构
    */
-  private analyzeZi(zi: string): ZiAnalysis {
+  private analyzeZi(zi: string, membership: MembershipTier): ZiAnalysis {
     const char = zi.charAt(0);
     
     // 检查是否有预设数据
@@ -398,6 +449,11 @@ export class ZiService {
         components: preset.parts,
         componentMeanings: preset.meanings,
         associativeMeaning: preset.association,
+        lihefa: this.buildLihefa(preset.parts, preset.meanings),
+        tianziGe: this.buildTianziGe(char, preset.parts),
+        imageryInference: this.buildImageryInference(char, preset.parts),
+        probingQuestion: this.buildProbingQuestion(char, preset.parts),
+        oracleBone: this.buildOracleBoneInsight(char, membership),
       };
     }
     
@@ -414,6 +470,11 @@ export class ZiService {
       components: this.breakDown(char),
       componentMeanings: this.getComponentMeanings(char),
       associativeMeaning: `此字需细加品味，可从字形、字义、字音多角度联想。`,
+      lihefa: this.buildLihefa(this.breakDown(char), this.getComponentMeanings(char)),
+      tianziGe: this.buildTianziGe(char, this.breakDown(char)),
+      imageryInference: this.buildImageryInference(char, this.breakDown(char)),
+      probingQuestion: this.buildProbingQuestion(char, this.breakDown(char)),
+      oracleBone: this.buildOracleBoneInsight(char, membership),
     };
   }
   
@@ -497,7 +558,10 @@ export class ZiService {
     advice.push(wuxingAdvice[zi.wuxing] || '保持良好生活习惯');
     
     return {
-      overall: `${handwriting.pressureInterpretation} ${handwriting.structureInterpretation}`,
+      overall:
+        `${handwriting.pressureInterpretation} ${handwriting.structureInterpretation} ` +
+        `离合法显示「${zi.lihefa[0] || '先拆后合'}」，填字格提示「${zi.tianziGe[0] || '先看中心、再看边界'}」。` +
+        `${zi.oracleBone.interpretation}`,
       career: `从你的字来看，你是个有${handwriting.personalityInsights[0] || '想法'}的人，${zi.wuxing}性较强，适合 ${this.getCareerByWuxing(zi.wuxing)} 方向。`,
       love: `你是个重感情的人，${zi.yinyang === '阳' ? '在感情中较为主动' : '内心细腻，需要被理解'}。`,
       wealth: `财运与${zi.wuxing}相关，${zi.jixiong === '吉' ? '正财运不错' : '需稳扎稳打'}。`,
@@ -530,6 +594,9 @@ export class ZiService {
     // 通用问题
     questions.push('最近是否有特别在意的事情？');
     questions.push('这个字是你随意写的，还是有特别的想法？');
+    if (zi.probingQuestion) {
+      questions.unshift(zi.probingQuestion);
+    }
     
     return questions.slice(0, 2);
   }
@@ -705,6 +772,138 @@ export class ZiService {
   
   private getComponentMeanings(zi: string): string[] {
     return this.breakDown(zi).map(c => `部件"${c}"`);
+  }
+
+  private async ensureOracleBoneLexicon(): Promise<void> {
+    const now = Date.now();
+    if (this.oracleBoneLexicon && now - this.oracleBoneLexiconLoadedAt < this.oracleBoneCacheMs) {
+      return;
+    }
+    if (this.oracleBoneLexiconLoading) {
+      await this.oracleBoneLexiconLoading;
+      return;
+    }
+
+    this.oracleBoneLexiconLoading = (async () => {
+      try {
+        const response = await axios.get<OracleBoneEntry[]>(this.oracleBoneIndexUrl, {
+          timeout: 5000,
+        });
+        const map = this.createOracleBoneMap(response.data || []);
+        if (map.size) {
+          this.oracleBoneLexicon = map;
+          this.oracleBoneLexiconLoadedAt = Date.now();
+          return;
+        }
+      } catch (error) {
+        this.logger.warn(`甲骨文字表在线加载失败，使用内置词表: ${(error as Error).message}`);
+      }
+      this.oracleBoneLexicon = this.getOracleFallbackMap();
+      this.oracleBoneLexiconLoadedAt = Date.now();
+    })();
+
+    try {
+      await this.oracleBoneLexiconLoading;
+    } finally {
+      this.oracleBoneLexiconLoading = null;
+    }
+  }
+
+  private createOracleBoneMap(entries: OracleBoneEntry[]): Map<string, string[]> {
+    const map = new Map<string, string[]>();
+    for (const item of entries) {
+      const name = (item?.name || '').trim();
+      const image = (item?.image || '').trim();
+      if (!name || !image || name.length !== 1) continue;
+      const urls = map.get(name) || [];
+      urls.push(`${this.oracleBoneImageBaseUrl}${image}`);
+      map.set(name, urls);
+    }
+    return map;
+  }
+
+  private getOracleFallbackMap(): Map<string, string[]> {
+    const rawMap: Record<string, string[]> = ORACLE_BONE_SNAPSHOT;
+    const map = new Map<string, string[]>();
+    for (const [key, images] of Object.entries(rawMap)) {
+      map.set(
+        key,
+        images.map((img) => `${this.oracleBoneImageBaseUrl}${img}`),
+      );
+    }
+    return map;
+  }
+
+  private buildOracleBoneInsight(zi: string, membership: MembershipTier): ZiAnalysis['oracleBone'] {
+    const fullImages = (this.oracleBoneLexicon?.get(zi) || []).slice(0, 3);
+    const isPaid = membership === 'premium' || membership === 'vip';
+    const images = isPaid ? fullImages : fullImages.slice(0, 1);
+    const previewLocked = !isPaid && fullImages.length > images.length;
+    const xiang = this.getXiangxingMeaning(zi);
+    if (images.length > 0) {
+      const variantText = fullImages.length > 1
+        ? `可见${fullImages.length}种常见异体，会员版更强调“同字多形、同象异势”的差异。`
+        : '当前仅收录到少量字形样本，重在看象意主轴。';
+      return {
+        exists: true,
+        source: 'JiaGuWen 开源甲骨文字表',
+        imageUrls: images,
+        totalImages: fullImages.length,
+        shownImages: images.length,
+        previewLocked,
+        interpretation: `甲骨象形：字形早期意象多与「${xiang}」相关，可作为你当前主题的原初投射。${variantText}`,
+        note: isPaid
+          ? '会员已解锁完整图像与异体视角，建议结合离合法交叉验证。'
+          : '当前为简版展示，升级会员可查看更多异体图像与差异解读。',
+      };
+    }
+    return {
+      exists: false,
+      source: 'JiaGuWen 开源甲骨文字表',
+      imageUrls: [],
+      totalImages: 0,
+      shownImages: 0,
+      previewLocked: false,
+      interpretation: `甲骨象形：目前字表未收录「${zi}」图像，先按部件关系与象形线索推断（${xiang}）。`,
+      note: '甲骨文释读仍在发展中，部分字暂无公认图像或尚未统一释义。',
+    };
+  }
+
+  private buildLihefa(parts: string[], meanings: string[]): string[] {
+    if (!parts.length) return ['先离后合：把问题拆开看，再综合决策。'];
+    const lines: string[] = [];
+    const first = parts[0];
+    const second = parts[1];
+    lines.push(`离：先看外层「${first}」意象，通常代表你表层正在应对的现实压力。`);
+    if (second) {
+      lines.push(`合：再看内层「${second}」意象，往往对应你真正挂心的核心诉求。`);
+    }
+    lines.push(`转：把${parts.join('、')}合起来看，说明你现在在“现实安排”和“内在感受”之间求平衡。`);
+    if (meanings[0]) {
+      lines.push(`证：从部件含义看「${meanings[0]}」，你的问题不是没答案，而是还在等待更稳妥的时机。`);
+    }
+    return lines.slice(0, 4);
+  }
+
+  private buildTianziGe(zi: string, parts: string[]): string[] {
+    const center = parts[Math.floor(parts.length / 2)] || zi;
+    const outer = parts[0] || zi;
+    return [
+      `填字格-中心位：${center}，通常是你此刻最难放下的念头。`,
+      `填字格-边界位：${outer}，反映你对外界规则或他人期待的顾虑。`,
+      `填字格-落点：建议先处理“中心位”情绪，再处理“边界位”行动，效率会更高。`,
+    ];
+  }
+
+  private buildImageryInference(zi: string, parts: string[]): string {
+    const xiang = this.getXiangxingMeaning(zi);
+    const core = parts.join('+') || zi;
+    return `象形投射：${zi}可见「${xiang}」，部件组合为「${core}」，这往往对应“外在局势在变、内在仍想稳住”的状态。`;
+  }
+
+  private buildProbingQuestion(zi: string, parts: string[]): string {
+    const focus = parts[1] || parts[0] || zi;
+    return `反问：你写「${zi}」时，把注意力更多放在「${focus}」这部分了吗？这通常指向你最在意的那一环。`;
   }
   
   private getCareerByWuxing(wuxing: string): string {
