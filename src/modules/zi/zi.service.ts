@@ -165,6 +165,7 @@ const ziComponents: Record<string, { parts: string[]; meanings: string[]; associ
   '财': { parts: ['贝', '才'], meanings: ['钱贝', '才能'], association: '贝为钱，有才方能生财' },
   '运': { parts: ['辶', '云'], meanings: ['行走', '云彩/变化'], association: '云动为运，事物在变' },
   '事': { parts: ['亅', '口', '一'], meanings: ['钩', '人口', '一横'], association: '以口行事，一以贯之' },
+  '回': { parts: ['囗', '口'], meanings: ['外框/环境', '内核/真实想法'], association: '外有框，内有口，常见“有话绕圈、内外两层”之象' },
   '道': { parts: ['辶', '首'], meanings: ['行走', '头脑/开始'], association: '用头脑思考后行走' },
   '梦': { parts: ['夕', '冖', '木'], meanings: ['夜晚', '覆盖', '树木'], association: '夜间树下之想' },
   '命': { parts: ['人', '叩'], meanings: ['人', '叩首'], association: '人叩首为命，天命所归' },
