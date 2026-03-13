@@ -60,12 +60,14 @@ export class CheckInService implements OnModuleInit {
       };
     }
 
+    // 使用事务保证签到、积分变动的原子性
+    const txResult = await this.prisma.$transaction(async (tx) => {
     // 获取昨天的签到记录来计算连续签到
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toISOString().split('T')[0];
     
-    const yesterdayCheckIn = await this.prisma.checkIn.findUnique({
+    const yesterdayCheckIn = await tx.checkIn.findUnique({
       where: {
         userId_date: {
           userId,
@@ -95,7 +97,7 @@ export class CheckInService implements OnModuleInit {
     }
 
     // 创建签到记录
-    await this.prisma.checkIn.create({
+    await tx.checkIn.create({
       data: {
         userId,
         date: today,
@@ -106,12 +108,12 @@ export class CheckInService implements OnModuleInit {
     });
 
     // 创建或更新用户积分
-    let userPoints = await this.prisma.userPoints.findUnique({
+    let userPoints = await tx.userPoints.findUnique({
       where: { userId },
     });
     
     if (!userPoints) {
-      userPoints = await this.prisma.userPoints.create({
+      userPoints = await tx.userPoints.create({
         data: {
           userId,
           totalPoints: points,
@@ -119,7 +121,7 @@ export class CheckInService implements OnModuleInit {
         },
       });
     } else {
-      userPoints = await this.prisma.userPoints.update({
+      userPoints = await tx.userPoints.update({
         where: { userId },
         data: {
           totalPoints: { increment: points },
@@ -129,7 +131,7 @@ export class CheckInService implements OnModuleInit {
     }
 
     // 记录积分变动
-    await this.prisma.pointRecord.create({
+    await tx.pointRecord.create({
       data: {
         userId,
         points,
@@ -138,16 +140,14 @@ export class CheckInService implements OnModuleInit {
       },
     });
 
-    // 检查并解锁成就
-    let unlockedAchievement: {
-      name: string;
-      description: string;
-      icon: string;
-    } | null = null;
+    return { streak, points, reward, isFirstCheckIn: streak === 1 };
+    });
+
+    // 事务成功后检查并解锁成就（成就操作在事务外，避免循环依赖）
+    let unlockedAchievement: { name: string; description: string; icon: string } | null = null;
     if (this.achievementService) {
-      const achievement = await this.achievementService.checkLoginAchievements(userId, streak);
+      const achievement = await this.achievementService.checkLoginAchievements(userId, txResult.streak);
       if (achievement) {
-        // 奖励成就积分
         if (achievement.points > 0) {
           await this.prisma.userPoints.update({
             where: { userId },
@@ -156,7 +156,6 @@ export class CheckInService implements OnModuleInit {
               availablePoints: { increment: achievement.points },
             },
           });
-          
           await this.prisma.pointRecord.create({
             data: {
               userId,
@@ -166,7 +165,6 @@ export class CheckInService implements OnModuleInit {
             },
           });
         }
-        
         unlockedAchievement = {
           name: achievement.name,
           description: achievement.description,
@@ -175,15 +173,13 @@ export class CheckInService implements OnModuleInit {
       }
     }
 
-    const isFirstCheckIn = streak === 1;
-
     return {
       success: true,
-      message: streak === 1 ? '签到成功，欢迎回来！' : `已连续签到 ${streak} 天`,
-      streak,
-      points,
-      reward: reward || undefined,
-      isFirstCheckIn,
+      message: txResult.streak === 1 ? '签到成功，欢迎回来！' : `已连续签到 ${txResult.streak} 天`,
+      streak: txResult.streak,
+      points: txResult.points,
+      reward: txResult.reward || undefined,
+      isFirstCheckIn: txResult.isFirstCheckIn,
       ...(unlockedAchievement ? { unlockedAchievement } : {}),
     };
   }

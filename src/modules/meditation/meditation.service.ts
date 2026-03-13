@@ -5,7 +5,7 @@ export interface Meditation {
   title: string;
   description: string;
   durationMinutes: number;
-  category: 'calm' | 'sleep' | 'anxiety' | 'focus';
+  category: 'calm' | 'sleep' | 'anxiety';
   steps: MeditationStep[];
 }
 

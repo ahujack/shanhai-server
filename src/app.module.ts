@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma.module';
 import { HealthModule } from './modules/health/health.module';
 import { PersonaModule } from './modules/persona/persona.module';
@@ -17,6 +19,7 @@ import { PaymentModule } from './modules/payment/payment.module';
 
 @Module({
   imports: [
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]), // 每分钟最多60次请求
     PrismaModule,
     JwtModule.register({
       global: true,
@@ -36,6 +39,9 @@ import { PaymentModule } from './modules/payment/payment.module';
     AchievementModule,
     PointsModule,
     PaymentModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

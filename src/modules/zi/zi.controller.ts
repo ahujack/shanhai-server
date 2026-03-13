@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, BadRequestException } from '@nestjs/common';
 import { IsString, IsOptional } from 'class-validator';
 import { Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
@@ -49,8 +49,12 @@ export class ZiController {
 
   @Post('analyze')
   async analyze(@Body() dto: AnalyzeZiDto) {
+    const zi = String(dto.zi || '').trim().charAt(0);
+    if (!/[\u4e00-\u9fa5]/.test(zi)) {
+      throw new BadRequestException('请输入一个有效的汉字');
+    }
     const membership = await this.getMembership(dto.userId);
-    const result = await this.ziService.analyze(dto.zi, dto.handwriting, membership, dto.focusAspect);
+    const result = await this.ziService.analyze(zi, dto.handwriting, membership, dto.focusAspect);
 
     // 保存测字记录
     if (dto.userId) {
@@ -58,7 +62,7 @@ export class ZiController {
         await this.prisma.ziAnalysis.create({
           data: {
             userId: dto.userId,
-            zi: dto.zi,
+            zi,
             pressure: result.handwriting.pressure,
             pressureInterpretation: result.handwriting.pressureInterpretation,
             stability: result.handwriting.stability,

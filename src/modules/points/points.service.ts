@@ -80,7 +80,7 @@ export class PointsService implements OnModuleInit {
   }
 
   /**
-   * 消费积分（用于兑换服务）
+   * 消费积分（用于兑换服务）- 使用事务保证原子性
    */
   async consumePoints(
     userId: string, 
@@ -88,45 +88,42 @@ export class PointsService implements OnModuleInit {
     type: string, 
     description: string
   ): Promise<{ success: boolean; message: string; remainingPoints?: number }> {
-    const userPoints = await this.prisma.userPoints.findUnique({
-      where: { userId },
-    });
-    
-    if (!userPoints || userPoints.availablePoints < points) {
+    return this.prisma.$transaction(async (tx) => {
+      const userPoints = await tx.userPoints.findUnique({
+        where: { userId },
+      });
+      
+      if (!userPoints || userPoints.availablePoints < points) {
+        return {
+          success: false,
+          message: '积分不足',
+        };
+      }
+      
+      await tx.userPoints.update({
+        where: { userId },
+        data: { availablePoints: { decrement: points } },
+      });
+      
+      await tx.pointRecord.create({
+        data: {
+          userId,
+          points: -points,
+          type,
+          description,
+        },
+      });
+      
+      const updated = await tx.userPoints.findUnique({
+        where: { userId },
+      });
+      
       return {
-        success: false,
-        message: '积分不足',
+        success: true,
+        message: '积分消费成功',
+        remainingPoints: updated?.availablePoints ?? 0,
       };
-    }
-    
-    // 扣除积分
-    await this.prisma.userPoints.update({
-      where: { userId },
-      data: {
-        availablePoints: { decrement: points },
-      },
     });
-    
-    // 记录积分变动
-    await this.prisma.pointRecord.create({
-      data: {
-        userId,
-        points: -points,
-        type,
-        description,
-      },
-    });
-    
-    // 获取剩余积分
-    const updatedUserPoints = await this.prisma.userPoints.findUnique({
-      where: { userId },
-    });
-    
-    return {
-      success: true,
-      message: '积分消费成功',
-      remainingPoints: updatedUserPoints?.availablePoints || 0,
-    };
   }
 
   /**
@@ -138,47 +135,47 @@ export class PointsService implements OnModuleInit {
     type: string,
     description: string
   ): Promise<{ success: boolean; newBalance?: number }> {
-    // 确保用户积分记录存在
-    let userPoints = await this.prisma.userPoints.findUnique({
-      where: { userId },
-    });
-    
-    if (!userPoints) {
-      userPoints = await this.prisma.userPoints.create({
+    return this.prisma.$transaction(async (tx) => {
+      let userPoints = await tx.userPoints.findUnique({
+        where: { userId },
+      });
+      
+      if (!userPoints) {
+        userPoints = await tx.userPoints.create({
+          data: {
+            userId,
+            totalPoints: points,
+            availablePoints: points,
+          },
+        });
+      } else {
+        await tx.userPoints.update({
+          where: { userId },
+          data: {
+            totalPoints: { increment: points },
+            availablePoints: { increment: points },
+          },
+        });
+      }
+      
+      await tx.pointRecord.create({
         data: {
           userId,
-          totalPoints: points,
-          availablePoints: points,
+          points,
+          type,
+          description,
         },
       });
-    } else {
-      await this.prisma.userPoints.update({
+      
+      const updated = await tx.userPoints.findUnique({
         where: { userId },
-        data: {
-          totalPoints: { increment: points },
-          availablePoints: { increment: points },
-        },
       });
-    }
-    
-    // 记录积分变动
-    await this.prisma.pointRecord.create({
-      data: {
-        userId,
-        points,
-        type,
-        description,
-      },
+      
+      return {
+        success: true,
+        newBalance: updated?.availablePoints ?? 0,
+      };
     });
-    
-    const updatedUserPoints = await this.prisma.userPoints.findUnique({
-      where: { userId },
-    });
-    
-    return {
-      success: true,
-      newBalance: updatedUserPoints?.availablePoints || 0,
-    };
   }
 
   /**
