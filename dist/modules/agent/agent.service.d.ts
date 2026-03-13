@@ -2,7 +2,6 @@ import { PersonaService } from '../persona/persona.service';
 import { ReadingService } from '../reading/reading.service';
 import { FortuneService } from '../fortune/fortune.service';
 import { ChartService } from '../chart/chart.service';
-import { ZiService } from '../zi/zi.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
 export declare class AgentService {
@@ -10,10 +9,9 @@ export declare class AgentService {
     private readonly readingService;
     private readonly fortuneService;
     private readonly chartService;
-    private readonly ziService;
     private readonly logger;
     private prisma;
-    constructor(personaService: PersonaService, readingService: ReadingService, fortuneService: FortuneService, chartService: ChartService, ziService: ZiService);
+    constructor(personaService: PersonaService, readingService: ReadingService, fortuneService: FortuneService, chartService: ChartService);
     handleChat(dto: AgentChatDto): Promise<{
         persona: import("../persona/persona.service").PersonaId;
         intent: AgentIntent;

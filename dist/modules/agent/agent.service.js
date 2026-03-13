@@ -21,21 +21,18 @@ const persona_service_1 = require("../persona/persona.service");
 const reading_service_1 = require("../reading/reading.service");
 const fortune_service_1 = require("../fortune/fortune.service");
 const chart_service_1 = require("../chart/chart.service");
-const zi_service_1 = require("../zi/zi.service");
 let AgentService = AgentService_1 = class AgentService {
     personaService;
     readingService;
     fortuneService;
     chartService;
-    ziService;
     logger = new common_1.Logger(AgentService_1.name);
     prisma = new client_1.PrismaClient();
-    constructor(personaService, readingService, fortuneService, chartService, ziService) {
+    constructor(personaService, readingService, fortuneService, chartService) {
         this.personaService = personaService;
         this.readingService = readingService;
         this.fortuneService = fortuneService;
         this.chartService = chartService;
-        this.ziService = ziService;
     }
     async handleChat(dto) {
         if (!dto.message || dto.message.trim().length === 0) {
@@ -106,20 +103,11 @@ let AgentService = AgentService_1 = class AgentService {
         }
         if (intent === 'zi') {
             const ziChar = this.extractZiFromMessage(dto.message);
-            if (ziChar) {
-                try {
-                    const ziResult = await this.ziService.analyze(ziChar);
-                    artifacts = { zi: ziResult };
-                    actions.push({
-                        type: 'view_zi',
-                        label: '查看测字详情',
-                    });
-                }
-                catch (error) {
-                    this.logger.error(`测字分析失败: ${error.message}`);
-                    artifacts = { zi: null };
-                }
-            }
+            artifacts = { ziSuggestion: { zi: ziChar } };
+            actions.push({
+                type: 'view_zi',
+                label: '进入测字页面',
+            });
         }
         const reply = await this.composeReply(persona, intent, dto.message, artifacts, userChart, dto);
         if (dto.userId) {
@@ -378,14 +366,10 @@ ${contextInfo}
         return defaultReplies[Math.floor(Math.random() * defaultReplies.length)];
     }
     async composeReply(persona, intent, message, artifacts, userChart, dto) {
-        if (intent === 'zi' && artifacts.zi) {
-            const zi = artifacts.zi;
-            if (!zi) {
-                return `${persona.name}：抱歉，测字服务暂时不可用，请稍后再试。`;
-            }
-            const coldRead = zi.coldReadings[0];
-            const advice = zi.interpretation.advice[0];
-            return `${persona.name}：${coldRead}\n\n🔍 拆解："${zi.zi.zi}"字\n📦 部件：${zi.zi.components.join(' + ')}\n💡 联想：${zi.zi.associativeMeaning}\n\n📋 建议：${advice}\n\n${zi.handwriting.stabilityInterpretation}\n\n点击「查看测字详情」可获得完整分析。`;
+        if (intent === 'zi') {
+            const suggestedZi = artifacts?.ziSuggestion?.zi;
+            const ziHint = suggestedZi ? `（可先用「${suggestedZi}」起测）` : '';
+            return `${persona.name}：可以，我们去测字页面做更完整的仪式化解读。${ziHint}\n\n建议你先静心10秒，心里只想着这件事，再写下一个字，这样解读会更聚焦。\n\n点击下方「进入测字页面」开始。`;
         }
         if (intent === 'divination' && artifacts.reading) {
             const reading = artifacts.reading;
@@ -421,7 +405,6 @@ exports.AgentService = AgentService = AgentService_1 = __decorate([
     __metadata("design:paramtypes", [persona_service_1.PersonaService,
         reading_service_1.ReadingService,
         fortune_service_1.FortuneService,
-        chart_service_1.ChartService,
-        zi_service_1.ZiService])
+        chart_service_1.ChartService])
 ], AgentService);
 //# sourceMappingURL=agent.service.js.map

@@ -5,7 +5,7 @@ export declare class AgentController {
     constructor(agentService: AgentService);
     chat(dto: AgentChatDto): Promise<{
         persona: import("../persona/persona.service").PersonaId;
-        intent: "fortune" | "zi" | "chat" | "divination" | "meditation" | "chart";
+        intent: "fortune" | "chat" | "divination" | "meditation" | "chart" | "zi";
         reply: string;
         actions: {
             type: string;

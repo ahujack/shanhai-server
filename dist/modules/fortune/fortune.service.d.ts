@@ -27,6 +27,14 @@ export interface FortuneSlip {
         direction: string;
         food: string;
     };
+    fortuneRank?: '上上签' | '上签' | '中签' | '下签';
+    fortuneScore?: number;
+    fortuneTheme?: 'career' | 'love' | 'wealth' | 'health' | 'general';
+    luckyTime?: string;
+    drawCode?: string;
+    funTip?: string;
+    mission?: string;
+    socialLine?: string;
 }
 export declare class FortuneService {
     private prisma;
@@ -34,6 +42,13 @@ export declare class FortuneService {
     private lastUserId;
     private lastDate;
     private cachedSlip;
+    private hashString;
+    private createRng;
+    private pick;
+    private inferTheme;
+    private scoreFortune;
+    private rankFromScore;
+    private decorateSlip;
     getDailyFortune(userId?: string): FortuneSlip;
     getSlipByIndex(index: number): FortuneSlip;
     drawRandomSlip(): FortuneSlip;

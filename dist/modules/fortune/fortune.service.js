@@ -302,6 +302,33 @@ const fortuneSlips = [
         lucky: { color: '黑色', number: '4', direction: '东北', food: '猪肉' },
     },
 ];
+const rankTiers = [
+    { label: '上上签', min: 85, max: 100 },
+    { label: '上签', min: 70, max: 84 },
+    { label: '中签', min: 45, max: 69 },
+    { label: '下签', min: 20, max: 44 },
+];
+const luckyTimes = ['卯时 05:00-07:00', '巳时 09:00-11:00', '午时 11:00-13:00', '申时 15:00-17:00', '戌时 19:00-21:00'];
+const funTips = [
+    '今天适合先做最想拖延的那件事，运势会更顺。',
+    '遇到选择题先深呼吸三次，再看第一直觉。',
+    '出门前整理桌面 3 分钟，容易遇到好消息。',
+    '把手机壁纸换成暖色，今日心态更稳。',
+    '主动夸赞一个人，贵人运会抬头。',
+];
+const missionPool = [
+    '今日小任务：完成一个 25 分钟专注冲刺。',
+    '今日小任务：给未来的自己写一句鼓励。',
+    '今日小任务：走路 15 分钟，边走边想一件好事。',
+    '今日小任务：做一个“先开始 5 分钟”行动。',
+    '今日小任务：把待办清单减少 1 项。',
+];
+const socialLines = [
+    '今日签语：好运在路上，行动是最好的开运符。',
+    '今日签语：念头一转，局面就会慢慢转好。',
+    '今日签语：先稳住自己，再推进事情。',
+    '今日签语：好结果往往来自一次小小坚持。',
+];
 let FortuneService = class FortuneService {
     prisma;
     constructor(prisma) {
@@ -310,16 +337,94 @@ let FortuneService = class FortuneService {
     lastUserId = null;
     lastDate = null;
     cachedSlip = null;
+    hashString(input) {
+        let hash = 0;
+        for (let i = 0; i < input.length; i++) {
+            hash = (hash << 5) - hash + input.charCodeAt(i);
+            hash |= 0;
+        }
+        return Math.abs(hash);
+    }
+    createRng(seed) {
+        let t = seed + 0x6d2b79f5;
+        return () => {
+            t += 0x6d2b79f5;
+            let r = Math.imul(t ^ (t >>> 15), 1 | t);
+            r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+            return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+    pick(arr, rng) {
+        return arr[Math.floor(rng() * arr.length)];
+    }
+    inferTheme(slip) {
+        const text = `${slip.interpretation.career} ${slip.interpretation.love} ${slip.interpretation.wealth} ${slip.interpretation.health}`.toLowerCase();
+        if (/(事业|升职|团队|创业|竞争)/.test(text))
+            return 'career';
+        if (/(感情|桃花|婚姻|恋|伴侣)/.test(text))
+            return 'love';
+        if (/(财运|收益|投资|破财|生财)/.test(text))
+            return 'wealth';
+        if (/(健康|脾胃|心脏|肝|呼吸|休息)/.test(text))
+            return 'health';
+        return 'general';
+    }
+    scoreFortune(slip, rng) {
+        const text = `${slip.day} ${slip.month} ${slip.year} ${slip.interpretation.overall}`;
+        let score = 62;
+        if (/(大吉|亨通|旺盛|丰收|贵人|顺利)/.test(text))
+            score += 24;
+        if (/(平稳|积累|稳步|等待时机)/.test(text))
+            score += 8;
+        if (/(阻滞|争执|闭塞|凶|谨慎|不宜)/.test(text))
+            score -= 18;
+        score += Math.floor(rng() * 8) - 3;
+        return Math.max(20, Math.min(100, score));
+    }
+    rankFromScore(score) {
+        return rankTiers.find((tier) => score >= tier.min && score <= tier.max)?.label || '中签';
+    }
+    decorateSlip(base, rng, seedKey) {
+        const score = this.scoreFortune(base, rng);
+        const rank = this.rankFromScore(score);
+        const theme = this.inferTheme(base);
+        const luckTime = this.pick(luckyTimes, rng);
+        const funTip = this.pick(funTips, rng);
+        const mission = this.pick(missionPool, rng);
+        const socialLine = this.pick(socialLines, rng);
+        const drawCode = `SH-${seedKey.slice(0, 4).toUpperCase()}-${Math.floor(rng() * 900 + 100)}`;
+        const advice = [...base.advice];
+        if (!advice.includes(mission)) {
+            advice.push(mission);
+        }
+        return {
+            ...base,
+            day: `${base.day}｜${rank} · ${luckTime}`,
+            interpretation: {
+                ...base.interpretation,
+                overall: `${base.interpretation.overall}（今日主题：${theme}）`,
+            },
+            advice: advice.slice(0, 4),
+            fortuneRank: rank,
+            fortuneScore: score,
+            fortuneTheme: theme,
+            luckyTime: luckTime,
+            drawCode,
+            funTip,
+            mission,
+            socialLine,
+        };
+    }
     getDailyFortune(userId) {
         const today = new Date().toISOString().split('T')[0];
         if (this.lastUserId === userId && this.lastDate === today && this.cachedSlip) {
             return this.cachedSlip;
         }
-        const seed = userId
-            ? userId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) + new Date().getDate()
-            : new Date().getDate();
+        const seedKey = `${userId || 'guest'}_${today}`;
+        const seed = this.hashString(seedKey);
+        const rng = this.createRng(seed);
         const index = seed % fortuneSlips.length;
-        const slip = fortuneSlips[index];
+        const slip = this.decorateSlip(fortuneSlips[index], rng, seedKey);
         this.lastUserId = userId || null;
         this.lastDate = today;
         this.cachedSlip = slip;
@@ -329,8 +434,21 @@ let FortuneService = class FortuneService {
         return fortuneSlips[index % fortuneSlips.length];
     }
     drawRandomSlip() {
-        const index = Math.floor(Math.random() * fortuneSlips.length);
-        return fortuneSlips[index];
+        const nowSeed = `${Date.now()}_${Math.random()}`;
+        const seed = this.hashString(nowSeed);
+        const rng = this.createRng(seed);
+        const rankRoulette = rng();
+        let preferredRank = '中签';
+        if (rankRoulette > 0.88)
+            preferredRank = '上上签';
+        else if (rankRoulette > 0.62)
+            preferredRank = '上签';
+        else if (rankRoulette < 0.15)
+            preferredRank = '下签';
+        const decoratedPool = fortuneSlips.map((slip, idx) => this.decorateSlip(slip, this.createRng(seed + idx * 17), `${seed}_${idx}`));
+        const rankedPool = decoratedPool.filter((slip) => slip.fortuneRank === preferredRank);
+        const pickPool = rankedPool.length ? rankedPool : decoratedPool;
+        return this.pick(pickPool, rng);
     }
 };
 exports.FortuneService = FortuneService;
