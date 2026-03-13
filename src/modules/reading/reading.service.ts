@@ -515,9 +515,9 @@ export class ReadingService {
     category?: DivinationCategory;
     userId?: string;
   }): Promise<DivinationResult> {
-    // 使用时间戳生成卦象
     const now = Date.now();
-    const { original, changed, lines } = this.generateHexagram(now);
+    const seed = this.buildSeed(dto.question, dto.category, dto.userId);
+    const { original, changed, lines } = this.generateHexagram(seed);
     
     // 获取卦名
     const originalName = this.getHexagramName(original);
@@ -540,15 +540,15 @@ export class ReadingService {
       },
       
       interpretation: {
-        overall: `${originalName}，象征着特定的意义和趋势。`,
-        situation: this.analyzeSituation(original, changed),
-        guidance: '保持内心平静，顺应变化，把握时机',
+        overall: this.buildOverallInterpretation(originalName, dto.category, dto.question),
+        situation: this.analyzeSituation(original, changed, dto.question),
+        guidance: this.buildGuidance(originalName, dto.category),
       },
       
       recommendations: this.generateRecommendations(original, changed, dto.category),
       
       timing: {
-        suitable: '保持耐心，等待合适时机',
+        suitable: this.getTimingSuggestion(originalName),
         caution: this.getCaution(original, changed),
       },
       
@@ -578,13 +578,18 @@ export class ReadingService {
       else lines.push('6'); // 老阴
     }
 
-    // 将爻转换为卦 - 老阴(6)和老阳(9)为变爻，用0表示阴；少阳(7)为阳用1表示，少阴(8)为阴用0表示
-    const toBinary = (l: string): string => {
-      if (l === '6' || l === '9') return '0'; // 老阴和老阳都视为阴（动爻）
-      return l === '7' ? '1' : '0'; // 少阳为阳，少阴为阴
+    // 本卦：7/9 为阳，6/8 为阴；变卦：老阳9变阴、老阴6变阳
+    const toOriginalBinary = (l: string): string => {
+      if (l === '7' || l === '9') return '1';
+      return '0';
+    };
+    const toChangedBinary = (l: string): string => {
+      if (l === '9') return '0';
+      if (l === '6') return '1';
+      return l === '7' ? '1' : '0';
     };
 
-    const original = this.linesToHexagram(lines.map(toBinary));
+    const original = this.linesToHexagram(lines.map(toOriginalBinary));
 
     // 变卦：老阳变阴，老阴变阳
     const changedLines = lines.map(l => {
@@ -592,7 +597,7 @@ export class ReadingService {
       if (l === '6') return '9'; // 老阴变老阳
       return l;
     });
-    const changed = this.linesToHexagram(changedLines.map(toBinary));
+    const changed = this.linesToHexagram(changedLines.map(toChangedBinary));
 
     return { original, changed, lines };
   }
@@ -649,11 +654,11 @@ export class ReadingService {
   }
 
   // 分析形势
-  private analyzeSituation(original: number, changed: number): string {
+  private analyzeSituation(original: number, changed: number, question?: string): string {
     if (original === changed) {
-      return '当前处于稳定状态，暂无重大变化，需静待时机。';
+      return `当前局势相对稳定，重点在于“按节奏推进”。${question ? `针对你提到的“${question.slice(0, 18)}${question.length > 18 ? '…' : ''}”，建议先做小步试探。` : ''}`;
     }
-    return `从 ${this.getHexagramName(original)} 转化为 ${this.getHexagramName(changed)}，暗示事态正在发生转变。`;
+    return `从 ${this.getHexagramName(original)} 转化为 ${this.getHexagramName(changed)}，暗示事态正在发生转变，关键在于顺势调整而非硬推。`;
   }
 
   // 获取注意事项
@@ -700,5 +705,48 @@ export class ReadingService {
     }
     
     return recommendations.slice(0, 3);
+  }
+
+  private buildSeed(question: string, category?: DivinationCategory, userId?: string): number {
+    const day = new Date().toISOString().slice(0, 10);
+    const source = `${question}|${category || 'general'}|${userId || 'guest'}|${day}`;
+    let hash = 0;
+    for (let i = 0; i < source.length; i++) {
+      hash = (hash * 31 + source.charCodeAt(i)) >>> 0;
+    }
+    return hash || Date.now();
+  }
+
+  private buildOverallInterpretation(name: string, category: DivinationCategory | undefined, question: string): string {
+    const categoryLead: Record<DivinationCategory, string> = {
+      general: '整体趋势上',
+      career: '在事业层面',
+      love: '在感情层面',
+      wealth: '在财务层面',
+      health: '在健康层面',
+      growth: '在个人成长层面',
+    };
+    const lead = categoryLead[category || 'general'];
+    const q = question.trim();
+    return `${lead}，你对应到的是「${name}」之象。${q ? `结合你的问题“${q.slice(0, 24)}${q.length > 24 ? '…' : ''}”，` : ''}这更强调“先稳后进、边做边校准”。`;
+  }
+
+  private buildGuidance(name: string, category?: DivinationCategory): string {
+    if (category === 'career') return `「${name}」提示你：先拿下一个可验证的小目标，再逐步扩张，避免一次性下注。`;
+    if (category === 'love') return `「${name}」提示你：先把沟通边界说清，再谈承诺，关系会更稳。`;
+    if (category === 'wealth') return `「${name}」提示你：现金流优先，收益第二，先降风险再求增益。`;
+    if (category === 'health') return `「${name}」提示你：规律作息比短期冲刺更重要，建议先修复睡眠和压力管理。`;
+    if (category === 'growth') return `「${name}」提示你：把目标拆成周任务，用复盘代替焦虑。`;
+    return `「${name}」提示你：把复杂问题拆成可执行步骤，稳住节奏，结果会更清晰。`;
+  }
+
+  private getTimingSuggestion(name: string): string {
+    if (name.includes('泰') || name.includes('大有') || name.includes('晋')) {
+      return '时机偏顺，可在 7-14 天内推进关键动作。';
+    }
+    if (name.includes('否') || name.includes('蹇') || name.includes('困')) {
+      return '时机偏守，先做准备动作，等待外部条件改善后再发力。';
+    }
+    return '时机中性，宜小步快跑，用反馈修正方向。';
   }
 }

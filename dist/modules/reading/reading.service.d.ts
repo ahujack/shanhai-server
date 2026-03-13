@@ -42,4 +42,8 @@ export declare class ReadingService {
     private analyzeSituation;
     private getCaution;
     private generateRecommendations;
+    private buildSeed;
+    private buildOverallInterpretation;
+    private buildGuidance;
+    private getTimingSuggestion;
 }

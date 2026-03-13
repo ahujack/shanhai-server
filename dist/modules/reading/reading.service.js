@@ -467,7 +467,8 @@ let ReadingService = class ReadingService {
     };
     async generate(dto) {
         const now = Date.now();
-        const { original, changed, lines } = this.generateHexagram(now);
+        const seed = this.buildSeed(dto.question, dto.category, dto.userId);
+        const { original, changed, lines } = this.generateHexagram(seed);
         const originalName = this.getHexagramName(original);
         const changedName = this.getHexagramName(changed);
         const result = {
@@ -483,13 +484,13 @@ let ReadingService = class ReadingService {
                 yaoDescriptions: lines.map((l, i) => `${['初', '二', '三', '四', '五', '上'][i]}：${this.getYaoDescription(l)}`),
             },
             interpretation: {
-                overall: `${originalName}，象征着特定的意义和趋势。`,
-                situation: this.analyzeSituation(original, changed),
-                guidance: '保持内心平静，顺应变化，把握时机',
+                overall: this.buildOverallInterpretation(originalName, dto.category, dto.question),
+                situation: this.analyzeSituation(original, changed, dto.question),
+                guidance: this.buildGuidance(originalName, dto.category),
             },
             recommendations: this.generateRecommendations(original, changed, dto.category),
             timing: {
-                suitable: '保持耐心，等待合适时机',
+                suitable: this.getTimingSuggestion(originalName),
                 caution: this.getCaution(original, changed),
             },
             culturalSource: `出自《周易》六十四卦 ${originalName}`,
@@ -513,12 +514,19 @@ let ReadingService = class ReadingService {
             else
                 lines.push('6');
         }
-        const toBinary = (l) => {
-            if (l === '6' || l === '9')
+        const toOriginalBinary = (l) => {
+            if (l === '7' || l === '9')
+                return '1';
+            return '0';
+        };
+        const toChangedBinary = (l) => {
+            if (l === '9')
                 return '0';
+            if (l === '6')
+                return '1';
             return l === '7' ? '1' : '0';
         };
-        const original = this.linesToHexagram(lines.map(toBinary));
+        const original = this.linesToHexagram(lines.map(toOriginalBinary));
         const changedLines = lines.map(l => {
             if (l === '9')
                 return '6';
@@ -526,7 +534,7 @@ let ReadingService = class ReadingService {
                 return '9';
             return l;
         });
-        const changed = this.linesToHexagram(changedLines.map(toBinary));
+        const changed = this.linesToHexagram(changedLines.map(toChangedBinary));
         return { original, changed, lines };
     }
     linesToHexagram(binaryLines) {
@@ -575,11 +583,11 @@ let ReadingService = class ReadingService {
         };
         return map[yao] ?? '平和之爻';
     }
-    analyzeSituation(original, changed) {
+    analyzeSituation(original, changed, question) {
         if (original === changed) {
-            return '当前处于稳定状态，暂无重大变化，需静待时机。';
+            return `当前局势相对稳定，重点在于“按节奏推进”。${question ? `针对你提到的“${question.slice(0, 18)}${question.length > 18 ? '…' : ''}”，建议先做小步试探。` : ''}`;
         }
-        return `从 ${this.getHexagramName(original)} 转化为 ${this.getHexagramName(changed)}，暗示事态正在发生转变。`;
+        return `从 ${this.getHexagramName(original)} 转化为 ${this.getHexagramName(changed)}，暗示事态正在发生转变，关键在于顺势调整而非硬推。`;
     }
     getCaution(original, changed) {
         const cautions = {
@@ -615,6 +623,50 @@ let ReadingService = class ReadingService {
             recommendations.push('保持积极心态，顺势而为');
         }
         return recommendations.slice(0, 3);
+    }
+    buildSeed(question, category, userId) {
+        const day = new Date().toISOString().slice(0, 10);
+        const source = `${question}|${category || 'general'}|${userId || 'guest'}|${day}`;
+        let hash = 0;
+        for (let i = 0; i < source.length; i++) {
+            hash = (hash * 31 + source.charCodeAt(i)) >>> 0;
+        }
+        return hash || Date.now();
+    }
+    buildOverallInterpretation(name, category, question) {
+        const categoryLead = {
+            general: '整体趋势上',
+            career: '在事业层面',
+            love: '在感情层面',
+            wealth: '在财务层面',
+            health: '在健康层面',
+            growth: '在个人成长层面',
+        };
+        const lead = categoryLead[category || 'general'];
+        const q = question.trim();
+        return `${lead}，你对应到的是「${name}」之象。${q ? `结合你的问题“${q.slice(0, 24)}${q.length > 24 ? '…' : ''}”，` : ''}这更强调“先稳后进、边做边校准”。`;
+    }
+    buildGuidance(name, category) {
+        if (category === 'career')
+            return `「${name}」提示你：先拿下一个可验证的小目标，再逐步扩张，避免一次性下注。`;
+        if (category === 'love')
+            return `「${name}」提示你：先把沟通边界说清，再谈承诺，关系会更稳。`;
+        if (category === 'wealth')
+            return `「${name}」提示你：现金流优先，收益第二，先降风险再求增益。`;
+        if (category === 'health')
+            return `「${name}」提示你：规律作息比短期冲刺更重要，建议先修复睡眠和压力管理。`;
+        if (category === 'growth')
+            return `「${name}」提示你：把目标拆成周任务，用复盘代替焦虑。`;
+        return `「${name}」提示你：把复杂问题拆成可执行步骤，稳住节奏，结果会更清晰。`;
+    }
+    getTimingSuggestion(name) {
+        if (name.includes('泰') || name.includes('大有') || name.includes('晋')) {
+            return '时机偏顺，可在 7-14 天内推进关键动作。';
+        }
+        if (name.includes('否') || name.includes('蹇') || name.includes('困')) {
+            return '时机偏守，先做准备动作，等待外部条件改善后再发力。';
+        }
+        return '时机中性，宜小步快跑，用反馈修正方向。';
     }
 };
 exports.ReadingService = ReadingService;
