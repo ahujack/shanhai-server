@@ -435,7 +435,8 @@ export class ChartService {
     }
 
     try {
-      const solar = (solarlunar as any).lunar2solar(year, month, day, isLeapMonth);
+      const api = (solarlunar as any).default ?? solarlunar;
+      const solar = api.lunar2solar(year, month, day, isLeapMonth);
       if (!solar || !solar.cYear) return inputDate;
       const mm = String(solar.cMonth).padStart(2, '0');
       const dd = String(solar.cDay).padStart(2, '0');

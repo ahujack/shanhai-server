@@ -24,10 +24,13 @@ export class ChartController {
     // 以 token 中的用户为准，避免 path 与 token 不一致
     const targetUserId = authUserId;
     const user = await this.userService.findOne(targetUserId);
+    if (!user.birthDate || !user.birthTime) {
+      throw new BadRequestException('请先在个人资料中完善出生日期和时间');
+    }
     return await this.chartService.generateChart(
       targetUserId,
-      user.birthDate || '1990-01-01',
-      user.birthTime || '00:00',
+      user.birthDate,
+      user.birthTime,
       body.gender,
       {
         calendarType: user.calendarType || 'solar',
