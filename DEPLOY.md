@@ -12,16 +12,15 @@ NODE_ENV=production
 # JWT 密钥
 JWT_SECRET=your-super-secret-jwt-key
 
-# LLM API (用于 AI 对话和测字增强) - 使用 APIYi
-# 前往 https://docs.apiyi.com 获取 API Key
-LLM_API_KEY=your_apiyi_api_key_here
-
-# 可选（默认使用 gemini-1.5-flash-002）
+# 多模态 (Gemini) - 手写识别等需要图片的
+LLM_API_KEY=your_gemini_api_key_here
 LLM_API_URL=https://api.apiyi.com/v1/chat/completions
-LLM_MODEL=gemini-1.5-flash-002
+LLM_MODEL=gemini-2.5-flash
 
-# OCR API (手写识别) - 使用 APIYi
-OCR_API_KEY=your_apiyi_api_key_here
+# 纯文本 (DeepSeek) - 测字解读、八字解读、抽签、对话等
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
+DEEPSEEK_MODEL=deepseek-chat
 ```
 
 ## 部署步骤

@@ -148,10 +148,8 @@ export class ChartService {
       options?.timezone,
     );
     
-    // 计算八字
-    const yearGZ = this.calculateYearGanZhi(year);
-    const monthGZ = this.calculateMonthGanZhi(year, month);
-    const dayGZ = this.calculateDayGanZhi(year, month, day);
+    // 计算八字：年/月/日柱用 solarlunar（按节气），时柱自算
+    const { yearGZ, monthGZ, dayGZ } = this.getGanZhiFromSolar(year, month, day);
     const hourGZ = this.calculateHourGanZhi(dayGZ, correctedTime.hour);
     
     // 日主（日柱天干）
@@ -389,6 +387,34 @@ export class ChartService {
     return this.gan[hourGanIndex] + this.zhi[hourZhiIndex];
   }
 
+  /**
+   * 从阳历日期获取年/月/日柱（按节气，使用 solarlunar）
+   */
+  private getGanZhiFromSolar(
+    year: number,
+    month: number,
+    day: number,
+  ): { yearGZ: string; monthGZ: string; dayGZ: string } {
+    try {
+      const api = (solarlunar as any).default ?? solarlunar;
+      const result = api.solar2lunar(year, month, day);
+      if (result?.gzYear && result?.gzMonth && result?.gzDay) {
+        return {
+          yearGZ: result.gzYear,
+          monthGZ: result.gzMonth,
+          dayGZ: result.gzDay,
+        };
+      }
+    } catch {
+      // fallback
+    }
+    return {
+      yearGZ: this.calculateYearGanZhi(year),
+      monthGZ: this.calculateMonthGanZhi(year, month),
+      dayGZ: this.calculateDayGanZhi(year, month, day),
+    };
+  }
+
   private resolveSolarDate(
     inputDate: string,
     calendarType: 'solar' | 'lunar',
@@ -414,6 +440,10 @@ export class ChartService {
     }
   }
 
+  /**
+   * 真太阳时校正：经度时差 + 均时差
+   * 北京 7:06 + 出生地 113.8°E → 约 6:39 真太阳时 → 卯时
+   */
   private applyTrueSolarTimeCorrection(
     year: number,
     month: number,
@@ -429,11 +459,25 @@ export class ChartService {
 
     const offsetHours = this.getTimezoneOffsetHours(timezone || 'Asia/Shanghai', new Date(year, month - 1, day, hour, minute));
     const standardMeridian = offsetHours * 15;
-    const correctionMinutes = Math.round((longitude - standardMeridian) * 4);
+    // 经度时差：1° ≈ 4 分钟，东经越小则地方时越晚
+    const longitudeCorrectionMinutes = Math.round((longitude - standardMeridian) * 4);
+    // 均时差：真太阳时 = 平太阳时 + 均时差（分）
+    const equationOfTimeMinutes = this.getEquationOfTimeMinutes(year, month, day);
+    const totalCorrection = longitudeCorrectionMinutes + equationOfTimeMinutes;
 
     const date = new Date(year, month - 1, day, hour, minute);
-    date.setMinutes(date.getMinutes() + correctionMinutes);
+    date.setMinutes(date.getMinutes() + totalCorrection);
     return { hour: date.getHours(), minute: date.getMinutes() };
+  }
+
+  /** 均时差（分钟），近似公式：真太阳时 = 平太阳时 + 均时差 */
+  private getEquationOfTimeMinutes(year: number, month: number, day: number): number {
+    const startOfYear = new Date(year, 0, 1);
+    const current = new Date(year, month - 1, day);
+    const d = Math.floor((current.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const D = 6.24004077 + 0.01720197 * (365.25 * (year - 2000) + d);
+    const deltaMinutes = -7.659 * Math.sin(D) + 9.863 * Math.sin(2 * D + 3.5932);
+    return Math.round(deltaMinutes);
   }
 
   private getTimezoneOffsetHours(timezone: string, date: Date): number {
@@ -1140,7 +1184,8 @@ export class ChartService {
     baseDetailedReading: BaziChart['detailedReading'];
     membership: MembershipTier;
   }): Promise<BaziChart['detailedReading']> {
-    const enableLLM = process.env.BAZI_LLM_ENHANCE === 'true';
+    // 排盘用规则，排好后用文本大模型解读（DeepSeek）
+    const enableLLM = process.env.BAZI_LLM_ENHANCE !== 'false';
     const apiKey = process.env.BAZI_LLM_API_KEY || process.env.DEEPSEEK_API_KEY;
     if (!enableLLM || !apiKey) {
       return this.applyMembershipLayer(input.baseDetailedReading, input.membership);

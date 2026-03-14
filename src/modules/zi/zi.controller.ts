@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { ZiService, HandwritingAnalysis } from './zi.service';
 import { OcrService } from '../ocr/ocr.service';
+import { PointsService } from '../points/points.service';
 
 export class AnalyzeZiDto {
   @IsString()
@@ -38,6 +39,8 @@ export class AnalyzeHandwritingDto {
   focusAspect?: string;
 }
 
+const ZI_POINTS_COST = 10;
+
 @Controller('zi')
 export class ZiController {
   private prisma = new PrismaClient();
@@ -45,6 +48,7 @@ export class ZiController {
   constructor(
     private readonly ziService: ZiService,
     private readonly ocrService: OcrService,
+    private readonly pointsService: PointsService,
   ) {}
 
   @Post('analyze')
@@ -54,6 +58,17 @@ export class ZiController {
       throw new BadRequestException('请输入一个有效的汉字');
     }
     const membership = await this.getMembership(dto.userId);
+    if (dto.userId && membership === 'free') {
+      const consumed = await this.pointsService.consumePoints(
+        dto.userId,
+        ZI_POINTS_COST,
+        'zi',
+        '测字解读',
+      );
+      if (!consumed.success) {
+        throw new BadRequestException(consumed.message || '积分不足，请签到或前往积分商城获取');
+      }
+    }
     const result = await this.ziService.analyze(zi, dto.handwriting, membership, dto.focusAspect);
 
     // 保存测字记录
@@ -110,8 +125,24 @@ export class ZiController {
         };
       }
       
-      // 2. 分析字义
+      // 2. 积分消耗（非 VIP 用户）
       const membership = await this.getMembership(dto.userId);
+      if (dto.userId && membership === 'free') {
+        const consumed = await this.pointsService.consumePoints(
+          dto.userId,
+          ZI_POINTS_COST,
+          'zi',
+          '测字解读（手写）',
+        );
+        if (!consumed.success) {
+          return {
+            recognizedZi: zi,
+            error: consumed.message || '积分不足，请签到或前往积分商城获取',
+          };
+        }
+      }
+      
+      // 3. 分析字义
       const analysis = await this.ziService.analyze(zi, undefined, membership, dto.focusAspect);
       
       // 保存测字记录

@@ -7,9 +7,6 @@ import * as path from 'path';
 @Injectable()
 export class OcrService {
   private readonly logger = new Logger(OcrService.name);
-  private readonly API_KEY = 'sk-bj2OZEK29RKtXEUR4a93E30f0b664d0c85F665882dCbB69e';
-  private readonly API_URL = 'https://api.apiyi.com/v1/chat/completions';
-  private readonly MODEL = 'gemini-2.5-flash';
   private readonly SAMPLE_DIR = path.join(process.cwd(), 'handwriting-samples');
   
   constructor() {
@@ -19,9 +16,16 @@ export class OcrService {
   }
   
   /**
-   * 使用 Gemini 2.5 Flash 识别手写汉字
+   * 使用 Gemini 多模态模型识别手写汉字（LLM_API_KEY + LLM_MODEL）
    */
   async recognizeHandwriting(imageBase64: string): Promise<{ zi: string; confidence: number }> {
+    const apiKey = process.env.LLM_API_KEY;
+    const apiUrl = process.env.LLM_API_URL || process.env.LLM_URL || 'https://api.apiyi.com/v1/chat/completions';
+    const model = process.env.LLM_MODEL || 'gemini-2.5-flash';
+    if (!apiKey) {
+      this.logger.warn('LLM_API_KEY 未配置，多模态手写识别不可用，将尝试 SVG 备用方案');
+      return this.extractFromSvg(imageBase64, Date.now());
+    }
     this.logger.log('=== 开始 Gemini 手写识别 ===');
     
     const timestamp = Date.now();
@@ -86,7 +90,7 @@ export class OcrService {
       
       // 按照用户提供的 Python 代码格式 - 优化提示词
       const requestBody = {
-        model: this.MODEL,
+        model,
         messages: [
           {
             role: 'user',
@@ -110,9 +114,9 @@ export class OcrService {
       
       this.logger.log('发送 Gemini 请求（图片大小: ' + jpegBase64.length + '）...');
       
-      const response = await axios.post(this.API_URL, requestBody, {
+      const response = await axios.post(apiUrl, requestBody, {
         headers: { 
-          'Authorization': `Bearer ${this.API_KEY}`, 
+          'Authorization': `Bearer ${apiKey}`, 
           'Content-Type': 'application/json' 
         },
         timeout: 90000,
