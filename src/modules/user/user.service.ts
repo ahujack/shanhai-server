@@ -257,12 +257,23 @@ export class UserService {
     return this.formatUser(user);
   }
 
-  // 更新用户
+  // 更新用户（过滤 undefined，确保 Prisma 正确更新）
   async update(id: string, dto: Partial<CreateUserDto>): Promise<UserProfile> {
+    const clean = Object.fromEntries(
+      Object.entries(dto).filter(([, v]) => v !== undefined)
+    ) as Partial<CreateUserDto>;
+    if (clean.email) {
+      const existing = await this.prisma.user.findFirst({
+        where: { email: clean.email, id: { not: id } },
+      });
+      if (existing) {
+        throw new BadRequestException('该邮箱已被其他账号使用');
+      }
+    }
     const user = await this.prisma.user.update({
       where: { id },
       data: {
-        ...dto,
+        ...clean,
         updatedAt: new Date(),
       } as any,
     });
