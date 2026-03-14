@@ -15,14 +15,17 @@ export class ChartController {
   async generate(
     @Param('userId') userId: string,
     @Body() body: { gender: 'male' | 'female' },
-    @Req() req: { user: { sub: string } },
+    @Req() req: { user: { sub?: string; id?: string } },
   ) {
-    if (userId !== req.user.sub) {
-      throw new BadRequestException('无权操作他人命盘');
+    const authUserId = String(req.user?.sub || req.user?.id || '');
+    if (!authUserId) {
+      throw new BadRequestException('请先登录');
     }
-    const user = await this.userService.findOne(userId);
+    // 以 token 中的用户为准，避免 path 与 token 不一致
+    const targetUserId = authUserId;
+    const user = await this.userService.findOne(targetUserId);
     return await this.chartService.generateChart(
-      userId,
+      targetUserId,
       user.birthDate || '1990-01-01',
       user.birthTime || '00:00',
       body.gender,
@@ -41,14 +44,17 @@ export class ChartController {
   @UseGuards(RequireAuthGuard)
   async findOne(
     @Param('userId') userId: string,
-    @Req() req: { user: { sub: string } },
+    @Req() req: { user: { sub?: string; id?: string } },
   ) {
-    if (userId !== req.user.sub) {
-      throw new BadRequestException('无权查看他人命盘');
+    const authUserId = String(req.user?.sub || req.user?.id || '');
+    if (!authUserId) {
+      throw new BadRequestException('请先登录');
     }
-    const user = await this.userService.findOne(userId);
+    // 以 token 中的用户为准
+    const targetUserId = authUserId;
+    const user = await this.userService.findOne(targetUserId);
     const chart = await this.chartService.findOne(
-      userId,
+      targetUserId,
       (user.membership as 'free' | 'premium' | 'vip') || 'free',
     );
     if (!chart) {
