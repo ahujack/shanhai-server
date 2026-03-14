@@ -1,10 +1,13 @@
-import { Body, Controller, Post, BadRequestException } from '@nestjs/common';
-import { IsString, IsOptional } from 'class-validator';
+import { Body, Controller, Post, BadRequestException, Req, UseGuards } from '@nestjs/common';
+import { IsString, IsOptional, MaxLength } from 'class-validator';
 import { Logger } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
 import { ZiService, HandwritingAnalysis } from './zi.service';
 import { OcrService } from '../ocr/ocr.service';
 import { PointsService } from '../points/points.service';
+import { PrismaService } from '../../prisma.service';
+import { RequireAuthGuard } from '../auth/jwt-auth.guard';
+
+const ZI_POINTS_COST = parseInt(process.env.ZI_POINTS_COST || '10', 10);
 
 export class AnalyzeZiDto {
   @IsString()
@@ -14,11 +17,8 @@ export class AnalyzeZiDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   focusAspect?: string;
-
-  @IsOptional()
-  @IsString()
-  userId?: string;
 }
 
 export class RecognizeDto {
@@ -32,35 +32,31 @@ export class AnalyzeHandwritingDto {
 
   @IsOptional()
   @IsString()
-  userId?: string;
-
-  @IsOptional()
-  @IsString()
+  @MaxLength(50)
   focusAspect?: string;
 }
 
-const ZI_POINTS_COST = 10;
-
 @Controller('zi')
 export class ZiController {
-  private prisma = new PrismaClient();
-
   constructor(
     private readonly ziService: ZiService,
     private readonly ocrService: OcrService,
     private readonly pointsService: PointsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Post('analyze')
-  async analyze(@Body() dto: AnalyzeZiDto) {
+  @UseGuards(RequireAuthGuard)
+  async analyze(@Body() dto: AnalyzeZiDto, @Req() req: { user: { sub: string } }) {
+    const userId = req.user.sub;
     const zi = String(dto.zi || '').trim().charAt(0);
     if (!/[\u4e00-\u9fa5]/.test(zi)) {
       throw new BadRequestException('请输入一个有效的汉字');
     }
-    const membership = await this.getMembership(dto.userId);
-    if (dto.userId && membership === 'free') {
+    const membership = await this.getMembership(userId);
+    if (membership === 'free') {
       const consumed = await this.pointsService.consumePoints(
-        dto.userId,
+        userId,
         ZI_POINTS_COST,
         'zi',
         '测字解读',
@@ -72,11 +68,10 @@ export class ZiController {
     const result = await this.ziService.analyze(zi, dto.handwriting, membership, dto.focusAspect);
 
     // 保存测字记录
-    if (dto.userId) {
-      try {
-        await this.prisma.ziAnalysis.create({
-          data: {
-            userId: dto.userId,
+    try {
+      await this.prisma.ziAnalysis.create({
+        data: {
+          userId,
             zi,
             pressure: result.handwriting.pressure,
             pressureInterpretation: result.handwriting.pressureInterpretation,
@@ -93,17 +88,16 @@ export class ZiController {
             followUpQuestions: JSON.stringify(result.followUpQuestions),
           },
         });
-      } catch (error) {
-        Logger.error('保存测字记录失败', (error as Error).message, ZiController.name);
-      }
+    } catch (error) {
+      Logger.error('保存测字记录失败', (error as Error).message, ZiController.name);
     }
 
     return result;
   }
 
   @Post('recognize')
+  @UseGuards(RequireAuthGuard)
   async recognize(@Body() dto: RecognizeDto) {
-    console.log('收到 recognize 请求, dto:', dto);
     const result = await this.ocrService.recognizeHandwriting(dto.image);
     return {
       recognizedZi: result.zi,
@@ -112,7 +106,9 @@ export class ZiController {
   }
 
   @Post('analyze-handwriting')
-  async analyzeHandwriting(@Body() dto: AnalyzeHandwritingDto) {
+  @UseGuards(RequireAuthGuard)
+  async analyzeHandwriting(@Body() dto: AnalyzeHandwritingDto, @Req() req: { user: { sub: string } }) {
+    const userId = req.user.sub;
     try {
       // 1. 识别文字
       const ocrResult = await this.ocrService.recognizeHandwriting(dto.image);
@@ -126,10 +122,10 @@ export class ZiController {
       }
       
       // 2. 积分消耗（非 VIP 用户）
-      const membership = await this.getMembership(dto.userId);
-      if (dto.userId && membership === 'free') {
+      const membership = await this.getMembership(userId);
+      if (membership === 'free') {
         const consumed = await this.pointsService.consumePoints(
-          dto.userId,
+          userId,
           ZI_POINTS_COST,
           'zi',
           '测字解读（手写）',
@@ -146,11 +142,10 @@ export class ZiController {
       const analysis = await this.ziService.analyze(zi, undefined, membership, dto.focusAspect);
       
       // 保存测字记录
-      if (dto.userId) {
-        try {
-          await this.prisma.ziAnalysis.create({
-            data: {
-              userId: dto.userId,
+      try {
+        await this.prisma.ziAnalysis.create({
+          data: {
+            userId,
               zi,
               pressure: analysis.handwriting.pressure,
               pressureInterpretation: analysis.handwriting.pressureInterpretation,
@@ -166,11 +161,10 @@ export class ZiController {
               coldReadings: JSON.stringify(analysis.coldReadings),
               followUpQuestions: JSON.stringify(analysis.followUpQuestions),
               confidence: ocrResult.confidence,
-            },
-          });
-        } catch (error) {
-          Logger.error('保存测字记录失败', (error as Error).message, ZiController.name);
-        }
+          },
+        });
+      } catch (error) {
+        Logger.error('保存测字记录失败', (error as Error).message, ZiController.name);
       }
 
       return {
@@ -187,15 +181,19 @@ export class ZiController {
     }
   }
 
-  private async getMembership(userId?: string): Promise<'free' | 'premium' | 'vip'> {
-    if (!userId) return 'free';
+  private async getMembership(userId: string): Promise<'free' | 'premium' | 'vip'> {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
-        select: { membership: true },
+        select: { membership: true, membershipExpiryAt: true },
       });
       const membership = user?.membership;
-      if (membership === 'premium' || membership === 'vip') return membership;
+      if (membership === 'premium' || membership === 'vip') {
+        if (user?.membershipExpiryAt && new Date() > user.membershipExpiryAt) {
+          return 'free';
+        }
+        return membership;
+      }
     } catch (error) {
       Logger.warn(`读取用户会员失败: ${(error as Error).message}`, ZiController.name);
     }

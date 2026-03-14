@@ -15,8 +15,4 @@ export class CreateReadingDto {
   @IsArray()
   @IsOptional()
   keywords?: string[];
-  
-  @IsString()
-  @IsOptional()
-  userId?: string;
 }

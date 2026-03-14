@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Req, UseGuards, BadRequestException } from '@nestjs/common';
 import { ChartService } from './chart.service';
 import { UserService } from '../user/user.service';
+import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('charts')
 export class ChartController {
@@ -10,10 +11,15 @@ export class ChartController {
   ) {}
 
   @Post(':userId')
+  @UseGuards(RequireAuthGuard)
   async generate(
     @Param('userId') userId: string,
-    @Body() body: { gender: 'male' | 'female' }
+    @Body() body: { gender: 'male' | 'female' },
+    @Req() req: { user: { sub: string } },
   ) {
+    if (userId !== req.user.sub) {
+      throw new BadRequestException('无权操作他人命盘');
+    }
     const user = await this.userService.findOne(userId);
     return await this.chartService.generateChart(
       userId,
@@ -24,6 +30,7 @@ export class ChartController {
         calendarType: user.calendarType || 'solar',
         isLeapMonth: user.isLeapMonth || false,
         birthLongitude: user.birthLongitude,
+        birthLocation: user.birthLocation,
         timezone: user.timezone,
         membership: (user.membership as 'free' | 'premium' | 'vip') || 'free',
       },
@@ -31,7 +38,14 @@ export class ChartController {
   }
 
   @Get(':userId')
-  async findOne(@Param('userId') userId: string) {
+  @UseGuards(RequireAuthGuard)
+  async findOne(
+    @Param('userId') userId: string,
+    @Req() req: { user: { sub: string } },
+  ) {
+    if (userId !== req.user.sub) {
+      throw new BadRequestException('无权查看他人命盘');
+    }
     const user = await this.userService.findOne(userId);
     const chart = await this.chartService.findOne(
       userId,

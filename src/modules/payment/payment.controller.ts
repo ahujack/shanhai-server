@@ -81,20 +81,28 @@ export class PaymentController {
     }
   }
 
-  // Creem Webhook 回调
+  // Creem Webhook 回调（需配置 rawBody 以验证签名）
   @Post('webhook/creem')
-  async handleCreemWebhook(@Body() body: any) {
+  async handleCreemWebhook(@Req() req: any) {
+    const signature = req.headers['creem-signature'];
+    const rawBody = req.rawBody ?? (req.body ? JSON.stringify(req.body) : null);
+    const body = req.body;
     try {
-      return await this.paymentService.handleCreemWebhook(body);
+      return await this.paymentService.handleCreemWebhook(body, { signature, rawBody });
     } catch (error) {
       console.error('Creem Webhook error:', error.message);
       return { received: false, error: error.message };
     }
   }
 
-  // 模拟支付成功（仅用于测试）
+  // 模拟支付成功（仅开发/测试环境）
   @Post('mock-payment/:paymentId')
   async mockPayment(@Param('paymentId') paymentId: string) {
+    const env = (process.env.NODE_ENV || '').toLowerCase();
+    const allowMock = env !== 'production' || process.env.ALLOW_MOCK_PAYMENT === 'true';
+    if (!allowMock) {
+      throw new NotFoundException('Not Found');
+    }
     try {
       const result = await this.paymentService.mockPaymentSuccess(paymentId);
       return { success: true, payment: result };

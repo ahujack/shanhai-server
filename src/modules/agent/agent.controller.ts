@@ -1,19 +1,22 @@
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import { Body, Controller, Post, Res, Req, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { AgentService } from './agent.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
+import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('agent')
 export class AgentController {
   constructor(private readonly agentService: AgentService) {}
 
   @Post('chat')
-  async chat(@Body() dto: AgentChatDto) {
-    return this.agentService.handleChat(dto);
+  @UseGuards(RequireAuthGuard)
+  async chat(@Body() dto: AgentChatDto, @Req() req: { user: { sub: string } }) {
+    return this.agentService.handleChat({ ...dto, userId: req.user.sub });
   }
 
   @Post('chat-stream')
-  async chatStream(@Body() dto: AgentChatDto, @Res() res: Response) {
+  @UseGuards(RequireAuthGuard)
+  async chatStream(@Body() dto: AgentChatDto, @Res() res: Response, @Req() req: { user: { sub: string } }) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -21,7 +24,7 @@ export class AgentController {
     res.flushHeaders();
 
     try {
-      for await (const event of this.agentService.handleChatStream(dto)) {
+      for await (const event of this.agentService.handleChatStream({ ...dto, userId: req.user.sub })) {
         res.write(`data: ${JSON.stringify(event)}\n\n`);
         if (typeof (res as any).flush === 'function') {
           (res as any).flush();

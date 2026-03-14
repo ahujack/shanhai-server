@@ -122,10 +122,15 @@ export class ChartService {
       calendarType?: 'solar' | 'lunar';
       isLeapMonth?: boolean;
       birthLongitude?: number;
+      birthLocation?: string;
       timezone?: string;
       membership?: MembershipTier;
     },
   ): Promise<BaziChart> {
+    const resolvedLongitude = await this.resolveBirthLongitude(
+      options?.birthLongitude,
+      options?.birthLocation,
+    );
     const resolvedSolarDate = this.resolveSolarDate(
       birthDate,
       options?.calendarType || 'solar',
@@ -144,7 +149,7 @@ export class ChartService {
       day,
       hour,
       minute,
-      options?.birthLongitude,
+      resolvedLongitude,
       options?.timezone,
     );
     
@@ -185,7 +190,7 @@ export class ChartService {
       birthTime,
       resolvedSolarDate,
       correctedTime,
-      birthLongitude: options?.birthLongitude,
+      birthLongitude: resolvedLongitude,
       timezone: options?.timezone || 'Asia/Shanghai',
       yearGanZhi: yearGZ,
       monthGanZhi: monthGZ,
@@ -438,6 +443,40 @@ export class ChartService {
     } catch {
       return inputDate;
     }
+  }
+
+  /**
+   * 解析出生地经度：优先用用户填写的经度；未填时根据出生地城市名地理编码获取
+   */
+  private async resolveBirthLongitude(
+    birthLongitude?: number,
+    birthLocation?: string,
+  ): Promise<number | undefined> {
+    if (birthLongitude !== undefined && birthLongitude !== null && !Number.isNaN(birthLongitude)) {
+      return birthLongitude;
+    }
+    const location = birthLocation?.trim();
+    if (!location || location.length < 2) {
+      return undefined;
+    }
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location + ', 中国')}&format=json&limit=1`;
+      const response = await axios.get<Array<{ lon: string; lat: string }>>(url, {
+        headers: { 'User-Agent': 'ShanhaiBazi/1.0 (birthplace geocoding)' },
+        timeout: 5000,
+      });
+      const first = response.data?.[0];
+      if (first?.lon) {
+        const lon = Number(first.lon);
+        if (Number.isFinite(lon) && lon >= 70 && lon <= 140) {
+          this.logger.log(`出生地 "${location}" 地理编码经度: ${lon}`);
+          return lon;
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`出生地 "${location}" 地理编码失败:`, (err as Error)?.message);
+    }
+    return undefined;
   }
 
   /**

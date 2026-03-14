@@ -31,6 +31,7 @@ model User {
   focusGod      String?   // 用户长期关注十神（用于跨设备个性化）
   role          String    @default("user") // user | admin
   membership    String    @default("free") // free | premium | vip
+  membershipExpiryAt DateTime? // 会员到期时间，过期后自动降级为 free
   
   // 社交登录绑定
   googleId      String?   @unique

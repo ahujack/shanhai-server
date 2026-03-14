@@ -241,10 +241,27 @@ export class PaymentService implements OnModuleInit {
     }
   }
 
-  // 处理 Creem Webhook
-  async handleCreemWebhook(body: any) {
+  // 处理 Creem Webhook（可选签名验证）
+  async handleCreemWebhook(
+    body: any,
+    opts?: { signature?: string; rawBody?: string | Buffer },
+  ) {
+    const secret = process.env.CREEM_WEBHOOK_SECRET;
+    if (secret) {
+      if (!opts?.signature || !opts?.rawBody) {
+        this.logger.warn('Creem Webhook 已配置 CREEM_WEBHOOK_SECRET 但缺少 creem-signature 或 rawBody');
+        throw new BadRequestException('Webhook signature required');
+      }
+      const crypto = await import('crypto');
+      const raw = typeof opts.rawBody === 'string' ? opts.rawBody : opts.rawBody.toString();
+      const computed = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+      if (computed !== opts.signature) {
+        this.logger.warn('Creem Webhook 签名验证失败');
+        throw new BadRequestException('Invalid webhook signature');
+      }
+    }
+
     const event = body;
-    
     if (event.event === 'checkout.completed') {
       const checkout = event.data;
       const paymentId = checkout.metadata?.paymentId;
@@ -298,17 +315,17 @@ export class PaymentService implements OnModuleInit {
       );
     }
 
-    // 2. 如果是订阅产品，更新用户会员状态
+    // 2. 如果是订阅产品，更新用户会员状态及到期时间
     if (payment.product.type === 'subscription') {
       const periodDays = payment.product.periodDays || 30;
       const expiryDate = new Date();
       expiryDate.setDate(expiryDate.getDate() + periodDays);
 
-      // 更新用户会员状态
       await this.prisma.user.update({
         where: { id: payment.userId },
         data: {
           membership: payment.product.code.includes('vip') ? 'vip' : 'premium',
+          membershipExpiryAt: expiryDate,
         },
       });
     }

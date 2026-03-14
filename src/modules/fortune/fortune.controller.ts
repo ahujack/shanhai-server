@@ -1,13 +1,15 @@
-import { Controller, Get, Post, Query } from '@nestjs/common';
+import { Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { FortuneService } from './fortune.service';
+import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('fortunes')
 export class FortuneController {
   constructor(private readonly fortuneService: FortuneService) {}
 
   @Get('daily')
-  getDailyFortune(@Query('userId') userId?: string) {
-    return this.fortuneService.getDailyFortune(userId);
+  @UseGuards(RequireAuthGuard)
+  getDailyFortune(@Req() req: { user: { sub: string } }) {
+    return this.fortuneService.getDailyFortune(req.user.sub);
   }
 
   @Get('draw')
