@@ -1,7 +1,7 @@
 import { Body, Controller, Post, BadRequestException, Req, UseGuards } from '@nestjs/common';
 import { IsString, IsOptional, MaxLength } from 'class-validator';
 import { Logger } from '@nestjs/common';
-import { ZiService, HandwritingAnalysis } from './zi.service';
+import { ZiService, HandwritingAnalysis, ZiBaziContext } from './zi.service';
 import { OcrService } from '../ocr/ocr.service';
 import { PointsService } from '../points/points.service';
 import { PrismaService } from '../../prisma.service';
@@ -65,7 +65,8 @@ export class ZiController {
         throw new BadRequestException(consumed.message || '积分不足，请签到或前往积分商城获取');
       }
     }
-    const result = await this.ziService.analyze(zi, dto.handwriting, membership, dto.focusAspect);
+    const chartCtx = await this.buildZiBaziContext(userId);
+    const result = await this.ziService.analyze(zi, dto.handwriting, membership, dto.focusAspect, chartCtx);
 
     if (userId) {
       try {
@@ -111,7 +112,10 @@ export class ZiController {
   async analyzeHandwriting(@Body() dto: AnalyzeHandwritingDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
     try {
-      const ocrResult = await this.ocrService.recognizeHandwriting(dto.image);
+      const [ocrResult, visionHw] = await Promise.all([
+        this.ocrService.recognizeHandwriting(dto.image),
+        this.ocrService.inferHandwritingTraitsWithGemini(dto.image),
+      ]);
       const zi = ocrResult.zi;
 
       if (!zi) {
@@ -137,7 +141,31 @@ export class ZiController {
         }
       }
 
-      const analysis = await this.ziService.analyze(zi, undefined, membership, dto.focusAspect);
+      const chartCtx = await this.buildZiBaziContext(userId);
+      let visionNote: string | undefined;
+      let preserveVision = false;
+      const hwPayload: Partial<HandwritingAnalysis> | undefined =
+        visionHw && visionHw.pressure ? { ...visionHw } : undefined;
+      if (hwPayload) {
+        preserveVision = true;
+        visionNote = [
+          `多模态笔迹观察：力度${hwPayload.pressure}，稳定${hwPayload.stability}，结构${hwPayload.structure}，连贯${hwPayload.continuity}`,
+          hwPayload.pressureInterpretation,
+          hwPayload.stabilityInterpretation,
+        ]
+          .filter(Boolean)
+          .join('；')
+          .slice(0, 800);
+      }
+
+      const analysis = await this.ziService.analyze(
+        zi,
+        hwPayload,
+        membership,
+        dto.focusAspect,
+        chartCtx,
+        { visionHandwritingNote: visionNote, preserveVisionHandwriting: preserveVision },
+      );
 
       if (userId) {
         try {
@@ -177,6 +205,36 @@ export class ZiController {
         recognizedZi: null,
         error: error.message || '服务器错误',
       };
+    }
+  }
+
+  private async buildZiBaziContext(userId?: string): Promise<ZiBaziContext | null> {
+    if (!userId) return null;
+    try {
+      const row = await this.prisma.baziChart.findUnique({ where: { userId } });
+      if (!row) return null;
+      let wx: Record<string, number> = {};
+      try {
+        wx = JSON.parse(row.wuxingStrength || '{}') as Record<string, number>;
+      } catch {
+        /* ignore */
+      }
+      const sorted = Object.entries(wx).sort((a, b) => Number(b[1]) - Number(a[1]));
+      const wuxingSummary =
+        sorted
+          .slice(0, 3)
+          .map(([k, v]) => `${k}${Math.round(Number(v))}`)
+          .join(' ') || '未定';
+      return {
+        pillars: `${row.yearGanZhi} ${row.monthGanZhi} ${row.dayGanZhi} ${row.hourGanZhi}`,
+        dayMaster: row.dayMaster,
+        dayPillar: row.dayGanZhi,
+        wuxingSummary,
+        wuxingStrength: wx,
+        gender: row.gender,
+      };
+    } catch {
+      return null;
     }
   }
 

@@ -44,6 +44,23 @@ export interface HandwritingAnalysis {
   personalityInsights: string[];
 }
 
+/** 测字 DeepSeek 联动：登录用户有命盘时传入，避免解读千篇一律 */
+export interface ZiBaziContext {
+  pillars: string;
+  dayMaster: string;
+  dayPillar: string;
+  wuxingSummary: string;
+  wuxingStrength: Record<string, number>;
+  gender: string;
+}
+
+export interface ZiAnalyzeOptions {
+  /** 多模态笔迹观察摘要，供 DeepSeek 承接（勿与图像矛盾） */
+  visionHandwritingNote?: string;
+  /** 为 true 时 DeepSeek 返回的 handwritingInterpretation 不覆盖已有笔迹字段 */
+  preserveVisionHandwriting?: boolean;
+}
+
 // 笔迹特征库
 const handwritingPatterns = {
   // 力度分析
@@ -297,13 +314,15 @@ export class ZiService {
     handwritingData?: Partial<HandwritingAnalysis>,
     membership: MembershipTier = 'free',
     focusAspect?: string,
+    chartContext?: ZiBaziContext | null,
+    analyzeOpts?: ZiAnalyzeOptions,
   ): Promise<ZiResult> {
     try {
       const char = zi.charAt(0);
       const focus = this.normalizeFocusAspect(focusAspect);
       await this.ensureOracleBoneLexicon();
       
-      // 1. 笔迹分析
+      // 1. 笔迹分析（可含 Gemini 多模态笔迹；无则模板/随机）
       let handwriting = this.analyzeHandwriting(handwritingData);
       
       // 2. 汉字拆解分析
@@ -315,7 +334,10 @@ export class ZiService {
       const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis, focus);
 
       try {
-        const llmResult = await this.getLLMEnhancement(char, handwriting, ziAnalysis, focus);
+        const llmResult = await this.getLLMEnhancement(char, handwriting, ziAnalysis, focus, {
+          chartContext: chartContext ?? undefined,
+          visionHandwritingNote: analyzeOpts?.visionHandwritingNote,
+        });
         if (llmResult) {
           // 技法细化：离合法、填字格、象形投射
           if (llmResult.lihefa?.length || llmResult.tianziGe?.length || llmResult.imageryInference) {
@@ -337,8 +359,8 @@ export class ZiService {
               },
             };
           }
-          // 笔迹心理学：LLM 结合字+方向做详细解读
-          if (llmResult.handwritingInterpretation) {
+          // 笔迹心理学：Gemini 已读图时默认不覆盖，其余走 DeepSeek 补强
+          if (llmResult.handwritingInterpretation && !analyzeOpts?.preserveVisionHandwriting) {
             const hi = llmResult.handwritingInterpretation;
             handwriting = {
               ...handwriting,
@@ -726,6 +748,10 @@ export class ZiService {
     handwriting: HandwritingAnalysis, 
     ziAnalysis: ZiAnalysis,
     focus: FocusProfile,
+    ctx?: {
+      chartContext?: ZiBaziContext;
+      visionHandwritingNote?: string;
+    },
   ): Promise<{
     overall?: string;
     advice?: string[];
@@ -784,6 +810,9 @@ export class ZiService {
 2. focusAspect（用户选的方向）决定解读重心：若为「感情/事业/财运/健康」等，至少 80% 内容围绕该方向深入展开
 3. 讲解要详细、有层次但控制篇幅：overall 约200-320字，career/love/wealth/health 各约100-180字（避免超长 JSON 导致超时）
 4. coldReadings 每条都要结合该字的具体部件或字义，不能是通用话术
+5. 【去模板化】禁止输出可套用到任意汉字上的万能句；overall 与 coldReadings 中须至少 3 处点名本字具体部件或本字字义
+6. 【八字联动】若用户 JSON 中 baziProfile 非空：必须把所测之字的五行（ziAnalysis.wuxing）与用户日主 dayMaster、四柱 pillars、五行强弱 wuxingStrength 对照，写清生克与扶助；针对 focusAspect 给差异化建议。无 baziProfile 时不要编造命盘。
+7. 【笔迹承接】若提供了 visionHandwritingNote（多模态已读图），handwritingInterpretation 四条须在语义上承接该观察，并结合 focus 与八字（若有）延伸，不得改成与之矛盾的套话。
 
 【技法细化】必须结合该字部件拆解，每条都要不同：
 - lihefa：离合法，3条。格式如「离：先看外层「X」意象…」「转：把X合起来看…」「证：从部件含义看…」。必须用该字真实部件
@@ -829,6 +858,17 @@ export class ZiService {
               content: JSON.stringify({
                 question: '请深度解读这个字，务必结合具体字义与部件，用户关注方向：' + focus.label,
                 focusAspect: focus.label,
+                visionHandwritingNote: ctx?.visionHandwritingNote || null,
+                baziProfile: ctx?.chartContext
+                  ? {
+                      pillars: ctx.chartContext.pillars,
+                      dayMaster: ctx.chartContext.dayMaster,
+                      dayPillar: ctx.chartContext.dayPillar,
+                      wuxingSummary: ctx.chartContext.wuxingSummary,
+                      wuxingStrength: ctx.chartContext.wuxingStrength,
+                      gender: ctx.chartContext.gender,
+                    }
+                  : null,
                 zi: zi,
                 handwriting: {
                   pressure: handwriting.pressure,
