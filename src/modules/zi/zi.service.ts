@@ -761,13 +761,18 @@ export class ZiService {
     try {
       const apiUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
       const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-      
+      // 原 5500 tokens + 30s 超时极易未完成即断开，前端表现为 net::ERR_CONNECTION_TIMED_OUT
+      const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || '3800', 10);
+      const maxTokens = Math.min(8192, Math.max(1500, Number.isFinite(maxTokensRaw) ? maxTokensRaw : 3800));
+      const timeoutRaw = parseInt(process.env.ZI_DEEPSEEK_TIMEOUT_MS || '120000', 10);
+      const timeoutMs = Math.min(180000, Math.max(45000, Number.isFinite(timeoutRaw) ? timeoutRaw : 120000));
+
       const response = await axios.post(
         apiUrl,
         {
           model: model,
           temperature: 0.75,
-          max_tokens: 5500,
+          max_tokens: maxTokens,
           response_format: { type: 'json_object' },
           messages: [
             {
@@ -777,7 +782,7 @@ export class ZiService {
 【核心要求】
 1. 必须结合具体字进行解读，禁止泛泛而谈。每个输出都要显式用到该字的：部首、笔画、部件拆解、字义联想、五行阴阳吉凶
 2. focusAspect（用户选的方向）决定解读重心：若为「感情/事业/财运/健康」等，至少 80% 内容围绕该方向深入展开
-3. 讲解要详细、有层次。overall 200-400字，各方向解读 150-300字
+3. 讲解要详细、有层次但控制篇幅：overall 约200-320字，career/love/wealth/health 各约100-180字（避免超长 JSON 导致超时）
 4. coldReadings 每条都要结合该字的具体部件或字义，不能是通用话术
 
 【技法细化】必须结合该字部件拆解，每条都要不同：
@@ -859,13 +864,18 @@ export class ZiService {
             Authorization: `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
           },
-          timeout: 30000,
+          timeout: timeoutMs,
         },
       );
-      
+
       const content = response.data?.choices?.[0]?.message?.content;
       if (content) {
-        return JSON.parse(content);
+        try {
+          const raw = String(content).replace(/```json\n?|\n?```/g, '').trim();
+          return JSON.parse(raw);
+        } catch (parseErr) {
+          this.logger.warn(`LLM 测字 JSON 解析失败: ${(parseErr as Error).message}`);
+        }
       }
     } catch (error) {
       this.logger.warn('LLM增强调用失败', error);
@@ -1171,8 +1181,9 @@ export class ZiService {
 
     this.oracleBoneLexiconLoading = (async () => {
       try {
+        const oracleT = parseInt(process.env.ZI_ORACLE_INDEX_TIMEOUT_MS || '3500', 10);
         const response = await axios.get<OracleBoneEntry[]>(this.oracleBoneIndexUrl, {
-          timeout: 5000,
+          timeout: Math.min(12000, Math.max(1500, Number.isFinite(oracleT) ? oracleT : 3500)),
         });
         const map = this.createOracleBoneMap(response.data || []);
         if (map.size) {

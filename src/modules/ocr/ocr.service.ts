@@ -114,12 +114,16 @@ export class OcrService {
       
       this.logger.log('发送 Gemini 请求（图片大小: ' + jpegBase64.length + '）...');
       
+      const ocrTimeout = Math.min(
+        120000,
+        Math.max(20000, parseInt(process.env.LLM_OCR_TIMEOUT_MS || '55000', 10)),
+      );
       const response = await axios.post(apiUrl, requestBody, {
         headers: { 
           'Authorization': `Bearer ${apiKey}`, 
           'Content-Type': 'application/json' 
         },
-        timeout: 90000,
+        timeout: ocrTimeout,
       });
       
       this.logger.log('Gemini 响应状态:', response.status);
