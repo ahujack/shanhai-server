@@ -353,6 +353,7 @@ export class OcrService {
     } catch (e) {
       this.logger.error('SVG提取失败:', e);
     }
-    return { zi: '测', confidence: 0.3 };
+    // 不再用固定「测」兜底，避免 OCR 失败时误当成识别成功
+    return { zi: '', confidence: 0 };
   }
 }
