@@ -1,6 +1,13 @@
 import { Controller, Post, Get, Body, Param, UseGuards, Request } from '@nestjs/common';
 import { CheckInService, CheckInResult, CheckInStatus } from './checkin.service';
-import { RequireAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard, RequireAuthGuard } from '../auth/jwt-auth.guard';
+
+const guestCheckInStatus: CheckInStatus = {
+  todayCheckedIn: false,
+  currentStreak: 0,
+  totalPoints: 0,
+  consecutiveDays: 0,
+};
 
 @Controller('checkin')
 export class CheckInController {
@@ -17,22 +24,28 @@ export class CheckInController {
   }
 
   /**
-   * 获取签到状态（需要登录）
+   * 获取签到状态（未登录或 token 无效时返回空状态，避免首页 401）
    */
   @Get('status')
-  @UseGuards(RequireAuthGuard)
+  @UseGuards(JwtAuthGuard)
   async getStatus(@Request() req): Promise<CheckInStatus> {
-    const userId = req.user.sub;
+    const userId = req.user?.sub ?? req.user?.id;
+    if (!userId) {
+      return guestCheckInStatus;
+    }
     return await this.checkInService.getCheckInStatus(userId);
   }
 
   /**
-   * 获取签到日历（需要登录）
+   * 获取签到日历（未登录返回空数组）
    */
   @Get('calendar')
-  @UseGuards(RequireAuthGuard)
+  @UseGuards(JwtAuthGuard)
   async getCalendar(@Request() req): Promise<string[]> {
-    const userId = req.user.sub;
+    const userId = req.user?.sub ?? req.user?.id;
+    if (!userId) {
+      return [];
+    }
     return await this.checkInService.getCheckInCalendar(userId);
   }
 }
