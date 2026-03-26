@@ -10,6 +10,39 @@ export class ChartController {
     private readonly userService: UserService,
   ) {}
 
+  /** 游客试算：不落库，无需登录 */
+  @Post('preview')
+  async preview(
+    @Body()
+    body: {
+      birthDate: string;
+      birthTime: string;
+      gender: 'male' | 'female';
+      calendarType?: 'solar' | 'lunar';
+      isLeapMonth?: boolean;
+      birthLongitude?: number;
+      birthLocation?: string;
+      timezone?: string;
+    },
+  ) {
+    const birthDate = String(body.birthDate || '').trim();
+    const birthTime = String(body.birthTime || '').trim();
+    if (!birthDate || !birthTime) {
+      throw new BadRequestException('请填写出生日期与出生时间');
+    }
+    const gender = body.gender === 'female' ? 'female' : 'male';
+    const guestId = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    return this.chartService.generateChart(guestId, birthDate, birthTime, gender, {
+      calendarType: body.calendarType || 'solar',
+      isLeapMonth: !!body.isLeapMonth,
+      birthLongitude: body.birthLongitude,
+      birthLocation: body.birthLocation,
+      timezone: body.timezone,
+      membership: 'free',
+      persist: false,
+    });
+  }
+
   @Post(':userId')
   @UseGuards(RequireAuthGuard)
   async generate(

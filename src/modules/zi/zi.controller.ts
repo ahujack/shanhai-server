@@ -5,7 +5,7 @@ import { ZiService, HandwritingAnalysis } from './zi.service';
 import { OcrService } from '../ocr/ocr.service';
 import { PointsService } from '../points/points.service';
 import { PrismaService } from '../../prisma.service';
-import { RequireAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 const ZI_POINTS_COST = parseInt(process.env.ZI_POINTS_COST || '10', 10);
 
@@ -46,15 +46,15 @@ export class ZiController {
   ) {}
 
   @Post('analyze')
-  @UseGuards(RequireAuthGuard)
-  async analyze(@Body() dto: AnalyzeZiDto, @Req() req: { user: { sub: string } }) {
-    const userId = req.user.sub;
+  @UseGuards(JwtAuthGuard)
+  async analyze(@Body() dto: AnalyzeZiDto, @Req() req: { user?: { sub?: string; id?: string } }) {
+    const userId = req.user?.sub ?? req.user?.id;
     const zi = String(dto.zi || '').trim().charAt(0);
     if (!/[\u4e00-\u9fa5]/.test(zi)) {
       throw new BadRequestException('请输入一个有效的汉字');
     }
     const membership = await this.getMembership(userId);
-    if (membership === 'free') {
+    if (membership === 'free' && userId) {
       const consumed = await this.pointsService.consumePoints(
         userId,
         ZI_POINTS_COST,
@@ -67,11 +67,11 @@ export class ZiController {
     }
     const result = await this.ziService.analyze(zi, dto.handwriting, membership, dto.focusAspect);
 
-    // 保存测字记录
-    try {
-      await this.prisma.ziAnalysis.create({
-        data: {
-          userId,
+    if (userId) {
+      try {
+        await this.prisma.ziAnalysis.create({
+          data: {
+            userId,
             zi,
             pressure: result.handwriting.pressure,
             pressureInterpretation: result.handwriting.pressureInterpretation,
@@ -88,15 +88,16 @@ export class ZiController {
             followUpQuestions: JSON.stringify(result.followUpQuestions),
           },
         });
-    } catch (error) {
-      Logger.error('保存测字记录失败', (error as Error).message, ZiController.name);
+      } catch (error) {
+        Logger.error('保存测字记录失败', (error as Error).message, ZiController.name);
+      }
     }
 
     return result;
   }
 
   @Post('recognize')
-  @UseGuards(RequireAuthGuard)
+  @UseGuards(JwtAuthGuard)
   async recognize(@Body() dto: RecognizeDto) {
     const result = await this.ocrService.recognizeHandwriting(dto.image);
     return {
@@ -106,24 +107,22 @@ export class ZiController {
   }
 
   @Post('analyze-handwriting')
-  @UseGuards(RequireAuthGuard)
-  async analyzeHandwriting(@Body() dto: AnalyzeHandwritingDto, @Req() req: { user: { sub: string } }) {
-    const userId = req.user.sub;
+  @UseGuards(JwtAuthGuard)
+  async analyzeHandwriting(@Body() dto: AnalyzeHandwritingDto, @Req() req: { user?: { sub?: string; id?: string } }) {
+    const userId = req.user?.sub ?? req.user?.id;
     try {
-      // 1. 识别文字
       const ocrResult = await this.ocrService.recognizeHandwriting(dto.image);
       const zi = ocrResult.zi;
-      
+
       if (!zi) {
         return {
           recognizedZi: null,
           error: '未能识别出汉字',
         };
       }
-      
-      // 2. 积分消耗（非 VIP 用户）
+
       const membership = await this.getMembership(userId);
-      if (membership === 'free') {
+      if (membership === 'free' && userId) {
         const consumed = await this.pointsService.consumePoints(
           userId,
           ZI_POINTS_COST,
@@ -137,15 +136,14 @@ export class ZiController {
           };
         }
       }
-      
-      // 3. 分析字义
+
       const analysis = await this.ziService.analyze(zi, undefined, membership, dto.focusAspect);
-      
-      // 保存测字记录
-      try {
-        await this.prisma.ziAnalysis.create({
-          data: {
-            userId,
+
+      if (userId) {
+        try {
+          await this.prisma.ziAnalysis.create({
+            data: {
+              userId,
               zi,
               pressure: analysis.handwriting.pressure,
               pressureInterpretation: analysis.handwriting.pressureInterpretation,
@@ -161,10 +159,11 @@ export class ZiController {
               coldReadings: JSON.stringify(analysis.coldReadings),
               followUpQuestions: JSON.stringify(analysis.followUpQuestions),
               confidence: ocrResult.confidence,
-          },
-        });
-      } catch (error) {
-        Logger.error('保存测字记录失败', (error as Error).message, ZiController.name);
+            },
+          });
+        } catch (error) {
+          Logger.error('保存测字记录失败', (error as Error).message, ZiController.name);
+        }
       }
 
       return {
@@ -181,7 +180,10 @@ export class ZiController {
     }
   }
 
-  private async getMembership(userId: string): Promise<'free' | 'premium' | 'vip'> {
+  private async getMembership(userId?: string): Promise<'free' | 'premium' | 'vip'> {
+    if (!userId) {
+      return 'free';
+    }
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },

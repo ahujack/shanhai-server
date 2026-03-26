@@ -125,6 +125,8 @@ export class ChartService {
       birthLocation?: string;
       timezone?: string;
       membership?: MembershipTier;
+      /** 为 false 时不写入数据库（游客试算等） */
+      persist?: boolean;
     },
   ): Promise<BaziChart> {
     const resolvedLongitude = await this.resolveBirthLongitude(
@@ -224,44 +226,45 @@ export class ChartService {
       detailedReading,
     };
 
-    // 保存到数据库（使用 upsert，如果已存在则更新）
-    await this.prisma.baziChart.upsert({
-      where: { userId },
-      update: {
-        birthDate,
-        birthTime,
-        gender,
-        yearGanZhi: yearGZ,
-        monthGanZhi: monthGZ,
-        dayGanZhi: dayGZ,
-        hourGanZhi: hourGZ,
-        dayMaster,
-        sun: chart.sun,
-        moon: chart.moon,
-        wuxingStrength: JSON.stringify(wuxingStrength),
-        personalityTraits: JSON.stringify(personalityTraits),
-        fortuneSummary: JSON.stringify(fortuneSummary),
-        suggestions: JSON.stringify(suggestions),
-        updatedAt: new Date(),
-      },
-      create: {
-        userId,
-        birthDate,
-        birthTime,
-        gender,
-        yearGanZhi: yearGZ,
-        monthGanZhi: monthGZ,
-        dayGanZhi: dayGZ,
-        hourGanZhi: hourGZ,
-        dayMaster,
-        sun: chart.sun,
-        moon: chart.moon,
-        wuxingStrength: JSON.stringify(wuxingStrength),
-        personalityTraits: JSON.stringify(personalityTraits),
-        fortuneSummary: JSON.stringify(fortuneSummary),
-        suggestions: JSON.stringify(suggestions),
-      },
-    });
+    if (options?.persist !== false) {
+      await this.prisma.baziChart.upsert({
+        where: { userId },
+        update: {
+          birthDate,
+          birthTime,
+          gender,
+          yearGanZhi: yearGZ,
+          monthGanZhi: monthGZ,
+          dayGanZhi: dayGZ,
+          hourGanZhi: hourGZ,
+          dayMaster,
+          sun: chart.sun,
+          moon: chart.moon,
+          wuxingStrength: JSON.stringify(wuxingStrength),
+          personalityTraits: JSON.stringify(personalityTraits),
+          fortuneSummary: JSON.stringify(fortuneSummary),
+          suggestions: JSON.stringify(suggestions),
+          updatedAt: new Date(),
+        },
+        create: {
+          userId,
+          birthDate,
+          birthTime,
+          gender,
+          yearGanZhi: yearGZ,
+          monthGanZhi: monthGZ,
+          dayGanZhi: dayGZ,
+          hourGanZhi: hourGZ,
+          dayMaster,
+          sun: chart.sun,
+          moon: chart.moon,
+          wuxingStrength: JSON.stringify(wuxingStrength),
+          personalityTraits: JSON.stringify(personalityTraits),
+          fortuneSummary: JSON.stringify(fortuneSummary),
+          suggestions: JSON.stringify(suggestions),
+        },
+      });
+    }
 
     return chart;
   }

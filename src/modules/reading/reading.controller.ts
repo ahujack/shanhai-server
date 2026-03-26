@@ -4,7 +4,7 @@ import { ReadingService } from './reading.service';
 import { CreateReadingDto } from './dto/create-reading.dto';
 import { PointsService } from '../points/points.service';
 import { PrismaService } from '../../prisma.service';
-import { RequireAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 const READING_POINTS_COST = parseInt(process.env.READING_POINTS_COST || '15', 10);
 
@@ -17,35 +17,38 @@ export class ReadingController {
   ) {}
 
   @Post()
-  @UseGuards(RequireAuthGuard)
-  async create(@Body() dto: CreateReadingDto, @Req() req: { user: { sub: string } }) {
-    const userId = req.user.sub;
-    const membership = await this.getMembership(userId);
-    if (membership === 'free') {
-      const consumed = await this.pointsService.consumePoints(
-        userId,
-        READING_POINTS_COST,
-        'reading',
-        '占卜解读',
-      );
-      if (!consumed.success) {
-        throw new BadRequestException(consumed.message || '积分不足，请签到或前往积分商城获取');
+  @UseGuards(JwtAuthGuard)
+  async create(@Body() dto: CreateReadingDto, @Req() req: { user?: { sub?: string; id?: string } }) {
+    const userId = req.user?.sub ?? req.user?.id;
+    if (userId) {
+      const membership = await this.getMembership(userId);
+      if (membership === 'free') {
+        const consumed = await this.pointsService.consumePoints(
+          userId,
+          READING_POINTS_COST,
+          'reading',
+          '占卜解读',
+        );
+        if (!consumed.success) {
+          throw new BadRequestException(consumed.message || '积分不足，请签到或前往积分商城获取');
+        }
       }
     }
     const result = await this.readingService.generate({ ...dto, userId });
 
-    // 保存占卜记录
-    try {
-      await this.prisma.reading.create({
-        data: {
-          userId,
-          question: dto.question,
-          category: dto.category,
-          result: JSON.stringify(result),
-        },
-      });
-    } catch (error) {
-      Logger.error('保存占卜记录失败', (error as Error).message, ReadingController.name);
+    if (userId) {
+      try {
+        await this.prisma.reading.create({
+          data: {
+            userId,
+            question: dto.question,
+            category: dto.category,
+            result: JSON.stringify(result),
+          },
+        });
+      } catch (error) {
+        Logger.error('保存占卜记录失败', (error as Error).message, ReadingController.name);
+      }
     }
 
     return result;
