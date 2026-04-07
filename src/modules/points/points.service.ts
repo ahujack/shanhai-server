@@ -32,7 +32,8 @@ export class PointsService implements OnModuleInit {
    * 正式对用户扣分时设置 POINTS_GATE_ENFORCED=true（优先于下方变量）。
    * 若需显式声明「要扣积分」也可设 DISABLE_POINTS_GATE=false。
    */
-  private isPointsGateDisabled(): boolean {
+  /** 供 PointsController 预检等使用：门闸关闭时不应因「未识别到用户」而返回 hasEnough:false */
+  isPointsGateDisabled(): boolean {
     const enforced = process.env.POINTS_GATE_ENFORCED?.trim().toLowerCase();
     if (enforced === 'true' || enforced === '1' || enforced === 'yes') {
       return false;

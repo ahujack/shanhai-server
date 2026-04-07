@@ -62,13 +62,17 @@ export class PointsController {
     @Request() req,
     @Body() dto: { points: number }
   ) {
-    const userId = req.user?.sub ?? req.user?.id;
-    if (!userId) {
-      return { success: true, hasEnough: false };
-    }
     const need = Number(dto?.points);
     if (!Number.isFinite(need) || need <= 0) {
       return { success: true, hasEnough: true };
+    }
+    // 门闸关闭时须直接放行：否则未带 token / token 未解析到 user 时会误返回 hasEnough:false，前端会拦截
+    if (this.pointsService.isPointsGateDisabled()) {
+      return { success: true, hasEnough: true };
+    }
+    const userId = req.user?.sub ?? req.user?.id;
+    if (!userId) {
+      return { success: true, hasEnough: false };
     }
     const hasEnough = await this.pointsService.hasEnoughPoints(userId, need);
     return { success: true, hasEnough };
