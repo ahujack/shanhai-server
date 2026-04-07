@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { config } from 'dotenv';
 import * as path from 'path';
 import { GlobalExceptionFilter } from './modules/auth/global-exception.filter';
@@ -14,10 +15,12 @@ config({ path: path.resolve(__dirname, '../.env.local'), override: true });
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: process.env.NODE_ENV === 'production'
       ? ['error', 'warn']
       : ['log', 'debug', 'error', 'verbose', 'warn'],
+    // Creem Webhook 签名校验需要与发送方一致的原始 JSON 字节
+    rawBody: true,
   });
 
   // 启用 CORS

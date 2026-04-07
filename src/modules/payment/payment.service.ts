@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../prisma.service';
 import { PointsService } from '../points/points.service';
 import axios from 'axios';
+import * as crypto from 'crypto';
 
 // Creem 支付服务 - 仅使用 Creem
 
@@ -32,6 +33,8 @@ export class PaymentService implements OnModuleInit {
   async onModuleInit() {
     // 初始化 Creem
     this.creemApiKey = process.env.CREEM_API_KEY || null;
+    const base = (process.env.CREEM_API_URL || 'https://api.creem.io/v1').replace(/\/$/, '');
+    this.creemApiUrl = base;
     if (this.creemApiKey) {
       console.log('Creem initialized successfully');
     } else {
@@ -241,7 +244,7 @@ export class PaymentService implements OnModuleInit {
     }
   }
 
-  // 处理 Creem Webhook（可选签名验证）
+  // 处理 Creem Webhook（可选签名验证；载荷字段为 eventType + object，见官方文档）
   async handleCreemWebhook(
     body: any,
     opts?: { signature?: string; rawBody?: string | Buffer },
@@ -252,26 +255,68 @@ export class PaymentService implements OnModuleInit {
         this.logger.warn('Creem Webhook 已配置 CREEM_WEBHOOK_SECRET 但缺少 creem-signature 或 rawBody');
         throw new BadRequestException('Webhook signature required');
       }
-      const crypto = await import('crypto');
       const raw = typeof opts.rawBody === 'string' ? opts.rawBody : opts.rawBody.toString();
       const computed = crypto.createHmac('sha256', secret).update(raw).digest('hex');
-      if (computed !== opts.signature) {
+      const sig = String(opts.signature).trim();
+      let sigOk = false;
+      try {
+        sigOk =
+          computed.length === sig.length &&
+          crypto.timingSafeEqual(Buffer.from(computed, 'hex'), Buffer.from(sig, 'hex'));
+      } catch {
+        sigOk = false;
+      }
+      if (!sigOk) {
         this.logger.warn('Creem Webhook 签名验证失败');
         throw new BadRequestException('Invalid webhook signature');
       }
     }
 
-    const event = body;
-    if (event.event === 'checkout.completed') {
-      const checkout = event.data;
+    const eventType: string | undefined = body?.eventType ?? body?.event;
+    const payload = body?.object ?? body?.data;
+
+    if (eventType === 'checkout.completed' && payload?.object === 'checkout') {
+      const checkout = payload;
       const paymentId = checkout.metadata?.paymentId;
-      
       if (paymentId) {
         await this.processPaymentSuccess(paymentId, checkout.id, 'completed');
+      } else {
+        this.logger.warn('Creem checkout.completed 缺少 metadata.paymentId');
       }
+    } else if (eventType === 'checkout.completed' && payload) {
+      // 兼容无 object 字段的 checkout 载荷
+      const paymentId = payload.metadata?.paymentId;
+      if (paymentId) {
+        await this.processPaymentSuccess(paymentId, payload.id, 'completed');
+      }
+    } else if (eventType === 'subscription.paid' && payload?.metadata?.paymentId) {
+      await this.processPaymentSuccess(payload.metadata.paymentId, payload.id, 'completed');
+    } else if (eventType) {
+      this.logger.debug(`Creem Webhook 未处理的事件类型: ${eventType}`);
     }
-    
+
     return { received: true };
+  }
+
+  /** 支付仍为 pending 时向 Creem 查询 checkout，作为 webhook 未送达时的兜底 */
+  private async trySyncPaymentFromCreem(paymentId: string): Promise<void> {
+    if (!this.creemApiKey) return;
+    const row = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!row || row.status !== 'pending' || !row.creemCheckoutId) return;
+    try {
+      const response = await axios.get(`${this.creemApiUrl}/checkouts`, {
+        params: { checkout_id: row.creemCheckoutId },
+        headers: { 'x-api-key': this.creemApiKey },
+      });
+      const checkout = response.data;
+      const status = checkout?.status;
+      if (status === 'completed') {
+        await this.processPaymentSuccess(paymentId, checkout.id ?? row.creemCheckoutId, 'completed');
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'unknown';
+      this.logger.debug(`Creem checkout 同步失败 paymentId=${paymentId}: ${msg}`);
+    }
   }
 
   // 处理 Stripe Webhook（不再支持）
@@ -360,7 +405,7 @@ export class PaymentService implements OnModuleInit {
 
   // 查询支付状态（用于前端轮询支付完成）
   async getPaymentStatusForUser(userId: string, paymentId: string) {
-    const payment = await this.prisma.payment.findUnique({
+    let payment = await this.prisma.payment.findUnique({
       where: { id: paymentId },
       include: { product: true },
     });
@@ -370,6 +415,17 @@ export class PaymentService implements OnModuleInit {
     }
     if (payment.userId !== userId) {
       throw new BadRequestException('无权查看该支付记录');
+    }
+
+    if (payment.status === 'pending') {
+      await this.trySyncPaymentFromCreem(paymentId);
+      payment = await this.prisma.payment.findUnique({
+        where: { id: paymentId },
+        include: { product: true },
+      });
+      if (!payment) {
+        throw new NotFoundException('支付记录不存在');
+      }
     }
 
     const user = await this.prisma.user.findUnique({

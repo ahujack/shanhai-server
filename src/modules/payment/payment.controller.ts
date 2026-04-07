@@ -100,8 +100,13 @@ export class PaymentController {
   // Creem Webhook 回调（需配置 rawBody 以验证签名）
   @Post('webhook/creem')
   async handleCreemWebhook(@Req() req: any) {
-    const signature = req.headers['creem-signature'];
-    const rawBody = req.rawBody ?? (req.body ? JSON.stringify(req.body) : null);
+    const signature = req.headers['creem-signature'] as string | undefined;
+    const rawBody = (() => {
+      const rb = req.rawBody;
+      if (Buffer.isBuffer(rb)) return rb.toString('utf8');
+      if (typeof rb === 'string') return rb;
+      return req.body ? JSON.stringify(req.body) : undefined;
+    })();
     const body = req.body;
     try {
       return await this.paymentService.handleCreemWebhook(body, { signature, rawBody });
