@@ -27,8 +27,31 @@ export interface PointsSummary {
 export class PointsService implements OnModuleInit {
   constructor(private prisma: PrismaService) {}
 
+  /**
+   * 默认不扣积分、不校验余额（便于全环境测试效果）。
+   * 正式对用户扣分时设置 POINTS_GATE_ENFORCED=true（优先于下方变量）。
+   * 若需显式声明「要扣积分」也可设 DISABLE_POINTS_GATE=false。
+   */
+  private isPointsGateDisabled(): boolean {
+    const enforced = process.env.POINTS_GATE_ENFORCED?.trim().toLowerCase();
+    if (enforced === 'true' || enforced === '1' || enforced === 'yes') {
+      return false;
+    }
+    const disableGate = process.env.DISABLE_POINTS_GATE?.trim().toLowerCase();
+    if (disableGate === 'false' || disableGate === '0' || disableGate === 'no') {
+      return false;
+    }
+    return true;
+  }
+
   async onModuleInit() {
-    console.log('Points Service 已初始化');
+    if (this.isPointsGateDisabled()) {
+      console.warn(
+        '[Points] 积分门闸已关闭：测字/占卜等不扣积分。正式启用扣费请设置环境变量 POINTS_GATE_ENFORCED=true。',
+      );
+    } else {
+      console.log('Points Service 已初始化（积分门闸已启用）');
+    }
   }
 
   /**
@@ -88,6 +111,16 @@ export class PointsService implements OnModuleInit {
     type: string, 
     description: string
   ): Promise<{ success: boolean; message: string; remainingPoints?: number }> {
+    if (this.isPointsGateDisabled()) {
+      const userPoints = await this.prisma.userPoints.findUnique({
+        where: { userId },
+      });
+      return {
+        success: true,
+        message: '积分门闸已关闭（测试）',
+        remainingPoints: userPoints?.availablePoints ?? 0,
+      };
+    }
     return this.prisma.$transaction(async (tx) => {
       const userPoints = await tx.userPoints.findUnique({
         where: { userId },
@@ -182,6 +215,9 @@ export class PointsService implements OnModuleInit {
    * 检查积分是否足够
    */
   async hasEnoughPoints(userId: string, points: number): Promise<boolean> {
+    if (this.isPointsGateDisabled()) {
+      return true;
+    }
     const userPoints = await this.prisma.userPoints.findUnique({
       where: { userId },
     });
