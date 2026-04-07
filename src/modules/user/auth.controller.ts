@@ -202,7 +202,7 @@ export class AuthController {
   @Post('social-login')
   @HttpCode(HttpStatus.OK)
   async socialLogin(@Body() dto: SocialLoginDto) {
-    let userInfo: { email?: string; name?: string } | null = null;
+    let userInfo: { email?: string; name?: string; sub?: string } | null = null;
 
     if (dto.provider === 'google') {
       userInfo = await this.verifyGoogleToken(dto.idToken);
@@ -216,8 +216,18 @@ export class AuthController {
       return { success: false, message: '第三方登录验证失败' };
     }
 
-    // 创建或更新用户
-    const user = await this.userService.findOrCreateBySocial(dto.provider, dto.idToken, userInfo);
+    const socialId = userInfo.sub?.trim();
+    if (!socialId) {
+      return { success: false, message: '无法解析第三方账号标识，请更新应用后重试' };
+    }
+
+    // 创建或更新用户（传入原始 token 以匹配历史误将整段 token 写入 googleId/facebookId 的数据）
+    const user = await this.userService.findOrCreateBySocial(
+      dto.provider,
+      socialId,
+      userInfo,
+      dto.idToken,
+    );
 
     // 生成 JWT Token
     const payload = { sub: user.id, id: user.id, email: user.email, provider: dto.provider };
@@ -240,7 +250,9 @@ export class AuthController {
   }
 
   // 验证 Google ID Token
-  private async verifyGoogleToken(idToken: string): Promise<{ email?: string; name?: string } | null> {
+  private async verifyGoogleToken(
+    idToken: string,
+  ): Promise<{ email?: string; name?: string; sub?: string } | null> {
     try {
       const clientId = process.env.GOOGLE_CLIENT_ID;
       if (clientId) {
@@ -254,13 +266,15 @@ export class AuthController {
         return {
           email: payload?.email,
           name: payload?.name,
+          sub: payload?.sub,
         };
       }
 
       console.log(`[模拟] 验证 Google ID Token: ${idToken.substring(0, 20)}...`);
       return {
-        email: `user_${Date.now()}@example.com`,
+        email: 'dev_google@shanhai.local',
         name: 'Google User',
+        sub: 'mock_google_sub_stable',
       };
     } catch (error) {
       console.error('Google Token 验证失败:', error.message);
@@ -269,7 +283,9 @@ export class AuthController {
   }
 
   // 验证 Facebook Access Token
-  private async verifyFacebookToken(accessToken: string): Promise<{ email?: string; name?: string } | null> {
+  private async verifyFacebookToken(
+    accessToken: string,
+  ): Promise<{ email?: string; name?: string; sub?: string } | null> {
     try {
       const appId = process.env.FACEBOOK_APP_ID;
       const appSecret = process.env.FACEBOOK_APP_SECRET;
@@ -283,19 +299,21 @@ export class AuthController {
           return null;
         }
 
-        const userInfoUrl = `https://graph.facebook.com/v18.0/me?fields=email,name&access_token=${accessToken}`;
+        const userInfoUrl = `https://graph.facebook.com/v18.0/me?fields=id,email,name&access_token=${accessToken}`;
         const userResponse = await axios.get(userInfoUrl);
         
         return {
           email: userResponse.data.email,
           name: userResponse.data.name,
+          sub: userResponse.data.id != null ? String(userResponse.data.id) : undefined,
         };
       }
 
       console.log(`[模拟] 验证 Facebook Access Token: ${accessToken.substring(0, 20)}...`);
       return {
-        email: `user_${Date.now()}@example.com`,
+        email: 'dev_facebook@shanhai.local',
         name: 'Facebook User',
+        sub: 'mock_facebook_sub_stable',
       };
     } catch (error) {
       console.error('Facebook Token 验证失败:', error.message);

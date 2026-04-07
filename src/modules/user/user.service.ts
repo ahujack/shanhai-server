@@ -214,11 +214,23 @@ export class UserService {
     return this.formatUser(updatedUser);
   }
 
-  // 创建用户
+  /** 占位/无效邮箱（历史数据或误创建） */
+  private isPlaceholderEmail(email?: string | null): boolean {
+    if (!email?.trim()) return true;
+    if (email.endsWith('@example.com')) return true;
+    if (/@google\.oauth\.pending$/i.test(email)) return true;
+    return false;
+  }
+
+  // 创建用户（游客完善资料也必须提供真实邮箱，避免再出现数字@example.com）
   async create(dto: CreateUserDto): Promise<UserProfile> {
+    const email = dto.email?.trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException('请填写有效邮箱后再保存资料');
+    }
     const user = await this.prisma.user.create({
       data: {
-        email: dto.email || `${Date.now()}@example.com`,
+        email,
         name: dto.name,
         birthDate: dto.birthDate,
         birthTime: dto.birthTime,
@@ -262,12 +274,21 @@ export class UserService {
     const clean = Object.fromEntries(
       Object.entries(dto).filter(([, v]) => v !== undefined)
     ) as Partial<CreateUserDto>;
-    if (clean.email) {
-      const existing = await this.prisma.user.findFirst({
-        where: { email: clean.email, id: { not: id } },
-      });
-      if (existing) {
-        throw new BadRequestException('该邮箱已被其他账号使用');
+    if (clean.email !== undefined) {
+      const em = typeof clean.email === 'string' ? clean.email.trim() : '';
+      if (!em) {
+        delete clean.email;
+      } else {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+          throw new BadRequestException('邮箱格式不正确');
+        }
+        clean.email = em;
+        const existing = await this.prisma.user.findFirst({
+          where: { email: clean.email, id: { not: id } },
+        });
+        if (existing) {
+          throw new BadRequestException('该邮箱已被其他账号使用');
+        }
       }
     }
     const user = await this.prisma.user.update({
@@ -353,31 +374,71 @@ export class UserService {
     return this.formatUser(user);
   }
 
-  // 第三方登录 - 查找或创建用户
+  // 第三方登录 - 查找或创建用户（googleId/facebookId 使用稳定 sub/id；legacyOAuthToken 匹配历史误存整段 token 的记录）
   async findOrCreateBySocial(
     provider: 'google' | 'facebook',
     socialId: string,
     userInfo?: { email?: string; name?: string },
+    legacyOAuthToken?: string,
   ): Promise<UserProfile> {
-    const where = provider === 'google'
-      ? { googleId: socialId }
-      : { facebookId: socialId };
+    if (!socialId?.trim()) {
+      throw new BadRequestException('第三方账号标识无效');
+    }
 
-    let user = await this.prisma.user.findFirst({
-      where,
-    });
+    const legacy = legacyOAuthToken?.trim();
+
+    // 1) 同一邮箱只保留一条用户：第三方返回的真实邮箱与已注册账号合并
+    if (userInfo?.email?.trim()) {
+      const normalizedEmail = userInfo.email.trim();
+      const byEmail = await this.prisma.user.findUnique({
+        where: { email: normalizedEmail },
+      });
+      if (byEmail) {
+        const data: Prisma.UserUpdateInput = {};
+        if (provider === 'google') data.googleId = socialId;
+        if (provider === 'facebook') data.facebookId = socialId;
+        if (userInfo.name && (byEmail.name.includes('用户') || byEmail.name === byEmail.email.split('@')[0])) {
+          data.name = userInfo.name;
+        }
+        if (Object.keys(data).length > 0) {
+          const updated = await this.prisma.user.update({
+            where: { id: byEmail.id },
+            data,
+          });
+          return this.formatUser(updated);
+        }
+        return this.formatUser(byEmail);
+      }
+    }
+
+    const idWhere =
+      provider === 'google'
+        ? { OR: [{ googleId: socialId }, ...(legacy ? [{ googleId: legacy }] : [])] }
+        : { OR: [{ facebookId: socialId }, ...(legacy ? [{ facebookId: legacy }] : [])] };
+
+    let user = await this.prisma.user.findFirst({ where: idWhere });
 
     if (user) {
-      // 如果有新的用户信息，更新一下
       if (userInfo) {
         const updateData: Prisma.UserUpdateInput = {};
-        if (userInfo.email && !user.email) {
-          updateData.email = userInfo.email;
+        if (provider === 'google' && user.googleId !== socialId) {
+          updateData.googleId = socialId;
         }
-        if (userInfo.name && user.name.includes('用户')) {
+        if (provider === 'facebook' && user.facebookId !== socialId) {
+          updateData.facebookId = socialId;
+        }
+        if (userInfo.email?.trim()) {
+          const em = userInfo.email.trim();
+          if (this.isPlaceholderEmail(user.email)) {
+            const taken = await this.prisma.user.findFirst({
+              where: { email: em, id: { not: user.id } },
+            });
+            if (!taken) updateData.email = em;
+          }
+        }
+        if (userInfo.name && (user.name?.includes('用户') || !user.name?.trim())) {
           updateData.name = userInfo.name;
         }
-
         if (Object.keys(updateData).length > 0) {
           user = await this.prisma.user.update({
             where: { id: user.id },
@@ -388,11 +449,15 @@ export class UserService {
       return this.formatUser(user);
     }
 
-    // 创建新用户
+    const emailForCreate = userInfo?.email?.trim();
+    if (!emailForCreate || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailForCreate)) {
+      throw new BadRequestException('无法获取第三方账号邮箱，请在授权时勾选邮箱权限或稍后重试');
+    }
+
     const data: Prisma.UserCreateInput = {
-      email: userInfo?.email || `${socialId}@${provider}.com`,
-      name: userInfo?.name || `${provider}用户`,
-      avatar: this.getRandomAvatar(), // 随机分配中国传统特色头像
+      email: emailForCreate,
+      name: userInfo?.name?.trim() || emailForCreate.split('@')[0],
+      avatar: this.getRandomAvatar(),
       timezone: 'Asia/Shanghai',
       role: 'user',
       membership: 'free',
@@ -404,10 +469,7 @@ export class UserService {
       data.facebookId = socialId;
     }
 
-    user = await this.prisma.user.create({
-      data,
-    });
-
+    user = await this.prisma.user.create({ data });
     return this.formatUser(user);
   }
 
