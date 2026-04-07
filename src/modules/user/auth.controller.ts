@@ -1,4 +1,18 @@
-import { Controller, Get, Post, Body, HttpCode, HttpStatus, UnauthorizedException, Inject, forwardRef, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  UnauthorizedException,
+  NotFoundException,
+  Inject,
+  forwardRef,
+  UseGuards,
+  Logger,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from '../user/user.service';
 import { MailService } from '../mail/mail.service';
@@ -15,6 +29,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly userService: UserService,
     @Inject(forwardRef(() => JwtService)) private readonly jwtService?: JwtService,
@@ -24,19 +40,21 @@ export class AuthController {
   // 发送验证码
   @Post('send-code')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async sendCode(@Body() dto: SendCodeDto) {
     const { email, purpose } = dto;
-    
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const debugAuth = process.env.DEBUG_AUTH === 'true';
+
     if (!email) {
       return { success: false, message: '请提供邮箱地址' };
     }
 
-    // 调试：检查 SMTP 配置
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpPort = process.env.SMTP_PORT;
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS ? '已设置' : '未设置';
-    console.log(`[Debug] SMTP配置: host=${smtpHost}, port=${smtpPort}, user=${smtpUser}, pass=${smtpPass}`);
+    if (!isProd || debugAuth) {
+      this.logger.debug(
+        `SMTP: hostSet=${!!process.env.SMTP_HOST} portSet=${!!process.env.SMTP_PORT} userSet=${!!process.env.SMTP_USER} passSet=${!!process.env.SMTP_PASS}`,
+      );
+    }
 
     // 注册时检查邮箱是否已存在
     if (purpose === 'register') {
@@ -69,22 +87,25 @@ export class AuthController {
       }
     }
     
-    // 如果没有配置 mailService 或者发送失败，进入模拟模式
     if (!this.mailService || !sent) {
-      // 模拟模式：打印到控制台并返回验证码方便测试
-      console.log(`验证码: ${code} (${email})`);
+      if (!isProd) {
+        this.logger.warn(`验证码未通过邮件发出（仅开发环境会在响应中返回 code）`);
+        return {
+          success: false,
+          message: errorMessage || '邮件发送失败',
+          code,
+        };
+      }
+      this.logger.warn(`邮件发送失败: purpose=${purpose}`);
       return {
         success: false,
-        message: errorMessage || '邮件发送失败',
-        code: code
+        message: errorMessage || '邮件发送失败，请稍后重试',
       };
     }
 
     return {
       success: true,
       message: '验证码已发送到您的邮箱',
-      // 始终返回验证码方便测试
-      code: code
     };
   }
 
@@ -270,14 +291,18 @@ export class AuthController {
         };
       }
 
-      console.log(`[模拟] 验证 Google ID Token: ${idToken.substring(0, 20)}...`);
+      if ((process.env.NODE_ENV || '').toLowerCase() === 'production') {
+        this.logger.error('GOOGLE_CLIENT_ID 未配置，拒绝 Google 登录');
+        return null;
+      }
+      this.logger.debug('Google ID Token 使用开发模拟验证');
       return {
         email: 'dev_google@shanhai.local',
         name: 'Google User',
         sub: 'mock_google_sub_stable',
       };
     } catch (error) {
-      console.error('Google Token 验证失败:', error.message);
+      this.logger.warn(`Google Token 验证失败: ${(error as Error).message}`);
       return null;
     }
   }
@@ -309,14 +334,18 @@ export class AuthController {
         };
       }
 
-      console.log(`[模拟] 验证 Facebook Access Token: ${accessToken.substring(0, 20)}...`);
+      if ((process.env.NODE_ENV || '').toLowerCase() === 'production') {
+        this.logger.error('FACEBOOK_APP_ID / FACEBOOK_APP_SECRET 未配置，拒绝 Facebook 登录');
+        return null;
+      }
+      this.logger.debug('Facebook Access Token 使用开发模拟验证');
       return {
         email: 'dev_facebook@shanhai.local',
         name: 'Facebook User',
         sub: 'mock_facebook_sub_stable',
       };
     } catch (error) {
-      console.error('Facebook Token 验证失败:', error.message);
+      this.logger.warn(`Facebook Token 验证失败: ${(error as Error).message}`);
       return null;
     }
   }
@@ -387,9 +416,14 @@ export class AuthController {
     }
   }
 
-  // 调试端点：检查 SMTP 配置
+  // 调试端点：检查 SMTP 配置（生产默认关闭）
   @Get('debug/smtp')
   debugSmtp() {
+    const env = (process.env.NODE_ENV || '').toLowerCase();
+    const allow = env !== 'production' || process.env.ENABLE_AUTH_DEBUG === 'true';
+    if (!allow) {
+      throw new NotFoundException();
+    }
     return {
       SMTP_HOST: process.env.SMTP_HOST || 'undefined',
       SMTP_PORT: process.env.SMTP_PORT || 'undefined',

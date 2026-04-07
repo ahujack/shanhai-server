@@ -11,12 +11,15 @@ import {
   UnauthorizedException,
   HttpCode,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('payment')
 export class PaymentController {
+  private readonly logger = new Logger(PaymentController.name);
+
   constructor(private readonly paymentService: PaymentService) {}
 
   // 获取支付配置状态
@@ -92,8 +95,8 @@ export class PaymentController {
     try {
       return await this.paymentService.handleWebhook(rawBody, signature);
     } catch (error) {
-      console.error('Webhook error:', error.message);
-      return { received: false, error: error.message };
+      this.logger.warn(`Stripe webhook error: ${(error as Error).message}`);
+      return { received: false, error: (error as Error).message };
     }
   }
 

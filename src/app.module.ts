@@ -19,7 +19,10 @@ import { PaymentModule } from './modules/payment/payment.module';
 
 @Module({
   imports: [
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]), // 每分钟最多60次请求
+    // 仅 default 一条桶，避免多命名桶叠加导致全站被误限；敏感路由用 @Throttle({ default: { limit, ttl } }) 覆盖
+    ThrottlerModule.forRoot({
+      throttlers: [{ name: 'default', ttl: 60000, limit: 120 }],
+    }),
     PrismaModule,
     JwtModule.register({
       global: true,

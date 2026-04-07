@@ -27,7 +27,7 @@ export class ReadingController {
           userId,
           READING_POINTS_COST,
           'reading',
-          '占卜解读',
+          `占卜解读${dto.category ? `（${dto.category}）` : ''}`,
         );
         if (!consumed.success) {
           throw new BadRequestException(consumed.message || '积分不足，请签到或前往积分商城获取');

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { MailService } from '../mail/mail.service';
 import { PointsService } from '../points/points.service';
@@ -250,6 +250,17 @@ export class UserService {
     });
 
     return this.formatUser(user);
+  }
+
+  /** 仅管理员可调用；由 Controller 守卫保证 */
+  async requireAdmin(userId: string): Promise<void> {
+    const u = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    if (u?.role !== 'admin') {
+      throw new ForbiddenException('需要管理员权限');
+    }
   }
 
   // 获取所有用户

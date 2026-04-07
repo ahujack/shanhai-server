@@ -6,6 +6,7 @@ import { config } from 'dotenv';
 import * as path from 'path';
 import { GlobalExceptionFilter } from './modules/auth/global-exception.filter';
 import { LoggingInterceptor } from './modules/auth/logging.interceptor';
+import { assertProductionConfig, resolveCorsOrigin } from './config/production-env';
 
 // 加载 .env 文件作为基础配置
 config({ path: path.resolve(__dirname, '../.env') });
@@ -14,7 +15,10 @@ config({ path: path.resolve(__dirname, '../.env.local'), override: true });
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  
+  assertProductionConfig();
+
+  const corsOrigin = resolveCorsOrigin();
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: process.env.NODE_ENV === 'production'
       ? ['error', 'warn']
@@ -23,9 +27,9 @@ async function bootstrap() {
     rawBody: true,
   });
 
-  // 启用 CORS
+  // 启用 CORS（生产环境已在 assertProductionConfig 中要求 ALLOWED_ORIGINS）
   app.enableCors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || true,
+    origin: corsOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'creem-signature'],

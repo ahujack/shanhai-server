@@ -1,6 +1,7 @@
-import { Injectable, OnModuleInit, forwardRef, Inject } from '@nestjs/common';
+import { Injectable, OnModuleInit, forwardRef, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { AchievementService } from '../achievement/achievement.service';
+import { PointsService } from '../points/points.service';
 
 export interface CheckInResult {
   success: boolean;
@@ -25,14 +26,17 @@ export interface CheckInStatus {
 
 @Injectable()
 export class CheckInService implements OnModuleInit {
+  private readonly logger = new Logger(CheckInService.name);
+
   constructor(
     private prisma: PrismaService,
+    private pointsService: PointsService,
     @Inject(forwardRef(() => AchievementService))
     private achievementService?: AchievementService,
   ) {}
 
   async onModuleInit() {
-    console.log('📝 CheckIn Service 已初始化');
+    this.logger.log('CheckIn Service 已初始化');
   }
 
   /**
@@ -148,23 +152,7 @@ export class CheckInService implements OnModuleInit {
     if (this.achievementService) {
       const achievement = await this.achievementService.checkLoginAchievements(userId, txResult.streak);
       if (achievement) {
-        if (achievement.points > 0) {
-          await this.prisma.userPoints.update({
-            where: { userId },
-            data: {
-              totalPoints: { increment: achievement.points },
-              availablePoints: { increment: achievement.points },
-            },
-          });
-          await this.prisma.pointRecord.create({
-            data: {
-              userId,
-              points: achievement.points,
-              type: 'reward',
-              description: `成就奖励：${achievement.name}`,
-            },
-          });
-        }
+        await this.pointsService.awardAchievementWalletBonus(userId, achievement);
         unlockedAchievement = {
           name: achievement.name,
           description: achievement.description,

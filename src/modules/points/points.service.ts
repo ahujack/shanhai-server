@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 
 export interface UserPoints {
@@ -23,8 +23,15 @@ export interface PointsSummary {
   totalSpent: number;
 }
 
+/**
+ * 积分与流水约定：
+ * - 凡变动 UserPoints（available/total），须在同一业务路径写入 PointRecord（awardPoints / consumePoints / 与之一致的事务）。
+ * - 签到事务内手写积分与流水见 checkin.service，须与此处字段语义保持一致。
+ */
 @Injectable()
 export class PointsService implements OnModuleInit {
+  private readonly logger = new Logger(PointsService.name);
+
   constructor(private prisma: PrismaService) {}
 
   /**
@@ -47,11 +54,11 @@ export class PointsService implements OnModuleInit {
 
   async onModuleInit() {
     if (this.isPointsGateDisabled()) {
-      console.warn(
-        '[Points] 积分门闸已关闭：测字/占卜等不扣积分。正式启用扣费请设置环境变量 POINTS_GATE_ENFORCED=true。',
+      this.logger.warn(
+        '积分门闸已关闭：测字/占卜等不扣积分。正式启用扣费请设置 POINTS_GATE_ENFORCED=true。',
       );
     } else {
-      console.log('Points Service 已初始化（积分门闸已启用）');
+      this.logger.log('Points Service 已初始化（积分门闸已启用）');
     }
   }
 
@@ -71,18 +78,20 @@ export class PointsService implements OnModuleInit {
         totalSpent: 0,
       };
     }
-    
-    // 计算总收入和总支出
-    const earnedRecords = await this.prisma.pointRecord.findMany({
-      where: { userId, points: { gt: 0 } },
-    });
-    
-    const spentRecords = await this.prisma.pointRecord.findMany({
-      where: { userId, points: { lt: 0 } },
-    });
-    
-    const totalEarned = earnedRecords.reduce((sum, r) => sum + r.points, 0);
-    const totalSpent = Math.abs(spentRecords.reduce((sum, r) => sum + r.points, 0));
+
+    const [earnedAgg, spentAgg] = await Promise.all([
+      this.prisma.pointRecord.aggregate({
+        where: { userId, points: { gt: 0 } },
+        _sum: { points: true },
+      }),
+      this.prisma.pointRecord.aggregate({
+        where: { userId, points: { lt: 0 } },
+        _sum: { points: true },
+      }),
+    ]);
+
+    const totalEarned = earnedAgg._sum.points ?? 0;
+    const totalSpent = Math.abs(spentAgg._sum.points ?? 0);
     
     return {
       totalPoints: userPoints.totalPoints,
@@ -96,10 +105,12 @@ export class PointsService implements OnModuleInit {
    * 获取积分记录
    */
   async getPointRecords(userId: string, limit = 20): Promise<PointRecord[]> {
+    const raw = limit ?? 20;
+    const take = Math.min(Math.max(Number.isFinite(raw) ? raw : 20, 1), 100);
     return this.prisma.pointRecord.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
-      take: limit,
+      take,
     });
   }
 
@@ -210,6 +221,23 @@ export class PointsService implements OnModuleInit {
         newBalance: updated?.availablePoints ?? 0,
       };
     });
+  }
+
+  /**
+   * 成就解锁后的钱包积分：与 UserAchievement 写入配套，统一走本方法以便生成 PointRecord。
+   * （注册时仅解锁徽章、积分已由 referral/register 等单独发放的场景，不要重复调用。）
+   */
+  async awardAchievementWalletBonus(
+    userId: string,
+    achievement: { name: string; points: number },
+  ): Promise<void> {
+    const pts = achievement.points;
+    if (!pts || pts <= 0) return;
+    try {
+      await this.awardPoints(userId, pts, 'achievement', `成就奖励：${achievement.name}`);
+    } catch (e) {
+      this.logger.error(`成就积分发放失败 userId=${userId} achievement=${achievement.name}`, (e as Error)?.stack);
+    }
   }
 
   /**

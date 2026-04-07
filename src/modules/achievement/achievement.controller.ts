@@ -1,10 +1,14 @@
 import { Controller, Get, Post, Body, UseGuards, Request } from '@nestjs/common';
 import { AchievementService, Achievement, UserAchievementWithDetails } from './achievement.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
+import { PointsService } from '../points/points.service';
 
 @Controller('achievements')
 export class AchievementController {
-  constructor(private readonly achievementService: AchievementService) {}
+  constructor(
+    private readonly achievementService: AchievementService,
+    private readonly pointsService: PointsService,
+  ) {}
 
   /**
    * 获取所有成就列表
@@ -49,8 +53,9 @@ export class AchievementController {
       dto.category,
       dto.count
     );
-    
+
     if (achievement) {
+      await this.pointsService.awardAchievementWalletBonus(userId, achievement);
       return {
         success: true,
         achievement,

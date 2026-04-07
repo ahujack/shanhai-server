@@ -1,9 +1,11 @@
 import { Body, Controller, Post, Res, Req, UseGuards } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { AgentService } from './agent.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
+@SkipThrottle()
 @Controller('agent')
 export class AgentController {
   constructor(private readonly agentService: AgentService) {}

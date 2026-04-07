@@ -59,7 +59,7 @@ export class RequireAuthGuard implements CanActivate {
     try {
       const payload = await this.jwtService.verifyAsync(token);
       request.user = payload;
-      logger.log(`User authenticated: ${payload.id || payload.sub || 'unknown'}`);
+      logger.debug(`User authenticated: ${payload.id || payload.sub || 'unknown'}`);
       return true;
     } catch (error) {
       logger.error(`Token verification failed: ${error.message}`);

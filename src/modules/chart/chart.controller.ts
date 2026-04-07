@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Body, Param, Req, UseGuards, BadRequestException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ChartService } from './chart.service';
 import { UserService } from '../user/user.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
@@ -12,6 +13,7 @@ export class ChartController {
 
   /** 游客试算：不落库，无需登录 */
   @Post('preview')
+  @Throttle({ default: { limit: 12, ttl: 60000 } })
   async preview(
     @Body()
     body: {

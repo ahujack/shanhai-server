@@ -26,8 +26,9 @@ export class PointsController {
     @Query('limit') limit?: string
   ): Promise<PointRecord[]> {
     const userId = req.user.sub;
-    const parsedLimit = limit ? parseInt(limit, 10) : 20;
-    return this.pointsService.getPointRecords(userId, parsedLimit);
+    const parsed = limit ? parseInt(limit, 10) : 20;
+    const n = Number.isFinite(parsed) ? parsed : 20;
+    return this.pointsService.getPointRecords(userId, n);
   }
 
   /**

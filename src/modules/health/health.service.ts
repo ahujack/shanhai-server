@@ -1,8 +1,9 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 
 @Injectable()
 export class HealthService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(HealthService.name);
   private startTime: number;
 
   constructor(private prisma: PrismaService) {
@@ -10,11 +11,11 @@ export class HealthService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit() {
-    console.log('🏥 Health Module 已初始化');
+    this.logger.log('Health Module 已初始化');
   }
 
   async onModuleDestroy() {
-    console.log('🏥 Health Module 已关闭');
+    this.logger.log('Health Module 已关闭');
   }
 
   async status() {
@@ -29,7 +30,8 @@ export class HealthService implements OnModuleInit, OnModuleDestroy {
       dbStatus = 'error';
     }
 
-    return {
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const base = {
       success: true,
       status: dbStatus === 'connected' ? 'ok' : 'degraded',
       timestamp: new Date().toISOString(),
@@ -37,12 +39,18 @@ export class HealthService implements OnModuleInit, OnModuleDestroy {
         seconds: uptime,
         formatted: this.formatUptime(uptime),
       },
-      service: '山海灵境 API',
-      version: process.env.npm_package_version || '1.0.0',
-      environment: process.env.NODE_ENV || 'development',
       dependencies: {
         database: dbStatus,
       },
+    };
+    if (isProd) {
+      return base;
+    }
+    return {
+      ...base,
+      service: '山海灵境 API',
+      version: process.env.npm_package_version || '1.0.0',
+      environment: process.env.NODE_ENV || 'development',
       endpoints: {
         health: '/api/health',
         api: '/api',

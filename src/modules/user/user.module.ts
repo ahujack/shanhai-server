@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { UserController } from './user.controller';
 import { AuthController } from './auth.controller';
 import { UserService } from './user.service';
+import { AdminGuard } from '../auth/admin.guard';
 import { MailModule } from '../mail/mail.module';
 import { PointsModule } from '../points/points.module';
 import { AchievementModule } from '../achievement/achievement.module';
@@ -19,7 +20,7 @@ import { AchievementModule } from '../achievement/achievement.module';
     forwardRef(() => AchievementModule),
   ],
   controllers: [UserController, AuthController],
-  providers: [UserService],
+  providers: [UserService, AdminGuard],
   exports: [UserService],
 })
 export class UserModule {}

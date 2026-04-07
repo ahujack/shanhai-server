@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 
 export interface Achievement {
@@ -26,10 +26,12 @@ export interface UserAchievementWithDetails extends UserAchievement {
 
 @Injectable()
 export class AchievementService implements OnModuleInit {
+  private readonly logger = new Logger(AchievementService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async onModuleInit() {
-    console.log('Achievement Service 已初始化');
+    this.logger.log('Achievement Service 已初始化');
     // 初始化成就数据
     await this.seedAchievements();
   }
@@ -77,7 +79,7 @@ export class AchievementService implements OnModuleInit {
       });
     }
     
-    console.log('成就数据初始化完成');
+    this.logger.log('成就数据初始化完成');
   }
 
   /**

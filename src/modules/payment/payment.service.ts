@@ -51,9 +51,9 @@ export class PaymentService implements OnModuleInit {
     const base = (process.env.CREEM_API_URL || 'https://api.creem.io/v1').replace(/\/$/, '');
     this.creemApiUrl = base;
     if (this.creemApiKey) {
-      console.log('Creem initialized successfully');
+      this.logger.log('Creem initialized successfully');
     } else {
-      console.log('Creem not configured - payment will use mock mode');
+      this.logger.warn('Creem not configured - payment will use mock mode');
     }
 
     // 初始化支付产品
@@ -620,7 +620,7 @@ export class PaymentService implements OnModuleInit {
       });
     }
 
-    console.log('Payment products seeded successfully');
+    this.logger.log('Payment products seeded successfully');
   }
 
   private appendQueryParam(url: string, key: string, value: string): string {
