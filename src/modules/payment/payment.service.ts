@@ -244,29 +244,101 @@ export class PaymentService implements OnModuleInit {
     }
   }
 
+  /** 解析 creem-signature（纯 hex，或带 sha256=/v1= 等前缀） */
+  private normalizeCreemSignatureHeader(signatureHeader: string): string {
+    const s = String(signatureHeader).trim();
+    if (!s) return '';
+    const parts = s.split(',').map((p) => p.trim()).filter(Boolean);
+    const last = parts[parts.length - 1] ?? s;
+    if (last.includes('=')) {
+      return last.split('=').pop()!.trim().replace(/^0x/i, '').toLowerCase();
+    }
+    return last.replace(/^0x/i, '').toLowerCase();
+  }
+
+  private creemHmacHexValid(rawBody: string, signatureHeader: string, hmacSecret: string): boolean {
+    if (!rawBody || !hmacSecret) return false;
+    const sigHex = this.normalizeCreemSignatureHeader(signatureHeader);
+    if (!/^[0-9a-f]+$/i.test(sigHex) || sigHex.length % 2 !== 0) return false;
+    const computed = crypto.createHmac('sha256', hmacSecret).update(rawBody, 'utf8').digest('hex');
+    try {
+      return (
+        computed.length === sigHex.length &&
+        crypto.timingSafeEqual(Buffer.from(computed, 'hex'), Buffer.from(sigHex, 'hex'))
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * HMAC 与原文不一致时（例如经 Vercel 等对 JSON 重写），用 API 拉取 checkout 与 Creem 侧 metadata 对齐后视为可信
+   */
+  private async verifyCheckoutCompletedAgainstCreemApi(body: any): Promise<boolean> {
+    if (!this.creemApiKey) return false;
+    const eventType = body?.eventType ?? body?.event;
+    if (eventType !== 'checkout.completed') return false;
+    const obj = body?.object ?? body?.data;
+    const checkoutId = obj?.id;
+    if (!checkoutId || typeof checkoutId !== 'string') return false;
+    try {
+      const { data: checkout } = await axios.get(`${this.creemApiUrl}/checkouts`, {
+        params: { checkout_id: checkoutId },
+        headers: { 'x-api-key': this.creemApiKey },
+      });
+      if (checkout?.status !== 'completed') return false;
+      const trustedPid = checkout.metadata?.paymentId;
+      if (!trustedPid || typeof trustedPid !== 'string') return false;
+      const claimedPid = obj?.metadata?.paymentId;
+      if (claimedPid != null && claimedPid !== trustedPid) return false;
+      return true;
+    } catch (e: any) {
+      this.logger.warn(`Creem API 校验 webhook checkout 失败: ${e?.message || e}`);
+      return false;
+    }
+  }
+
   // 处理 Creem Webhook（可选签名验证；载荷字段为 eventType + object，见官方文档）
   async handleCreemWebhook(
     body: any,
     opts?: { signature?: string; rawBody?: string | Buffer },
   ) {
-    const secret = process.env.CREEM_WEBHOOK_SECRET;
+    const secret = process.env.CREEM_WEBHOOK_SECRET?.trim();
+    const raw =
+      opts?.rawBody != null
+        ? typeof opts.rawBody === 'string'
+          ? opts.rawBody
+          : Buffer.isBuffer(opts.rawBody)
+            ? opts.rawBody.toString('utf8')
+            : String(opts.rawBody)
+        : '';
+
+    let trustWebhook = !secret;
     if (secret) {
-      if (!opts?.signature || !opts?.rawBody) {
-        this.logger.warn('Creem Webhook 已配置 CREEM_WEBHOOK_SECRET 但缺少 creem-signature 或 rawBody');
+      if (!opts?.signature) {
+        this.logger.warn('Creem Webhook 已配置 CREEM_WEBHOOK_SECRET 但缺少 creem-signature 请求头');
         throw new BadRequestException('Webhook signature required');
       }
-      const raw = typeof opts.rawBody === 'string' ? opts.rawBody : opts.rawBody.toString();
-      const computed = crypto.createHmac('sha256', secret).update(raw).digest('hex');
-      const sig = String(opts.signature).trim();
-      let sigOk = false;
-      try {
-        sigOk =
-          computed.length === sig.length &&
-          crypto.timingSafeEqual(Buffer.from(computed, 'hex'), Buffer.from(sig, 'hex'));
-      } catch {
-        sigOk = false;
+      if (raw) {
+        if (this.creemHmacHexValid(raw, opts.signature, secret)) {
+          trustWebhook = true;
+        } else if (this.creemApiKey && this.creemHmacHexValid(raw, opts.signature, this.creemApiKey.trim())) {
+          this.logger.warn(
+            'Creem Webhook：HMAC 使用了 CREEM_API_KEY 才通过。请将 Railway 的 CREEM_WEBHOOK_SECRET 设为 Creem 后台该 Webhook 的 Signing secret（与 API Key 不同）。',
+          );
+          trustWebhook = true;
+        }
       }
-      if (!sigOk) {
+      if (!trustWebhook) {
+        const apiOk = await this.verifyCheckoutCompletedAgainstCreemApi(body);
+        if (apiOk) {
+          this.logger.warn(
+            'Creem Webhook：HMAC 未通过，已用 Creem API 校验 checkout.completed（常见于经反向代理改写 body）。',
+          );
+          trustWebhook = true;
+        }
+      }
+      if (!trustWebhook) {
         this.logger.warn('Creem Webhook 签名验证失败');
         throw new BadRequestException('Invalid webhook signature');
       }

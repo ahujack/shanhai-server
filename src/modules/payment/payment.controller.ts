@@ -99,6 +99,7 @@ export class PaymentController {
 
   // Creem Webhook 回调（需配置 rawBody 以验证签名）
   @Post('webhook/creem')
+  @HttpCode(HttpStatus.OK)
   async handleCreemWebhook(@Req() req: any) {
     const signature = req.headers['creem-signature'] as string | undefined;
     const rawBody = (() => {
@@ -108,12 +109,8 @@ export class PaymentController {
       return req.body ? JSON.stringify(req.body) : undefined;
     })();
     const body = req.body;
-    try {
-      return await this.paymentService.handleCreemWebhook(body, { signature, rawBody });
-    } catch (error) {
-      console.error('Creem Webhook error:', error.message);
-      return { received: false, error: error.message };
-    }
+    // 勿吞掉异常：签名校验失败须返回 4xx，Creem 才会按策略重试；此前 catch 后仍 200 会导致控制台显示成功但业务未入账
+    return this.paymentService.handleCreemWebhook(body, { signature, rawBody });
   }
 
   // 模拟支付成功（仅开发/测试环境）
