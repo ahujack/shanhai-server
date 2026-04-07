@@ -254,7 +254,8 @@ export class OcrService {
 
     const apiUrl = resolveLlmChatUrl();
     const model = process.env.LLM_OCR_MODEL?.trim() || process.env.LLM_MODEL?.trim() || 'gemini-2.0-flash';
-    const timeout = Math.min(60000, Math.max(12000, parseInt(process.env.LLM_OCR_TIMEOUT_MS || '28000', 10)));
+    // 识字单次请求：默认 45s，上限 90s（Railway 冷启动 + 多模态较慢）
+    const timeout = Math.min(90000, Math.max(15000, parseInt(process.env.LLM_OCR_TIMEOUT_MS || '45000', 10)));
 
     const body = {
       model,
@@ -280,7 +281,7 @@ export class OcrService {
     try {
       const response = await axios.post(apiUrl, body, {
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        timeout: Number.isFinite(timeout) ? timeout : 28000,
+        timeout: Number.isFinite(timeout) ? timeout : 45000,
       });
       if (response.data?.error) {
         this.logger.warn(`LLM 识字 API 错误: ${JSON.stringify(response.data.error)}`);
