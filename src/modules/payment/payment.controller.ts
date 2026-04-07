@@ -51,7 +51,7 @@ export class PaymentController {
     const { productId } = body;
     
     // 成功和取消回调 URL
-    const baseUrl = process.env.FRONTEND_URL || 'https://shanhai.vercel.app';
+    const baseUrl = process.env.FRONTEND_URL || 'https://www.shanhai.app';
     const successUrl = `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${baseUrl}/payment/cancel`;
     
