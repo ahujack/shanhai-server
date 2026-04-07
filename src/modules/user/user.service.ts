@@ -26,6 +26,8 @@ export interface UserProfile {
   avatar?: string;
   role: 'user' | 'admin';
   membership: 'free' | 'premium' | 'vip';
+  /** 会员到期时间；未设置时后端仍按 VIP 权益处理（兼容历史数据） */
+  membershipExpiryAt?: Date | null;
   googleId?: string;
   facebookId?: string;
   referralCode?: string; // 推荐码

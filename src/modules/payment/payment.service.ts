@@ -315,10 +315,19 @@ export class PaymentService implements OnModuleInit {
       );
     }
 
-    // 2. 如果是订阅产品，更新用户会员状态及到期时间
+    // 2. 如果是订阅产品，更新用户会员状态及到期时间（在现有未过期会员上叠加时长）
     if (payment.product.type === 'subscription') {
       const periodDays = payment.product.periodDays || 30;
-      const expiryDate = new Date();
+      const existing = await this.prisma.user.findUnique({
+        where: { id: payment.userId },
+        select: { membershipExpiryAt: true },
+      });
+      const now = new Date();
+      let base = now;
+      if (existing?.membershipExpiryAt && existing.membershipExpiryAt > now) {
+        base = existing.membershipExpiryAt;
+      }
+      const expiryDate = new Date(base);
       expiryDate.setDate(expiryDate.getDate() + periodDays);
 
       await this.prisma.user.update({
@@ -365,7 +374,7 @@ export class PaymentService implements OnModuleInit {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { membership: true },
+      select: { membership: true, membershipExpiryAt: true },
     });
 
     return {
@@ -373,6 +382,9 @@ export class PaymentService implements OnModuleInit {
       status: payment.status,
       productType: payment.product.type,
       membership: user?.membership || 'free',
+      membershipExpiryAt: user?.membershipExpiryAt
+        ? user.membershipExpiryAt.toISOString()
+        : null,
       completedAt: payment.completedAt,
     };
   }

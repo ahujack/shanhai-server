@@ -1,4 +1,17 @@
-import { Controller, Get, Post, Body, Param, Query, Req, UseGuards, NotFoundException, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  Req,
+  UseGuards,
+  NotFoundException,
+  UnauthorizedException,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -47,12 +60,15 @@ export class PaymentController {
     @Body() body: { productId: string },
     @Req() req: any,
   ) {
-    const userId = req.user.id;
+    const userId = req.user?.sub ?? req.user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('用户未登录');
+    }
     const { productId } = body;
     
-    // 成功和取消回调 URL
-    const baseUrl = process.env.FRONTEND_URL || 'https://www.shanhai.app';
-    const successUrl = `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`;
+    // Creem 不会替换 Stripe 的 {CHECKOUT_SESSION_ID}，只使用干净路径；paymentId 由服务端 append 到 success_url
+    const baseUrl = (process.env.FRONTEND_URL || 'https://www.shanhai.app').replace(/\/$/, '');
+    const successUrl = `${baseUrl}/payment/success`;
     const cancelUrl = `${baseUrl}/payment/cancel`;
     
     return this.paymentService.createCheckoutSession(
@@ -119,7 +135,10 @@ export class PaymentController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    const userId = req.user.id;
+    const userId = req.user?.sub ?? req.user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('用户未登录');
+    }
     return this.paymentService.getUserPaymentHistory(
       userId,
       limit ? parseInt(limit) : 10,
@@ -134,7 +153,10 @@ export class PaymentController {
     @Req() req: any,
     @Param('paymentId') paymentId: string,
   ) {
-    const userId = req.user.id;
+    const userId = req.user?.sub ?? req.user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('用户未登录');
+    }
     return this.paymentService.getPaymentStatusForUser(userId, paymentId);
   }
 
