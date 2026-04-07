@@ -385,14 +385,15 @@ export class ZiService {
             interpretation.focusReading = {
               ...interpretation.focusReading,
               ...llmResult.focusReading,
-              llmEnhanced: true,
             };
           }
         }
       } catch (error) {
         this.logger.warn('LLM 解读失败，使用模板', error);
       }
-      
+
+      handwriting = this.ensureHandwritingMentionsZi(handwriting, char);
+
       const layeredInterpretation = this.applyMembershipInterpretation(interpretation, membership);
       return {
         handwriting,
@@ -475,6 +476,23 @@ export class ZiService {
     };
   }
   
+  /** 笔迹四条若未显式带上本字，则加前缀，避免模型误写其它汉字时用户觉得「不准」 */
+  private ensureHandwritingMentionsZi(h: HandwritingAnalysis, zi: string): HandwritingAnalysis {
+    const one = (text: string) => {
+      const t = (text || '').trim();
+      if (!t) return t;
+      if (t.includes(`「${zi}」`) || t.includes(`"${zi}"`) || t.includes(`『${zi}』`)) return text;
+      return `就你所写的「${zi}」而言：${t}`;
+    };
+    return {
+      ...h,
+      pressureInterpretation: one(h.pressureInterpretation),
+      stabilityInterpretation: one(h.stabilityInterpretation),
+      structureInterpretation: one(h.structureInterpretation),
+      continuityInterpretation: one(h.continuityInterpretation),
+    };
+  }
+
   /**
    * 分析手写特征
    */
@@ -813,23 +831,25 @@ export class ZiService {
 5. 【去模板化】禁止输出可套用到任意汉字上的万能句；overall 与 coldReadings 中须至少 3 处点名本字具体部件或本字字义
 6. 【八字联动】若用户 JSON 中 baziProfile 非空：必须把所测之字的五行（ziAnalysis.wuxing）与用户日主 dayMaster、四柱 pillars、五行强弱 wuxingStrength 对照，写清生克与扶助；针对 focusAspect 给差异化建议。无 baziProfile 时不要编造命盘。
 7. 【笔迹承接】若提供了 visionHandwritingNote（多模态已读图），handwritingInterpretation 四条须在语义上承接该观察，并结合 focus 与八字（若有）延伸，不得改成与之矛盾的套话。
+8. 【通俗易懂】少用生僻词与论文腔；必要术语后加一句白话解释；多用「对你来说」「可以把它理解成」等自然表达，让用户觉得好懂又贴己。
+9. 【笔下所指唯一】用户 JSON 中的 zi 字段即为本次所测单字（唯一本字）。全文禁止把本字说成其它汉字；讨论部件时可单独写部件字形。handwritingInterpretation 四条每条开头须出现「你写的「X」」或「这个「X」字」（X 必须与 zi 完全一致）。
 
-【技法细化】必须结合该字部件拆解，每条都要不同：
-- lihefa：离合法，3条。格式如「离：先看外层「X」意象…」「转：把X合起来看…」「证：从部件含义看…」。必须用该字真实部件
+【技法细化】必须结合该字部件拆解，每条都要不同；每条不超过约 70 字，一句一个要点，便于扫读：
+- lihefa：离合法，3条。格式如「离：先看外层「X」…」「转：把X合起来看…」「证：从部件含义看…」。必须用该字真实部件
 - tianziGe：填字格，3条。格式如「填字格-中心位：以「X」为核…」「填字格-边界位…」「填字格-落点…」
-- imageryInference：象形投射，1段。结合该字部件组合，推断当前心理状态
-- probingQuestion：反问引导，1句。针对该字最在意的部件或关系提问
+- imageryInference：象形投射，1段，80-120字，口语化比喻为主
+- probingQuestion：反问引导，1句，口语化
 
-【笔迹心理学】结合该字 + 用户方向 + 笔迹特征（力度/稳定性/结构/连贯性），每条 80-150 字，必须与字和方向相关：
+【笔迹心理学】结合该字 + 用户方向 + 笔迹特征（力度/稳定性/结构/连贯性），每条 70-120 字；开头点明「你写的「X」」，X 与 zi 一致：
 - pressureInterpretation：力度解读，结合该字字义与方向
 - stabilityInterpretation：稳定性解读，结合该字与方向
 - structureInterpretation：结构解读，结合该字与方向
 - continuityInterpretation：连贯性解读，结合该字与方向
 
-【甲骨文象形】oracleBoneInterpretation：150-250字。从甲骨文最原始字形出发（该字在甲骨中的象形特征、笔画走向、部件组合），结合用户测试方向，做深度解读。若该字甲骨字形已知，描述其象意；若未知，可从部件在甲骨中的常见形态推断。
+【甲骨文象形】oracleBoneInterpretation：120-200字。若用户 JSON 中 ziAnalysis.oracleBone.imageCount>0，首句须点明「可对照上方甲骨字形样本」再展开；从象形/部件联想结合测试方向，避免空洞形容。
 
 【方向解读】career/love/wealth/health 每条 100-200 字，必须结合该字部首/部件/字义
-【运势与建议】focusReading 必须结合该字+方向，每条都要具体：
+【运势与建议】focusReading 必须结合该字+方向，每条都要具体；列表项每条不超过约 60 字：
 - summary：方向详解，150-200字
 - anchors：关键锚点 4 条，每条结合该字笔画/五行/阴阳/吉凶
 - riskSignals：风险信号 3 条，每条与该字和方向相关
@@ -856,7 +876,12 @@ export class ZiService {
             {
               role: 'user',
               content: JSON.stringify({
-                question: '请深度解读这个字，务必结合具体字义与部件，用户关注方向：' + focus.label,
+                question:
+                  '请深度解读这个字，务必结合具体字义与部件，用户关注方向：' +
+                  focus.label +
+                  '。所测单字（唯一本字，全文不得换成其它汉字）：「' +
+                  zi +
+                  '」。',
                 focusAspect: focus.label,
                 visionHandwritingNote: ctx?.visionHandwritingNote || null,
                 baziProfile: ctx?.chartContext
@@ -1327,6 +1352,8 @@ export class ZiService {
       運: ['云', '人'],
       学: ['子', '门'],
       财: ['贝', '口', '人'],
+      冲: ['中', '冫', '水'],
+      泰: ['水', '大', '手'],
     };
     const list = new Set<string>();
     list.add(zi);
