@@ -19,11 +19,26 @@ export class PaymentService implements OnModuleInit {
   private creemApiKey: string | null = null;
   private creemApiUrl = 'https://api.creem.io/v1';
 
-  // Creem Product ID 映射
+  /**
+   * 代码内默认 Creem product_id（可被环境变量 CREEM_PRODUCT_<CODE> 覆盖，CODE 为大写+下划线，如 POINTS_100）
+   * 积分包需在 Creem 各建一个一次性商品，把 prod_xxx 配进环境变量或库里的 creemPriceId
+   */
   private readonly CREEM_PRICE_IDS: Record<string, string> = {
-    'vip_monthly': 'prod_78ZYwOA5jnKNJ8ub1Xwtra',
-    'vip_yearly': 'prod_2mQYQ2Hl5ylTkRKgEhVvbG',
+    vip_monthly: 'prod_78ZYwOA5jnKNJ8ub1Xwtra',
+    vip_yearly: 'prod_2mQYQ2Hl5ylTkRKgEhVvbG',
   };
+
+  /** 解析最终用于下单的 Creem 产品 ID（env > 代码映射 > 数据库） */
+  private resolvedCreemProductId(productCode: string, dbCreemPriceId: string | null | undefined): string | undefined {
+    const envKey = `CREEM_PRODUCT_${productCode.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+    const fromEnv = process.env[envKey]?.trim();
+    if (fromEnv) return fromEnv;
+    const mapped = this.CREEM_PRICE_IDS[productCode];
+    if (mapped) return mapped;
+    const fromDb = dbCreemPriceId?.trim();
+    if (fromDb) return fromDb;
+    return undefined;
+  }
 
   constructor(
     private prisma: PrismaService,
@@ -79,16 +94,17 @@ export class PaymentService implements OnModuleInit {
       keyFingerprint,
       productCount: products.length,
       products: products.map((product) => {
-        const mappedCreemProductId = this.CREEM_PRICE_IDS[product.code] || null;
-        const resolvedCreemProductId = mappedCreemProductId || product.creemPriceId || null;
+        const envKey = `CREEM_PRODUCT_${product.code.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
+        const resolved = this.resolvedCreemProductId(product.code, product.creemPriceId) || null;
+        const fromEnv = !!process.env[envKey]?.trim();
         return {
           id: product.id,
           code: product.code,
           type: product.type,
           dbCreemProductId: product.creemPriceId,
-          mappedCreemProductId,
-          resolvedCreemProductId,
-          source: mappedCreemProductId ? 'mapping' : product.creemPriceId ? 'database' : 'none',
+          envVarHint: envKey,
+          resolvedCreemProductId: resolved,
+          source: fromEnv ? 'env' : this.CREEM_PRICE_IDS[product.code] ? 'code_map' : product.creemPriceId ? 'database' : 'none',
         };
       }),
     };
@@ -156,14 +172,11 @@ export class PaymentService implements OnModuleInit {
     });
     this.logger.log(`Payment record created: ${payment.id}, amount: ${payment.amount}`);
 
-    // 检查是否有 Creem Price ID
-    // 优先使用代码内固定映射，避免数据库中历史错误ID导致下单失败
-    const mappedCreemProductId = this.CREEM_PRICE_IDS[product.code];
-    const creemPriceId = mappedCreemProductId || product.creemPriceId;
+    const creemPriceId = this.resolvedCreemProductId(product.code, product.creemPriceId);
     this.logger.log(`Product code: ${product.code}, creemPriceId: ${creemPriceId}, creemApiKey set: ${!!this.creemApiKey}`);
-    
-    // 如果没有配置 Creem，返回模拟支付
-    if (!this.creemApiKey || !creemPriceId) {
+
+    // 未配置 API Key：本地/测试用模拟支付
+    if (!this.creemApiKey) {
       this.logger.warn('Creem not configured, returning mock payment');
       return {
         paymentId: payment.id,
@@ -174,7 +187,13 @@ export class PaymentService implements OnModuleInit {
       };
     }
 
-    // 使用 Creem 创建支付会话
+    // 已接 Creem 但该商品未绑定产品 ID：勿再返回假 URL，避免前端「点了没进收银台」
+    if (!creemPriceId) {
+      throw new BadRequestException(
+        `商品「${product.name}」尚未绑定 Creem 产品。请在 Creem 后台创建对应商品（订阅或一次性付款），将产品 ID（prod_…）配置到环境变量 CREEM_PRODUCT_${product.code.toUpperCase().replace(/[^A-Z0-9]+/g, '_')} 或数据库 PaymentProduct.creemPriceId。`,
+      );
+    }
+
     return this.createCreemCheckout(userId, payment.id, creemPriceId, successUrl, cancelUrl);
   }
 
