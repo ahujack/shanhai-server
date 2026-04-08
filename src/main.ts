@@ -27,7 +27,7 @@ async function bootstrap() {
     rawBody: true,
   });
 
-  // 启用 CORS（生产环境已在 assertProductionConfig 中要求 ALLOWED_ORIGINS）
+  // 启用 CORS（配置了 ALLOWED_ORIGINS 则用白名单，否则回退为 true）
   app.enableCors({
     origin: corsOrigin,
     credentials: true,

@@ -7,9 +7,15 @@
 | 变量 | 说明 |
 |------|------|
 | `NODE_ENV` | 设为 `production` |
-| `JWT_SECRET` | 强随机字符串；未设置时进程会拒绝启动 |
-| `ALLOWED_ORIGINS` | CORS 白名单，逗号分隔，如 `https://www.shanhai.app,https://shanhai.app` |
 | `DATABASE_URL` | Prisma PostgreSQL 连接串 |
+
+## 强烈建议（未配时服务仍可启动，但有安全风险）
+
+| 变量 | 说明 |
+|------|------|
+| `JWT_SECRET` | 强随机字符串；未设置时启动会打 **error** 日志，JWT 仍可能使用代码内默认密钥（极不安全） |
+| `ALLOWED_ORIGINS` | CORS 白名单，逗号分隔；未设置时回退为 **允许任意来源** |
+| `EXPO_PUBLIC_API_URL` 或 `NEXT_PUBLIC_API_URL` | 前端 API 基址（含 `/api`）；未设置时前端回退默认 Railway URL 并 **warn** |
 
 ## 业务建议
 
