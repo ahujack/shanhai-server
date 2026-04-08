@@ -556,6 +556,12 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 - 每次回复控制在100-200字之间，保持简洁有力
 - 绝对不要输出"角色名："前缀，不要输出舞台动作括号
 - 先回应用户当前语句的真实语义；如果信息不足，可温和追问
+- 若用户在聊“事业/工作”，优先用四段结构：
+- 若用户在聊“事业/感情/财务/健康/成长”追问，优先用四段结构：
+  1) 盘面证据（引用1-2个命盘锚点，不要空泛）
+  2) 7天可执行动作（至少2条，具体可做）
+  3) 二选一追问（降低用户思考负担）
+  4) 轻转化钩子（自然、不过度推销）
 
 注意：用户可能只是在倾诉，不要急着给出建议，先表达理解和共情。`;
 
@@ -690,6 +696,12 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 - 如果用户提到命理相关内容，可以适当引用用户的八字信息给出个性化建议
 - 绝对不要输出"角色名："前缀，不要输出舞台动作括号（如“（轻抚长须）”）
 - 先回应用户当前语句的真实语义；如果信息不足，可温和追问，不要自说自话
+- 若用户在聊“事业/工作”，优先用四段结构：
+- 若用户在聊“事业/感情/财务/健康/成长”追问，优先用四段结构：
+  1) 盘面证据（引用1-2个命盘锚点，不要空泛）
+  2) 7天可执行动作（至少2条，具体可做）
+  3) 二选一追问（降低用户思考负担）
+  4) 轻转化钩子（自然、不过度推销）
 
 注意：
 - 用户可能只是在倾诉，不要急着给出建议，先表达理解和共情
@@ -914,6 +926,92 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     return '';
   }
 
+  private isCareerQuery(message: string, context?: string[]): boolean {
+    const text = `${message || ''} ${(context || []).join(' ')}`;
+    return /事业|工作|职业|升职|跳槽|转型|副业|面试|offer|岗位|发展|赛道/.test(text);
+  }
+
+  private isLoveQuery(message: string, context?: string[]): boolean {
+    const text = `${message || ''} ${(context || []).join(' ')}`;
+    return /感情|恋爱|婚姻|对象|脱单|复合|正缘|桃花|关系|伴侣/.test(text);
+  }
+
+  private isWealthQuery(message: string, context?: string[]): boolean {
+    const text = `${message || ''} ${(context || []).join(' ')}`;
+    return /财运|财富|赚钱|收入|投资|副业变现|现金流|存款|负债|开源/.test(text);
+  }
+
+  private isHealthQuery(message: string, context?: string[]): boolean {
+    const text = `${message || ''} ${(context || []).join(' ')}`;
+    return /健康|睡眠|焦虑|压力|疲惫|情绪|失眠|身体|状态|内耗/.test(text);
+  }
+
+  private isShortFollowUp(message: string): boolean {
+    const text = (message || '').trim();
+    if (text.length <= 8) return true;
+    return /^(事业|事业吧|工作|工作吧|继续|然后呢|那怎么办|你觉得呢|嗯|好的|是的)$/.test(text);
+  }
+
+  private buildCareerChartEvidence(userChart: any): string {
+    const wx = (userChart?.wuxingStrength || {}) as Record<string, number>;
+    const pairs = Object.entries(wx).filter(([, v]) => typeof v === 'number');
+    if (!pairs.length) return `你盘里「${userChart?.dayGanZhi || '日主'}」的主轴很明显。`;
+    const sorted = pairs.sort((a, b) => Number(b[1]) - Number(a[1]));
+    const map: Record<string, string> = { wood: '木', fire: '火', earth: '土', metal: '金', water: '水' };
+    const top = sorted[0];
+    const low = sorted[sorted.length - 1];
+    return `盘面锚点：日主「${userChart?.dayGanZhi || '未定'}」，${map[top[0]] || top[0]}偏强(${Math.round(Number(top[1]))}%)、${map[low[0]] || low[0]}偏弱(${Math.round(Number(low[1]))}%)。`;
+  }
+
+  private buildCareerFollowUpReply(
+    userChart: any,
+    membership: 'free' | 'premium' | 'vip',
+    conversionHint: string,
+  ): string {
+    const evidence = this.buildCareerChartEvidence(userChart);
+    const profileHint = userChart?.fortuneSummary?.career
+      ? `你当前事业节奏更像：${userChart.fortuneSummary.career}`
+      : '你现在更适合“先稳主线，再开副线”的推进节奏。';
+    const action1 = '本周先锁定1个主目标（升职/跳槽/副业三选一），其余不并行。';
+    const action2 = '连续7天每天30分钟做“可见成果动作”（投递、作品、复盘、拓人脉任选其一）。';
+    const close =
+      membership === 'free'
+        ? `如果你愿意，我可以再把你未来两季度拆成“机会月/避险月 + 行动清单”。${conversionHint ? `\n${conversionHint}` : ''}`
+        : '如果你愿意，我下一步可以按你当前行业，给你拆一版未来两季度的机会窗口与行动表。';
+    return `你问“事业”，这个方向很对。\n\n${evidence}\n${profileHint}\n\n先给你一个7天可执行版本：\n1) ${action1}\n2) ${action2}\n\n你更想先看哪一块：A. 近3个月适不适合跳槽  B. 现在岗位如何提速拿结果？\n\n${close}`;
+  }
+
+  private buildDomainFollowUpReply(
+    domain: 'career' | 'love' | 'wealth' | 'health' | 'growth',
+    userChart: any,
+    membership: 'free' | 'premium' | 'vip',
+    conversionHint: string,
+  ): string {
+    const evidence = this.buildCareerChartEvidence(userChart);
+    const baseClose =
+      membership === 'free'
+        ? conversionHint || '如果你愿意，我可以继续给你做更细的时间窗口与行动清单。'
+        : '如果你愿意，我可以继续按你的节奏拆成更细的行动表。';
+
+    if (domain === 'love') {
+      return `你这个追问很关键，感情这件事确实要看“节奏”和“边界”。\n\n${evidence}\n从盘面看，你更需要“先稳关系里的安全感，再推进承诺”。\n\n先给你一个7天动作：\n1) 只做1次高质量沟通：讲清需求，不翻旧账。\n2) 每天记录1条“关系里让我安心/不安的触发点”。\n\n你想先看哪一块：A. 近期是否适合推进关系  B. 如何判断这段关系值不值得继续？\n\n${baseClose}`;
+    }
+
+    if (domain === 'wealth') {
+      return `你问到财务，很务实，这一步很对。\n\n${evidence}\n当前更适合“先稳现金流，再追增量收益”。\n\n先给你一个7天动作：\n1) 列出近30天支出，砍掉1项低回报开销。\n2) 每天固定30分钟做1件增收动作（复盘报价/投递合作/发布作品）。\n\n你想先看哪一块：A. 未来3个月财务风险点  B. 先做副业还是先冲主业涨薪？\n\n${baseClose}`;
+    }
+
+    if (domain === 'health') {
+      return `你这个追问很及时，状态稳住了，很多事才会顺。\n\n${evidence}\n你现在的关键不是“硬扛”，而是先把睡眠和情绪阈值拉回安全区。\n\n先给你一个7天动作：\n1) 连续7天固定入睡时间，睡前30分钟停用高刺激信息。\n2) 每天安排一次20分钟低强度运动或静息呼吸。\n\n你想先看哪一块：A. 先改善睡眠  B. 先降低白天焦虑波动？\n\n${baseClose}`;
+    }
+
+    if (domain === 'growth') {
+      return `你这个追问很有价值，成长期最怕“方向很多、动作太散”。\n\n${evidence}\n你现在更适合“先定一个主轴，再做小步快跑验证”。\n\n先给你一个7天动作：\n1) 选1个核心方向，写下“本周唯一里程碑”。\n2) 每晚复盘10分钟，只看“今天是否更接近目标”。\n\n你想先看哪一块：A. 如何选唯一主轴  B. 如何判断这个方向值得继续投入？\n\n${baseClose}`;
+    }
+
+    return this.buildCareerFollowUpReply(userChart, membership, conversionHint);
+  }
+
   /**
    * 合成回复
    * 当是聊天意图时，使用AI生成个性化回复
@@ -967,6 +1065,19 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 
     // 日常聊天 - 使用AI生成真正的个性化回复
     if (intent === 'chat') {
+      if (userChart && this.isShortFollowUp(message)) {
+        const contextCategory = this.inferCategoryFromContext(dto);
+        let followUpDomain: 'career' | 'love' | 'wealth' | 'health' | 'growth' | null = null;
+        if (contextCategory === 'career' || this.isCareerQuery(message, dto.context)) followUpDomain = 'career';
+        else if (contextCategory === 'love' || this.isLoveQuery(message, dto.context)) followUpDomain = 'love';
+        else if (contextCategory === 'wealth' || this.isWealthQuery(message, dto.context)) followUpDomain = 'wealth';
+        else if (contextCategory === 'health' || this.isHealthQuery(message, dto.context)) followUpDomain = 'health';
+        else if (dto.context?.length) followUpDomain = 'growth';
+
+        if (followUpDomain) {
+          return this.buildDomainFollowUpReply(followUpDomain, userChart, membership, conversionHint);
+        }
+      }
       return await this.generateAIReply(message, persona, userChart, dto);
     }
 
