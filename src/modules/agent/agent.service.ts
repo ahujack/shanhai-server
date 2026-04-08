@@ -8,6 +8,7 @@ import { ChartService } from '../chart/chart.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
+type AgentAction = { type: string; label: string };
 
 @Injectable()
 export class AgentService {
@@ -20,6 +21,93 @@ export class AgentService {
     private readonly fortuneService: FortuneService,
     private readonly chartService: ChartService,
   ) {}
+
+  private refineIntentByReadiness(intent: AgentIntent, dto: AgentChatDto): AgentIntent {
+    if (intent === 'divination' && !this.isDivinationQuestionReady(dto.message)) {
+      return 'chat';
+    }
+    if (intent === 'zi' && !this.extractZiFromMessage(dto.message)) {
+      return 'chat';
+    }
+    return intent;
+  }
+
+  private isDivinationQuestionReady(message: string): boolean {
+    const text = (message || '').trim();
+    if (text.length < 8) return false;
+    const hasQuestionSignals =
+      /[？?]|要不要|该不该|怎么办|能不能|何时|什么时候|会不会|适不适合|是否/.test(text);
+    return hasQuestionSignals;
+  }
+
+  private async buildIntentArtifacts(
+    intent: AgentIntent,
+    dto: AgentChatDto,
+    mood: AgentChatDto['mood'],
+    userChart: any,
+    category?: 'career' | 'emotion' | 'growth',
+  ): Promise<{ artifacts: Record<string, unknown>; actions: AgentAction[] }> {
+    const actions: AgentAction[] = [];
+    let artifacts: Record<string, unknown> = {};
+    let divinationCategory = category === 'emotion' ? 'love' : category;
+    divinationCategory = this.inferCategoryFromContext(dto) || divinationCategory;
+
+    if (intent === 'divination') {
+      try {
+        const reading = await this.readingService.generate({
+          question: dto.message,
+          category: (divinationCategory as DivinationCategory) || this.inferCategory(dto.message),
+          userId: dto.userId,
+        });
+        if (dto.userId) {
+          try {
+            await this.prisma.reading.create({
+              data: {
+                userId: dto.userId,
+                question: dto.message,
+                category: (divinationCategory as DivinationCategory) || this.inferCategory(dto.message),
+                result: JSON.stringify(reading),
+              },
+            });
+          } catch (error) {
+            this.logger.warn(`写入占卜记录失败: ${(error as Error).message}`);
+          }
+        }
+        artifacts = { reading };
+        actions.push({ type: 'view_reading', label: '查看完整解读' });
+      } catch {
+        artifacts = { reading: null };
+      }
+      return { artifacts, actions };
+    }
+
+    if (intent === 'meditation') {
+      artifacts = { meditation: this.buildMeditation({ ...dto, mood }) };
+      actions.push({ type: 'start_meditation', label: '开始冥想' });
+      return { artifacts, actions };
+    }
+
+    if (intent === 'fortune') {
+      artifacts = { fortune: this.fortuneService.getDailyFortune(dto.userId) };
+      actions.push({ type: 'view_fortune', label: '查看今日运势' });
+      return { artifacts, actions };
+    }
+
+    if (intent === 'chart') {
+      artifacts = { chart: userChart, hasChart: !!userChart };
+      if (userChart) actions.push({ type: 'view_chart', label: '查看命盘详情' });
+      return { artifacts, actions };
+    }
+
+    if (intent === 'zi') {
+      const ziChar = this.extractZiFromMessage(dto.message);
+      artifacts = { ziSuggestion: { zi: ziChar } };
+      actions.push({ type: 'view_zi', label: '进入测字页面' });
+      return { artifacts, actions };
+    }
+
+    return { artifacts, actions };
+  }
 
   async *handleChatStream(dto: AgentChatDto): AsyncGenerator<Record<string, unknown>> {
     if (!dto.message || dto.message.trim().length === 0) {
@@ -41,41 +129,30 @@ export class AgentService {
       }
     }
 
-    const { intent, category, mood } = await this.classifyWithDeepSeek(dto, persona, userChart);
-    const actions: Array<{ type: string; label: string }> = [];
-    let artifacts: Record<string, unknown> = {};
-    let divinationCategory = category === 'emotion' ? 'love' : category;
-    divinationCategory = this.inferCategoryFromContext(dto) || divinationCategory;
-
-    if (intent === 'divination') {
-      try {
-        const reading = await this.readingService.generate({
-          question: dto.message,
-          category: divinationCategory as DivinationCategory || this.inferCategory(dto.message),
-          userId: dto.userId,
-        });
-        artifacts = { reading };
-        actions.push({ type: 'view_reading', label: '查看完整解读' });
-      } catch {
-        artifacts = { reading: null };
-      }
+    const classified = await this.classifyWithDeepSeek(dto, persona, userChart);
+    const intent = this.refineIntentByReadiness(classified.intent, dto);
+    const intentResult = await this.buildIntentArtifacts(
+      intent,
+      dto,
+      classified.mood,
+      userChart,
+      classified.category,
+    );
+    const actions = intentResult.actions;
+    let artifacts = intentResult.artifacts;
+    if (intent === 'chat' && classified.intent === 'divination') {
+      actions.push({ type: 'view_reading', label: '补充问题后起卦' });
+      artifacts = {
+        ...artifacts,
+        intentGuide: '起卦前请补一句具体问题，例如：我该不该在三个月内换工作？',
+      };
     }
-    if (intent === 'meditation') {
-      artifacts = { meditation: this.buildMeditation({ ...dto, mood }) };
-      actions.push({ type: 'start_meditation', label: '开始冥想' });
-    }
-    if (intent === 'fortune') {
-      artifacts = { fortune: this.fortuneService.getDailyFortune(dto.userId) };
-      actions.push({ type: 'view_fortune', label: '查看今日运势' });
-    }
-    if (intent === 'chart') {
-      artifacts = { chart: userChart, hasChart: !!userChart };
-      if (userChart) actions.push({ type: 'view_chart', label: '查看命盘详情' });
-    }
-    if (intent === 'zi') {
-      const ziChar = this.extractZiFromMessage(dto.message);
-      artifacts = { ziSuggestion: { zi: ziChar } };
-      actions.push({ type: 'view_zi', label: '进入测字页面' });
+    if (intent === 'chat' && classified.intent === 'zi') {
+      actions.push({ type: 'view_zi', label: '去测字并写下单字' });
+      artifacts = {
+        ...artifacts,
+        intentGuide: '测字时请给出一个单字，并说明你最想问的事情。',
+      };
     }
 
     let reply = '';
@@ -140,72 +217,30 @@ export class AgentService {
       }
     }
     
-    const { intent, category, mood } = await this.classifyWithDeepSeek(dto, persona, userChart);
-    const actions: Array<{ type: string; label: string }> = [];
-    let artifacts: Record<string, unknown> = {};
-
-    // map emotion to wealth for divination
-    let divinationCategory = category === 'emotion' ? 'love' : category;
-    // 结合上下文修正 category：若用户问正缘/婚姻等，必须用 love
-    divinationCategory = this.inferCategoryFromContext(dto) || divinationCategory;
-
-    if (intent === 'divination') {
-      try {
-        const reading = await this.readingService.generate({
-          question: dto.message,
-          category: divinationCategory as DivinationCategory || this.inferCategory(dto.message),
-          userId: dto.userId,
-        });
-        artifacts = { reading };
-        actions.push({
-          type: 'view_reading',
-          label: '查看完整解读',
-        });
-      } catch (error) {
-        this.logger.error(`生成占卜失败: ${error.message}`);
-        artifacts = { reading: null };
-      }
-    }
-
-    if (intent === 'meditation') {
-      const meditation = this.buildMeditation({ ...dto, mood });
-      artifacts = { meditation };
-      actions.push({
-        type: 'start_meditation',
-        label: '开始冥想',
-      });
-    }
-
-    if (intent === 'fortune') {
-      const fortune = this.fortuneService.getDailyFortune(dto.userId);
-      artifacts = { fortune };
-      actions.push({
-        type: 'view_fortune',
-        label: '查看今日运势',
-      });
-    }
-
-    if (intent === 'chart') {
-      artifacts = { 
-        chart: userChart,
-        hasChart: !!userChart,
+    const classified = await this.classifyWithDeepSeek(dto, persona, userChart);
+    const intent = this.refineIntentByReadiness(classified.intent, dto);
+    const intentResult = await this.buildIntentArtifacts(
+      intent,
+      dto,
+      classified.mood,
+      userChart,
+      classified.category,
+    );
+    const actions = intentResult.actions;
+    let artifacts = intentResult.artifacts;
+    if (intent === 'chat' && classified.intent === 'divination') {
+      actions.push({ type: 'view_reading', label: '补充问题后起卦' });
+      artifacts = {
+        ...artifacts,
+        intentGuide: '起卦前请补一句具体问题，例如：我该不该在三个月内换工作？',
       };
-      if (userChart) {
-        actions.push({
-          type: 'view_chart',
-          label: '查看命盘详情',
-        });
-      }
     }
-
-    // 测字功能
-    if (intent === 'zi') {
-      const ziChar = this.extractZiFromMessage(dto.message);
-      artifacts = { ziSuggestion: { zi: ziChar } };
-      actions.push({
-        type: 'view_zi',
-        label: '进入测字页面',
-      });
+    if (intent === 'chat' && classified.intent === 'zi') {
+      actions.push({ type: 'view_zi', label: '去测字并写下单字' });
+      artifacts = {
+        ...artifacts,
+        intentGuide: '测字时请给出一个单字，并说明你最想问的事情。',
+      };
     }
 
     const reply = await this.composeReply(persona, intent, dto.message, artifacts, userChart, dto);
@@ -294,6 +329,7 @@ export class AgentService {
 - 倾诉、表达感受：迷茫、纠结、不顺、不知道怎么办（未明确说想占卜）
 - 延续对话、简短回复
 宁可漏掉占卜（用户可再说一次），绝不要误判。有疑虑时一律选 chat。
+若用户虽提到占卜但问题不具体（如“帮我算算”），先选 chat 追问具体问题，再进入 divination。
 
 当 intent 为 divination 时，必须根据用户问题（含上下文）返回 category：
 - love: 正缘、婚姻、伴侣、桃花、遇见、缘分、感情、恋爱
@@ -484,6 +520,7 @@ ${contextInfo}`,
     }
 
     const recentMemory = dto.userId ? await this.fetchRecentChatMemory(dto.userId) : [];
+    const longTermMemory = dto.userId ? await this.buildLongTermMemory(dto.userId) : '';
     const contextLines = (dto.context || []).slice(-8);
     const conversationContext = [...recentMemory, ...contextLines].slice(-12).join('\n');
 
@@ -507,12 +544,15 @@ ${contextInfo}`,
 
 你是${persona.name}，${persona.title}。
 ${contextInfo}
+${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 
 你的回复风格：
 - toneTags: ${persona.toneTags.join('、')}
 - 以现代白话为主，自然亲切，偶尔用一两句雅致词汇点缀即可
 - 不要刻意堆砌古文、诗词典故，避免「庚金之性」「子水桃花」等过于晦涩的表达
 - 理解用户的情感需求，给予温暖、有智慧的回应
+- 回复结构优先采用「先共情，再解读，后建议」
+- 使用“大师四步”：定心（共情）→断势（判断）→开解（给路）→落地（下一步）
 - 每次回复控制在100-200字之间，保持简洁有力
 - 绝对不要输出"角色名："前缀，不要输出舞台动作括号
 - 先回应用户当前语句的真实语义；如果信息不足，可温和追问
@@ -529,6 +569,7 @@ ${contextInfo}
 
     try {
       const apiUrl = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions';
+      const startedAt = Date.now();
       const res = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -545,6 +586,7 @@ ${contextInfo}
       });
 
       if (!res.ok || !res.body) {
+        this.logger.warn(`LLM(stream) 响应异常 status=${res.status} duration=${Date.now() - startedAt}ms`);
         yield this.getDefaultChatReply(persona, userChart);
         return;
       }
@@ -581,6 +623,7 @@ ${contextInfo}
       if (!fullContent.trim()) {
         yield this.getDefaultChatReply(persona, userChart);
       }
+      this.logger.log(`LLM(stream) completed duration=${Date.now() - startedAt}ms size=${fullContent.length}`);
     } catch (error) {
       this.logger.error(`DeepSeek 流式生成失败: ${(error as Error).message}`);
       yield this.getDefaultChatReply(persona, userChart);
@@ -605,10 +648,12 @@ ${contextInfo}
     }
 
     const recentMemory = dto.userId ? await this.fetchRecentChatMemory(dto.userId) : [];
+    const longTermMemory = dto.userId ? await this.buildLongTermMemory(dto.userId) : '';
     const contextLines = (dto.context || []).slice(-8);
     const conversationContext = [...recentMemory, ...contextLines].slice(-12).join('\n');
 
     try {
+      const llmStartAt = Date.now();
       // 构建用户上下文
       let contextInfo = '';
       if (userChart) {
@@ -632,12 +677,15 @@ ${contextInfo}
 
 你是${persona.name}，${persona.title}。
 ${contextInfo}
+${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 
 你的回复风格：
 - toneTags: ${persona.toneTags.join('、')}
 - 以现代白话为主，自然亲切，偶尔用一两句雅致词汇点缀即可
 - 不要刻意堆砌古文、诗词典故，避免「庚金之性」「子水桃花」等过于晦涩的表达
 - 理解用户的情感需求，给予温暖、有智慧的回应
+- 回复结构优先采用「先共情，再解读，后建议」
+- 使用“大师四步”：定心（共情）→断势（判断）→开解（给路）→落地（下一步）
 - 每次回复控制在100-200字之间，保持简洁有力
 - 如果用户提到命理相关内容，可以适当引用用户的八字信息给出个性化建议
 - 绝对不要输出"角色名："前缀，不要输出舞台动作括号（如“（轻抚长须）”）
@@ -672,6 +720,11 @@ ${contextInfo}
           },
           timeout: 15000,
         },
+      );
+      this.logger.log(
+        `LLM(chat) completed duration=${Date.now() - llmStartAt}ms contentSize=${
+          response.data?.choices?.[0]?.message?.content?.length || 0
+        }`,
       );
 
       const reply = response.data?.choices?.[0]?.message?.content?.trim();
@@ -735,6 +788,132 @@ ${contextInfo}
     }
   }
 
+  private async buildLongTermMemory(userId: string): Promise<string> {
+    try {
+      const [user, recentChats, recentZi, recentReadings] = await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { focusGod: true, birthLocation: true },
+        }),
+        this.prisma.chatMessage.findMany({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+          take: 40,
+          select: { intent: true, message: true },
+        }),
+        this.prisma.ziAnalysis.findMany({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          select: { zi: true },
+        }),
+        this.prisma.reading.findMany({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          select: { category: true },
+        }),
+      ]);
+
+      const concernKeywords: Array<{ key: string; tags: string[] }> = [
+        { key: '事业', tags: ['工作', '职业', '事业', '升职', '离职', '跳槽'] },
+        { key: '感情', tags: ['感情', '恋爱', '婚姻', '对象', '关系', '分手'] },
+        { key: '财务', tags: ['财运', '收入', '赚钱', '投资', '负债', '现金'] },
+        { key: '健康', tags: ['健康', '睡眠', '焦虑', '压力', '情绪'] },
+      ];
+
+      const joined = recentChats.map((x) => x.message || '').join(' ');
+      const concerns = concernKeywords
+        .map((cfg) => ({
+          key: cfg.key,
+          score: cfg.tags.reduce((acc, t) => acc + (joined.includes(t) ? 1 : 0), 0),
+        }))
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 2)
+        .map((x) => x.key);
+
+      const latestZi = recentZi
+        .map((z) => z.zi)
+        .filter(Boolean)
+        .slice(0, 3)
+        .join('、');
+      const readingCats = recentReadings
+        .map((r) => r.category)
+        .filter(Boolean)
+        .slice(0, 3)
+        .join('、');
+      const dominantIntent = this.pickDominantIntent(
+        recentChats.map((x) => x.intent).filter(Boolean) as string[],
+      );
+
+      const memoryLines = [
+        concerns.length ? `长期关注主题：${concerns.join('、')}` : '',
+        latestZi ? `近期测字：${latestZi}` : '',
+        readingCats ? `近期问卦方向：${readingCats}` : '',
+        dominantIntent ? `对话偏好：${dominantIntent}` : '',
+        user?.focusGod ? `命理偏好：${user.focusGod}` : '',
+        user?.birthLocation ? `成长地域：${user.birthLocation}` : '',
+      ].filter(Boolean);
+
+      return memoryLines.join('\n');
+    } catch (error) {
+      this.logger.warn(`构建长期记忆失败: ${(error as Error).message}`);
+      return '';
+    }
+  }
+
+  private pickDominantIntent(intents: string[]): string {
+    if (!intents.length) return '';
+    const counter = intents.reduce<Record<string, number>>((acc, it) => {
+      acc[it] = (acc[it] || 0) + 1;
+      return acc;
+    }, {});
+    const top = Object.entries(counter).sort((a, b) => b[1] - a[1])[0];
+    const map: Record<string, string> = {
+      chat: '更偏情绪陪伴交流',
+      divination: '更偏结构化占卜解读',
+      fortune: '更偏轻量运势反馈',
+      zi: '更偏测字式自我探索',
+    };
+    return map[top[0]] || top[0];
+  }
+
+  private async getUserMembership(userId?: string): Promise<'free' | 'premium' | 'vip'> {
+    if (!userId) return 'free';
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { membership: true, membershipExpiryAt: true },
+      });
+      const membership = user?.membership;
+      if (membership === 'premium' || membership === 'vip') {
+        if (user?.membershipExpiryAt && new Date() > user.membershipExpiryAt) return 'free';
+        return membership;
+      }
+      return 'free';
+    } catch {
+      return 'free';
+    }
+  }
+
+  private buildConversionHint(intent: AgentIntent, membership: 'free' | 'premium' | 'vip'): string {
+    if (membership !== 'free') return '';
+    if (intent === 'divination') {
+      return '如果你想把这件事看得更透，我可以继续给你做「时间窗口 + 风险位 + 三步行动计划」的深度拆盘。';
+    }
+    if (intent === 'fortune') {
+      return '要是你愿意，我可以基于你这周的重点议题，给你做一版更细的日程化建议。';
+    }
+    if (intent === 'zi') {
+      return '你可以去测字页做完整仪式化解读（含方向深挖），结论会更具体。';
+    }
+    if (intent === 'chart') {
+      return '后续我还能把你的命盘和你当下问题做联动解读，让建议更贴身。';
+    }
+    return '';
+  }
+
   /**
    * 合成回复
    * 当是聊天意图时，使用AI生成个性化回复
@@ -747,11 +926,14 @@ ${contextInfo}
     userChart: any,
     dto: AgentChatDto,
   ): Promise<string> {
+    const membership = await this.getUserMembership(dto.userId);
+    const conversionHint = this.buildConversionHint(intent, membership);
+
     // 测字回复：只引导去测字页，不在对话内直接出结果
     if (intent === 'zi') {
       const suggestedZi = (artifacts as any)?.ziSuggestion?.zi;
       const ziHint = suggestedZi ? `（可先用「${suggestedZi}」起测）` : '';
-      return `可以，我们去测字页面做更完整的仪式化解读。${ziHint}\n\n建议你先静心10秒，心里只想着这件事，再写下一个字，这样解读会更聚焦。\n\n点击下方「进入测字页面」开始。`;
+      return `你这个问题很适合用“字”来入局。${ziHint}\n\n建议你先静心10秒，心里只想着这件事，再写下一个字，这样解读会更聚焦。\n\n点击下方「进入测字页面」开始。${conversionHint ? `\n\n${conversionHint}` : ''}`;
     }
 
     // 占卜回复
@@ -760,7 +942,7 @@ ${contextInfo}
       if (!reading) {
         return `抱歉，占卜服务暂时不可用，请稍后再试。`;
       }
-      return `你的问题我已感知。\n\n🙏 所得卦象：${reading.hexagram.originalName}\n📖 解读：${reading.interpretation.overall}\n\n建议你：${reading.recommendations[0]}\n\n若想查看完整解读，可点击下方按钮。`;
+      return `先抱抱你，带着这个问题来问卦，本身就很有勇气。\n\n【结论】${reading.interpretation.overall}\n【依据】卦象「${reading.hexagram.originalName}」\n【行动建议】${reading.recommendations[0]}\n\n若你愿意，我可以继续和你把下一步拆成更小、更可执行的动作。${conversionHint ? `\n\n${conversionHint}` : ''}`;
     }
 
     // 冥想回复
@@ -771,13 +953,13 @@ ${contextInfo}
     // 运势回复
     if (intent === 'fortune' && artifacts.fortune) {
       const fortune = artifacts.fortune as any;
-      return `今日与你有缘。\n\n✨ 今日签诗：${fortune.poem.title}\n💫 运势：${fortune.day}\n\n幸运数字：${fortune.lucky.number} | 幸运颜色：${fortune.lucky.color}\n\n建议：${fortune.advice[0]}`;
+      return `今日与你有缘，也愿你心安。\n\n【今日签诗】${fortune.poem.title}\n【总体提示】${fortune.day}\n【行动建议】${fortune.advice[0]}\n\n幸运数字：${fortune.lucky.number}，幸运颜色：${fortune.lucky.color}${conversionHint ? `\n\n${conversionHint}` : ''}`;
     }
 
     // 命盘回复
     if (intent === 'chart') {
       if (userChart) {
-        return `你的命盘已在此。\n\n🔮 八字：${userChart.dayGanZhi}（日主）\n🌟 五行：木${userChart.wuxingStrength.wood}% 火${userChart.wuxingStrength.fire}% 土${userChart.wuxingStrength.earth}% 金${userChart.wuxingStrength.metal}% 水${userChart.wuxingStrength.water}%\n\n📝 性格特点：${userChart.personalityTraits.slice(0, 2).join('、')}\n\n💼 事业：${userChart.fortuneSummary.career}\n💕 感情：${userChart.fortuneSummary.love}`;
+        return `你的命盘已在此。\n\n🔮 八字：${userChart.dayGanZhi}（日主）\n🌟 五行：木${userChart.wuxingStrength.wood}% 火${userChart.wuxingStrength.fire}% 土${userChart.wuxingStrength.earth}% 金${userChart.wuxingStrength.metal}% 水${userChart.wuxingStrength.water}%\n\n📝 性格特点：${userChart.personalityTraits.slice(0, 2).join('、')}\n\n💼 事业：${userChart.fortuneSummary.career}\n💕 感情：${userChart.fortuneSummary.love}${conversionHint ? `\n\n${conversionHint}` : ''}`;
       } else {
         return `你还没有建立命盘呢。\n\n若想了解自己的八字命盘，可以先去「我的」页面输入出生信息，我会为你生成专属命盘分析。`;
       }

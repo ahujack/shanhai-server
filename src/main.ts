@@ -27,7 +27,7 @@ async function bootstrap() {
     rawBody: true,
   });
 
-  // 启用 CORS（配置了 ALLOWED_ORIGINS 则用白名单，否则回退为 true）
+  // 启用 CORS（生产环境必须显式配置 ALLOWED_ORIGINS）
   app.enableCors({
     origin: corsOrigin,
     credentials: true,

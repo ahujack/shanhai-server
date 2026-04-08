@@ -1,5 +1,6 @@
 import { Injectable, NestInterceptor, ExecutionContext, CallHandler, Logger } from '@nestjs/common';
 import { Observable, tap } from 'rxjs';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
@@ -9,17 +10,20 @@ export class LoggingInterceptor implements NestInterceptor {
     const request = context.switchToHttp().getRequest();
     const { method, url, ip, headers } = request;
     const userAgent = headers['user-agent'] || '';
+    const requestId = (headers['x-request-id'] as string) || randomUUID();
+    request.requestId = requestId;
     const startTime = Date.now();
 
     return next.handle().pipe(
       tap(() => {
         const response = context.switchToHttp().getResponse();
+        response.setHeader('x-request-id', requestId);
         const { statusCode } = response;
         const contentLength = response.get('content-length') || '-';
         const duration = Date.now() - startTime;
 
         this.logger.log(
-          `${method} ${url} ${statusCode} ${contentLength} - ${duration}ms - ${ip} ${userAgent}`
+          `[${requestId}] ${method} ${url} ${statusCode} ${contentLength} - ${duration}ms - ${ip} ${userAgent}`
         );
       }),
     );

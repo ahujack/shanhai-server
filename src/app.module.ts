@@ -16,6 +16,7 @@ import { CheckInModule } from './modules/checkin/checkin.module';
 import { AchievementModule } from './modules/achievement/achievement.module';
 import { PointsModule } from './modules/points/points.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { getJwtSecret } from './config/production-env';
 
 @Module({
   imports: [
@@ -26,7 +27,7 @@ import { PaymentModule } from './modules/payment/payment.module';
     PrismaModule,
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET || 'shanhai-secret-key-change-in-production',
+      secret: getJwtSecret(),
       signOptions: { expiresIn: '7d' },
     }),
     HealthModule, 

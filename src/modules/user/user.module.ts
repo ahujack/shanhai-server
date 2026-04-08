@@ -7,12 +7,13 @@ import { AdminGuard } from '../auth/admin.guard';
 import { MailModule } from '../mail/mail.module';
 import { PointsModule } from '../points/points.module';
 import { AchievementModule } from '../achievement/achievement.module';
+import { getJwtSecret } from '../../config/production-env';
 
 @Module({
   imports: [
     JwtModule.register({
       global: true,
-      secret: process.env.JWT_SECRET || 'shanhai-secret-key-change-in-production',
+      secret: getJwtSecret(),
       signOptions: { expiresIn: '7d' },
     }),
     MailModule,

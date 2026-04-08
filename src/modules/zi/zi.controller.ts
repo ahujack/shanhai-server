@@ -19,6 +19,11 @@ export class AnalyzeZiDto {
   @IsString()
   @MaxLength(50)
   focusAspect?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  userQuestion?: string;
 }
 
 export class RecognizeDto {
@@ -34,6 +39,11 @@ export class AnalyzeHandwritingDto {
   @IsString()
   @MaxLength(50)
   focusAspect?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  userQuestion?: string;
 }
 
 @Controller('zi')
@@ -66,7 +76,14 @@ export class ZiController {
       }
     }
     const chartCtx = await this.buildZiBaziContext(userId);
-    const result = await this.ziService.analyze(zi, dto.handwriting, membership, dto.focusAspect, chartCtx);
+    const result = await this.ziService.analyze(
+      zi,
+      dto.handwriting,
+      membership,
+      dto.focusAspect,
+      chartCtx,
+      { userQuestion: dto.userQuestion },
+    );
 
     if (userId) {
       try {
@@ -164,7 +181,11 @@ export class ZiController {
         membership,
         dto.focusAspect,
         chartCtx,
-        { visionHandwritingNote: visionNote, preserveVisionHandwriting: preserveVision },
+        {
+          visionHandwritingNote: visionNote,
+          preserveVisionHandwriting: preserveVision,
+          userQuestion: dto.userQuestion,
+        },
       );
 
       if (userId) {

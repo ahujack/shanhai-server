@@ -59,6 +59,8 @@ export interface ZiAnalyzeOptions {
   visionHandwritingNote?: string;
   /** 为 true 时 DeepSeek 返回的 handwritingInterpretation 不覆盖已有笔迹字段 */
   preserveVisionHandwriting?: boolean;
+  /** 用户当下想问的具体问题，用于把测字和真实困扰绑定 */
+  userQuestion?: string;
 }
 
 // 笔迹特征库
@@ -331,12 +333,19 @@ export class ZiService {
       // 3. 优先用 LLM 生成全部解读（含技法细化 + 方向解读）
       let coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
       let interpretation = this.generateInterpretation(handwriting, ziAnalysis, focus);
+      if (analyzeOpts?.userQuestion?.trim()) {
+        interpretation = {
+          ...interpretation,
+          overall: `你当前最关心的问题是「${analyzeOpts.userQuestion.trim()}」。${interpretation.overall}`,
+        };
+      }
       const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis, focus);
 
       try {
         const llmResult = await this.getLLMEnhancement(char, handwriting, ziAnalysis, focus, {
           chartContext: chartContext ?? undefined,
           visionHandwritingNote: analyzeOpts?.visionHandwritingNote,
+          userQuestion: analyzeOpts?.userQuestion,
         });
         if (llmResult) {
           // 技法细化：离合法、填字格、象形投射
@@ -769,6 +778,7 @@ export class ZiService {
     ctx?: {
       chartContext?: ZiBaziContext;
       visionHandwritingNote?: string;
+      userQuestion?: string;
     },
   ): Promise<{
     overall?: string;
@@ -882,6 +892,7 @@ export class ZiService {
                   '。所测单字（唯一本字，全文不得换成其它汉字）：「' +
                   zi +
                   '」。',
+                userQuestion: ctx?.userQuestion?.trim() || null,
                 focusAspect: focus.label,
                 visionHandwritingNote: ctx?.visionHandwritingNote || null,
                 baziProfile: ctx?.chartContext
