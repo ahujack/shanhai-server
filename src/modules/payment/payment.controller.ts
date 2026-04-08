@@ -13,6 +13,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { PaymentService } from './payment.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -59,6 +60,7 @@ export class PaymentController {
   @Post('checkout')
   @HttpCode(HttpStatus.OK)
   @UseGuards(RequireAuthGuard)
+  @Throttle({ default: { limit: 12, ttl: 60000 } })
   async createCheckout(
     @Body() body: { productId: string },
     @Req() req: any,
@@ -118,6 +120,7 @@ export class PaymentController {
 
   // 模拟支付成功（仅开发/测试环境）
   @Post('mock-payment/:paymentId')
+  @Throttle({ default: { limit: 6, ttl: 60000 } })
   async mockPayment(@Param('paymentId') paymentId: string) {
     const env = (process.env.NODE_ENV || '').toLowerCase();
     const allowMock = env !== 'production' || process.env.ALLOW_MOCK_PAYMENT === 'true';

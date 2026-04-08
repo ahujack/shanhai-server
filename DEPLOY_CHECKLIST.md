@@ -9,12 +9,17 @@
 | `NODE_ENV` | 设为 `production` |
 | `DATABASE_URL` | Prisma PostgreSQL 连接串 |
 
-## 强烈建议（未配时服务仍可启动，但有安全风险）
+## 必填（生产，缺失会阻断启动）
 
 | 变量 | 说明 |
 |------|------|
-| `JWT_SECRET` | 强随机字符串；未设置时启动会打 **error** 日志，JWT 仍可能使用代码内默认密钥（极不安全） |
-| `ALLOWED_ORIGINS` | CORS 白名单，逗号分隔；未设置时回退为 **允许任意来源** |
+| `JWT_SECRET` | 强随机字符串；未设置时服务启动失败 |
+| `ALLOWED_ORIGINS` | CORS 白名单，逗号分隔；未设置时服务启动失败 |
+
+## 强烈建议（不阻断启动）
+
+| 变量 | 说明 |
+|------|------|
 | `EXPO_PUBLIC_API_URL` 或 `NEXT_PUBLIC_API_URL` | 前端 API 基址（含 `/api`）；未设置时前端回退默认 Railway URL 并 **warn** |
 
 ## 业务建议
@@ -52,3 +57,8 @@ E2E_DATABASE_URL="postgresql://user:pass@host:5432/db" npm run test:e2e
 
 - Creem：`POST /api/payment/webhook/creem`，需原始 body 验签（服务已启用 `rawBody`）。
 - Stripe：若使用，配置 `stripe-signature` 与对应 secret。
+
+## 观测与排障
+
+- 所有 HTTP 响应（含异常）都会返回 `x-request-id` 响应头。
+- 后端错误 JSON 中也会包含 `requestId` 字段，建议前端/客服反馈时携带该值。

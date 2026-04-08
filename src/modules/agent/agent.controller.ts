@@ -1,17 +1,17 @@
 import { Body, Controller, Post, Res, Req, UseGuards } from '@nestjs/common';
-import { SkipThrottle } from '@nestjs/throttler';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { AgentService } from './agent.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
-@SkipThrottle()
 @Controller('agent')
 export class AgentController {
   constructor(private readonly agentService: AgentService) {}
 
   @Post('chat')
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   async chat(@Body() dto: AgentChatDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
     return this.agentService.handleChat({ ...dto, userId });
@@ -19,6 +19,7 @@ export class AgentController {
 
   @Post('chat-stream')
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 15, ttl: 60000 } })
   async chatStream(@Body() dto: AgentChatDto, @Res() res: Response, @Req() req: { user?: { sub?: string; id?: string } }) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');

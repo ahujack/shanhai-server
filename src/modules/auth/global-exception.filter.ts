@@ -21,7 +21,14 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       
       if (typeof exceptionResponse === 'object') {
         const resp = exceptionResponse as Record<string, unknown>;
-        message = (resp.message as string) || exception.message;
+        const rawMessage = resp.message;
+        if (Array.isArray(rawMessage)) {
+          message = rawMessage.map((item) => String(item)).join('；');
+        } else if (typeof rawMessage === 'string') {
+          message = rawMessage;
+        } else {
+          message = exception.message;
+        }
         error = (resp.error as string) || 'Error';
       } else {
         message = exceptionResponse as string;
@@ -47,6 +54,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     this.logger.warn(`[${requestId || 'no-request-id'}] ${status} ${message}`);
+    if (requestId) {
+      response.setHeader('x-request-id', requestId);
+    }
     response.status(status).json(errorResponse);
   }
 }

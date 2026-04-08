@@ -1,6 +1,7 @@
 import { Body, Controller, Post, BadRequestException, Req, UseGuards } from '@nestjs/common';
 import { IsString, IsOptional, MaxLength } from 'class-validator';
 import { Logger } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ZiService, HandwritingAnalysis, ZiBaziContext } from './zi.service';
 import { OcrService } from '../ocr/ocr.service';
 import { PointsService } from '../points/points.service';
@@ -57,6 +58,7 @@ export class ZiController {
 
   @Post('analyze')
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   async analyze(@Body() dto: AnalyzeZiDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
     const zi = String(dto.zi || '').trim().charAt(0);
@@ -116,6 +118,7 @@ export class ZiController {
 
   @Post('recognize')
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   async recognize(@Body() dto: RecognizeDto) {
     const result = await this.ocrService.recognizeHandwriting(dto.image);
     return {
@@ -126,6 +129,7 @@ export class ZiController {
 
   @Post('analyze-handwriting')
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async analyzeHandwriting(@Body() dto: AnalyzeHandwritingDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
     try {
@@ -221,10 +225,10 @@ export class ZiController {
         analysis,
       };
     } catch (error) {
-      console.error('analyze-handwriting 错误:', error);
+      Logger.error(`analyze-handwriting 错误: ${(error as Error).message}`, undefined, ZiController.name);
       return {
         recognizedZi: null,
-        error: error.message || '服务器错误',
+        error: (error as Error).message || '服务器错误',
       };
     }
   }
