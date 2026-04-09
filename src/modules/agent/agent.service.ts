@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
 import FormData from 'form-data';
+import tencentcloud from 'tencentcloud-sdk-nodejs';
 import { PrismaClient } from '@prisma/client';
 import { PersonaService, PersonaSchema } from '../persona/persona.service';
 import { ReadingService, DivinationCategory } from '../reading/reading.service';
@@ -1104,6 +1105,98 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     if (!buffer || buffer.length === 0) {
       throw new BadRequestException('音频内容为空');
     }
+
+    const preferTencent = this.shouldUseTencentStt();
+    if (preferTencent) {
+      try {
+        return await this.transcribeWithTencent(buffer, mimeType, filename);
+      } catch (error) {
+        const allowFallback = (process.env.STT_FALLBACK_OPENAI || 'true') !== 'false';
+        if (!allowFallback) {
+          throw error;
+        }
+        this.logger.warn(`腾讯云转写失败，回退兼容STT: ${(error as Error).message}`);
+      }
+    }
+
+    return this.transcribeWithOpenAiCompatible(buffer, mimeType, filename);
+  }
+
+  private shouldUseTencentStt(): boolean {
+    const provider = (process.env.STT_PROVIDER || process.env.LLM_STT_PROVIDER || '').trim().toLowerCase();
+    if (provider === 'tencent' || provider === 'tencentcloud') return true;
+    return !!(process.env.TENCENTCLOUD_SECRET_ID?.trim() && process.env.TENCENTCLOUD_SECRET_KEY?.trim());
+  }
+
+  private mapTencentVoiceFormat(mimeType: string, filename: string): string | null {
+    const mime = String(mimeType || '').toLowerCase();
+    const name = String(filename || '').toLowerCase();
+    if (mime.includes('wav') || name.endsWith('.wav')) return 'wav';
+    if (mime.includes('mpeg') || mime.includes('mp3') || name.endsWith('.mp3')) return 'mp3';
+    if (mime.includes('ogg') || mime.includes('opus') || name.endsWith('.ogg') || name.endsWith('.opus')) return 'ogg-opus';
+    if (mime.includes('m4a') || name.endsWith('.m4a')) return 'm4a';
+    if (mime.includes('aac') || name.endsWith('.aac')) return 'aac';
+    if (name.endsWith('.pcm')) return 'pcm';
+    if (name.endsWith('.speex')) return 'speex';
+    if (name.endsWith('.silk')) return 'silk';
+    if (name.endsWith('.amr')) return 'amr';
+    // MediaRecorder 默认 webm，腾讯一句话接口不直接支持；走兜底兼容STT
+    if (mime.includes('webm') || name.endsWith('.webm')) return null;
+    return null;
+  }
+
+  private async transcribeWithTencent(buffer: Buffer, mimeType: string, filename: string): Promise<string> {
+    const secretId = process.env.TENCENTCLOUD_SECRET_ID?.trim();
+    const secretKey = process.env.TENCENTCLOUD_SECRET_KEY?.trim();
+    const region = process.env.TENCENTCLOUD_REGION?.trim() || 'ap-shanghai';
+    const engine = process.env.TENCENT_ASR_ENGINE || '16k_zh';
+    if (!secretId || !secretKey) {
+      throw new BadRequestException('腾讯云转写未配置密钥（TENCENTCLOUD_SECRET_ID/TENCENTCLOUD_SECRET_KEY）');
+    }
+    const voiceFormat = this.mapTencentVoiceFormat(mimeType, filename);
+    if (!voiceFormat) {
+      throw new BadRequestException(`腾讯云暂不支持该录音格式：${mimeType || filename || 'unknown'}`);
+    }
+    const AsrClient = (tencentcloud as any).asr.v20190614.Client;
+    const client = new AsrClient({
+      credential: { secretId, secretKey },
+      region,
+      profile: {
+        httpProfile: { endpoint: 'asr.tencentcloudapi.com', reqTimeout: 45 },
+      },
+    });
+
+    const req = {
+      EngSerViceType: engine,
+      SourceType: 1,
+      VoiceFormat: voiceFormat,
+      Data: buffer.toString('base64'),
+      DataLen: buffer.length,
+      UsrAudioKey: `voice_${Date.now()}`,
+      ProjectId: 0,
+      SubServiceType: 2,
+      FilterPunc: 0,
+      ConvertNumMode: 1,
+      WordInfo: 0,
+    } as Record<string, unknown>;
+
+    try {
+      const res = await client.SentenceRecognition(req);
+      const text = String(res?.Result || '').trim();
+      if (!text) {
+        throw new BadRequestException('腾讯云未返回可用文本');
+      }
+      return text;
+    } catch (error) {
+      const msg =
+        (error as any)?.response?.data?.Response?.Error?.Message ||
+        (error as any)?.message ||
+        '腾讯云语音转写失败';
+      throw new BadRequestException(`腾讯云语音转写失败: ${msg}`);
+    }
+  }
+
+  private async transcribeWithOpenAiCompatible(buffer: Buffer, mimeType = 'audio/webm', filename = 'recording.webm'): Promise<string> {
     const apiKey = process.env.LLM_API_KEY?.trim();
     const endpoint = resolveSttTranscriptionsUrl();
     const model = process.env.LLM_STT_MODEL?.trim() || 'whisper-1';

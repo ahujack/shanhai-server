@@ -49,7 +49,8 @@
     "smtp-server": "^3.18.1",
     "socks": "^2.8.7",
     "solarlunar": "^3.1.0",
-    "stripe": "^20.4.1"
+    "stripe": "^20.4.1",
+    "tencentcloud-sdk-nodejs": "^4.1.209"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
