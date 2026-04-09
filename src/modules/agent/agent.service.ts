@@ -556,6 +556,18 @@ ${contextInfo}`,
     };
   }
 
+  private sanitizeAssistantReply(raw: string): string {
+    let text = String(raw || '').trim();
+    if (!text) return text;
+    // 去掉舞台动作开头，如：（抬眼望天）...
+    text = text.replace(/^[（(][^）)\n]{1,28}[）)]\s*/u, '');
+    // 去掉不可核验的“上次某个字”历史暗示
+    text = text.replace(/上次[^。\n]*?(测|写|聊).{0,10}?字[^。\n]*[。！？!?]?/gu, '');
+    text = text.replace(/上次[^。\n]*?「[^」]{1,6}」[^。\n]*[。！？!?]?/gu, '');
+    text = text.replace(/\n{3,}/g, '\n\n').trim();
+    return text;
+  }
+
   /**
    * 流式生成 AI 回复（仅 chat 意图使用）
    */
@@ -610,6 +622,8 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 - 绝对不要输出"角色名："前缀，不要输出舞台动作括号
 - 先回应用户当前语句的真实语义；如果信息不足，可温和追问
 - 除非在本次对话上下文里有明确且可核验的记录，否则不要说“上次你……”或引用具体历史细节（例如“上次测了某个字”）
+- 严禁使用舞台动作括号描写（例如“（抬眼望天）”）
+- 严禁主动提及“上次某个字（如心字）”，用户未在当前消息明确给出时，不要猜测历史字词
 - 若用户在聊“事业/工作”，优先用四段结构：
 - 若用户在聊“事业/感情/财务/健康/成长”追问，优先用四段结构：
   1) 盘面证据（引用1-2个命盘锚点，不要空泛）
@@ -671,7 +685,6 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
               const content = parsed?.choices?.[0]?.delta?.content;
               if (content) {
                 fullContent += content;
-                yield content;
               }
             } catch {
               // ignore parse errors
@@ -680,10 +693,13 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
         }
       }
 
-      if (!fullContent.trim()) {
+      const safeContent = this.sanitizeAssistantReply(fullContent);
+      if (!safeContent.trim()) {
         yield this.getDefaultChatReply(persona, userChart);
+      } else {
+        yield safeContent;
       }
-      this.logger.log(`LLM(stream) completed duration=${Date.now() - startedAt}ms size=${fullContent.length}`);
+      this.logger.log(`LLM(stream) completed duration=${Date.now() - startedAt}ms size=${safeContent.length}`);
     } catch (error) {
       this.logger.error(`DeepSeek 流式生成失败: ${(error as Error).message}`);
       yield this.getDefaultChatReply(persona, userChart);
@@ -751,6 +767,8 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 - 绝对不要输出"角色名："前缀，不要输出舞台动作括号（如“（轻抚长须）”）
 - 先回应用户当前语句的真实语义；如果信息不足，可温和追问，不要自说自话
 - 除非在本次对话上下文里有明确且可核验的记录，否则不要说“上次你……”或引用具体历史细节（例如“上次测了某个字”）
+- 严禁使用舞台动作括号描写（例如“（抬眼望天）”）
+- 严禁主动提及“上次某个字（如心字）”，用户未在当前消息明确给出时，不要猜测历史字词
 - 若用户在聊“事业/工作”，优先用四段结构：
 - 若用户在聊“事业/感情/财务/健康/成长”追问，优先用四段结构：
   1) 盘面证据（引用1-2个命盘锚点，不要空泛）
@@ -796,7 +814,8 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 
       const reply = response.data?.choices?.[0]?.message?.content?.trim();
       if (reply) {
-        return reply.replace(/^[^：:\n]{1,12}[：:]\s*/u, '').trim();
+        const cleaned = reply.replace(/^[^：:\n]{1,12}[：:]\s*/u, '').trim();
+        return this.sanitizeAssistantReply(cleaned);
       }
       
       return this.getDefaultChatReply(persona, userChart);
