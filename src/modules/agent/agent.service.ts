@@ -556,6 +556,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 - 每次回复控制在100-200字之间，保持简洁有力
 - 绝对不要输出"角色名："前缀，不要输出舞台动作括号
 - 先回应用户当前语句的真实语义；如果信息不足，可温和追问
+- 除非在本次对话上下文里有明确且可核验的记录，否则不要说“上次你……”或引用具体历史细节（例如“上次测了某个字”）
 - 若用户在聊“事业/工作”，优先用四段结构：
 - 若用户在聊“事业/感情/财务/健康/成长”追问，优先用四段结构：
   1) 盘面证据（引用1-2个命盘锚点，不要空泛）
@@ -696,6 +697,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 - 如果用户提到命理相关内容，可以适当引用用户的八字信息给出个性化建议
 - 绝对不要输出"角色名："前缀，不要输出舞台动作括号（如“（轻抚长须）”）
 - 先回应用户当前语句的真实语义；如果信息不足，可温和追问，不要自说自话
+- 除非在本次对话上下文里有明确且可核验的记录，否则不要说“上次你……”或引用具体历史细节（例如“上次测了某个字”）
 - 若用户在聊“事业/工作”，优先用四段结构：
 - 若用户在聊“事业/感情/财务/健康/成长”追问，优先用四段结构：
   1) 盘面证据（引用1-2个命盘锚点，不要空泛）
@@ -845,11 +847,9 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
         .slice(0, 2)
         .map((x) => x.key);
 
-      const latestZi = recentZi
+      const ziCount = recentZi
         .map((z) => z.zi)
-        .filter(Boolean)
-        .slice(0, 3)
-        .join('、');
+        .filter(Boolean).length;
       const readingCats = recentReadings
         .map((r) => r.category)
         .filter(Boolean)
@@ -861,7 +861,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 
       const memoryLines = [
         concerns.length ? `长期关注主题：${concerns.join('、')}` : '',
-        latestZi ? `近期测字：${latestZi}` : '',
+        ziCount > 0 ? '近期有测字记录' : '',
         readingCats ? `近期问卦方向：${readingCats}` : '',
         dominantIntent ? `对话偏好：${dominantIntent}` : '',
         user?.focusGod ? `命理偏好：${user.focusGod}` : '',
