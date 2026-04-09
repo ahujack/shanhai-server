@@ -556,14 +556,24 @@ ${contextInfo}`,
     };
   }
 
-  private sanitizeAssistantReply(raw: string): string {
+  private sanitizeAssistantReply(raw: string, personaName?: string): string {
     let text = String(raw || '').trim();
     if (!text) return text;
+    const escapeRegExp = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // 去掉舞台动作开头，如：（抬眼望天）...
     text = text.replace(/^[（(][^）)\n]{1,28}[）)]\s*/u, '');
     // 去掉不可核验的“上次某个字”历史暗示
     text = text.replace(/上次[^。\n]*?(测|写|聊).{0,10}?字[^。\n]*[。！？!?]?/gu, '');
     text = text.replace(/上次[^。\n]*?「[^」]{1,6}」[^。\n]*[。！？!?]?/gu, '');
+    if (personaName) {
+      const escapedName = escapeRegExp(personaName.trim());
+      if (escapedName) {
+        // 避免把 AI 名字当作用户称呼（如：晚上好啊，云游子。）
+        text = text.replace(new RegExp(`([，,])\\s*${escapedName}(?=[，。！？!?\\s])`, 'gu'), '$1');
+        text = text.replace(new RegExp(`^${escapedName}\\s*[，,:：]\\s*`, 'u'), '');
+      }
+    }
+    text = text.replace(/[，,][。！？!?]/g, '。');
     text = text.replace(/\n{3,}/g, '\n\n').trim();
     return text;
   }
@@ -624,6 +634,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 - 除非在本次对话上下文里有明确且可核验的记录，否则不要说“上次你……”或引用具体历史细节（例如“上次测了某个字”）
 - 严禁使用舞台动作括号描写（例如“（抬眼望天）”）
 - 严禁主动提及“上次某个字（如心字）”，用户未在当前消息明确给出时，不要猜测历史字词
+- 不要把你的名字（如“${persona.name}”）当作对用户的称呼
 - 若用户在聊“事业/工作”，优先用四段结构：
 - 若用户在聊“事业/感情/财务/健康/成长”追问，优先用四段结构：
   1) 盘面证据（引用1-2个命盘锚点，不要空泛）
@@ -693,7 +704,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
         }
       }
 
-      const safeContent = this.sanitizeAssistantReply(fullContent);
+      const safeContent = this.sanitizeAssistantReply(fullContent, persona.name);
       if (!safeContent.trim()) {
         yield this.getDefaultChatReply(persona, userChart);
       } else {
@@ -769,6 +780,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 - 除非在本次对话上下文里有明确且可核验的记录，否则不要说“上次你……”或引用具体历史细节（例如“上次测了某个字”）
 - 严禁使用舞台动作括号描写（例如“（抬眼望天）”）
 - 严禁主动提及“上次某个字（如心字）”，用户未在当前消息明确给出时，不要猜测历史字词
+- 不要把你的名字（如“${persona.name}”）当作对用户的称呼
 - 若用户在聊“事业/工作”，优先用四段结构：
 - 若用户在聊“事业/感情/财务/健康/成长”追问，优先用四段结构：
   1) 盘面证据（引用1-2个命盘锚点，不要空泛）
@@ -815,7 +827,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
       const reply = response.data?.choices?.[0]?.message?.content?.trim();
       if (reply) {
         const cleaned = reply.replace(/^[^：:\n]{1,12}[：:]\s*/u, '').trim();
-        return this.sanitizeAssistantReply(cleaned);
+        return this.sanitizeAssistantReply(cleaned, persona.name);
       }
       
       return this.getDefaultChatReply(persona, userChart);
