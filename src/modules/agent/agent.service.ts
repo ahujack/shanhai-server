@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
 import FormData from 'form-data';
+import * as TencentCloudSdk from 'tencentcloud-sdk-nodejs';
 import { PrismaClient } from '@prisma/client';
 import { PersonaService, PersonaSchema } from '../persona/persona.service';
 import { ReadingService, DivinationCategory } from '../reading/reading.service';
@@ -37,9 +38,10 @@ function safeRequire(modulePath: string): any | null {
   }
 }
 
-async function resolveTencentAsrClientCtor(): Promise<any | null> {
+function resolveTencentAsrClientCtor(): any | null {
   if (cachedTencentAsrClientCtor !== undefined) return cachedTencentAsrClientCtor;
   const modules = [
+    TencentCloudSdk as any,
     safeRequire('tencentcloud-sdk-nodejs'),
     safeRequire('tencentcloud-sdk-nodejs/tencentcloud/services/asr/v20190614/asr_client'),
     safeRequire('tencentcloud-sdk-nodejs/es/services/asr/v20190614/asr_client'),
@@ -1228,7 +1230,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     if (!voiceFormat) {
       throw new BadRequestException(`腾讯云暂不支持该录音格式：${mimeType || filename || 'unknown'}`);
     }
-    const AsrClient = await resolveTencentAsrClientCtor();
+    const AsrClient = resolveTencentAsrClientCtor();
     if (!AsrClient) {
       throw new BadRequestException('腾讯云 SDK 加载失败：未找到 asr.v20190614.Client，请检查部署依赖');
     }
