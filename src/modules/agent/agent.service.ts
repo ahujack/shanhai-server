@@ -26,6 +26,16 @@ function resolveSttTranscriptionsUrl(): string {
   return `${trimmed.replace(/\/$/, '')}/audio/transcriptions`;
 }
 
+function resolveTencentAsrClientCtor(): any {
+  const sdkAny = tencentcloud as any;
+  const byDefault = sdkAny?.default;
+  return (
+    sdkAny?.asr?.v20190614?.Client ||
+    byDefault?.asr?.v20190614?.Client ||
+    null
+  );
+}
+
 @Injectable()
 export class AgentService {
   private readonly logger = new Logger(AgentService.name);
@@ -1193,7 +1203,10 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     if (!voiceFormat) {
       throw new BadRequestException(`腾讯云暂不支持该录音格式：${mimeType || filename || 'unknown'}`);
     }
-    const AsrClient = (tencentcloud as any).asr.v20190614.Client;
+    const AsrClient = resolveTencentAsrClientCtor();
+    if (!AsrClient) {
+      throw new BadRequestException('腾讯云 SDK 加载失败：未找到 asr.v20190614.Client，请检查部署依赖');
+    }
     const client = new AsrClient({
       credential: { secretId, secretKey },
       region,
