@@ -1,7 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
 import FormData from 'form-data';
-import tencentcloud from 'tencentcloud-sdk-nodejs';
 import { PrismaClient } from '@prisma/client';
 import { PersonaService, PersonaSchema } from '../persona/persona.service';
 import { ReadingService, DivinationCategory } from '../reading/reading.service';
@@ -26,14 +25,34 @@ function resolveSttTranscriptionsUrl(): string {
   return `${trimmed.replace(/\/$/, '')}/audio/transcriptions`;
 }
 
-function resolveTencentAsrClientCtor(): any {
-  const sdkAny = tencentcloud as any;
-  const byDefault = sdkAny?.default;
-  return (
-    sdkAny?.asr?.v20190614?.Client ||
-    byDefault?.asr?.v20190614?.Client ||
-    null
-  );
+let cachedTencentAsrClientCtor: any | null | undefined = undefined;
+
+async function resolveTencentAsrClientCtor(): Promise<any | null> {
+  if (cachedTencentAsrClientCtor !== undefined) return cachedTencentAsrClientCtor;
+  const candidates = [
+    () => import('tencentcloud-sdk-nodejs'),
+    () => import('tencentcloud-sdk-nodejs/tencentcloud/services/asr/v20190614/asr_client'),
+    () => import('tencentcloud-sdk-nodejs/es/services/asr/v20190614/asr_client'),
+  ];
+  for (const load of candidates) {
+    try {
+      const mod = (await load()) as any;
+      const clientCtor =
+        mod?.asr?.v20190614?.Client ||
+        mod?.default?.asr?.v20190614?.Client ||
+        mod?.Client ||
+        mod?.default?.Client ||
+        null;
+      if (clientCtor) {
+        cachedTencentAsrClientCtor = clientCtor;
+        return clientCtor;
+      }
+    } catch {
+      // ignore and continue to next candidate
+    }
+  }
+  cachedTencentAsrClientCtor = null;
+  return null;
 }
 
 @Injectable()
@@ -1203,7 +1222,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     if (!voiceFormat) {
       throw new BadRequestException(`腾讯云暂不支持该录音格式：${mimeType || filename || 'unknown'}`);
     }
-    const AsrClient = resolveTencentAsrClientCtor();
+    const AsrClient = await resolveTencentAsrClientCtor();
     if (!AsrClient) {
       throw new BadRequestException('腾讯云 SDK 加载失败：未找到 asr.v20190614.Client，请检查部署依赖');
     }
