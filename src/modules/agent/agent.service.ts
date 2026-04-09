@@ -1111,8 +1111,18 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
       try {
         return await this.transcribeWithTencent(buffer, mimeType, filename);
       } catch (error) {
-        const allowFallback = (process.env.STT_FALLBACK_OPENAI || 'true') !== 'false';
+        const errMsg = String((error as Error)?.message || '');
+        const isUnsupportedFormat = /暂不支持该录音格式|Unsupported audio data format/i.test(errMsg);
+        const allowFallback =
+          isUnsupportedFormat
+            ? this.canUseOpenAiFallback()
+            : (process.env.STT_FALLBACK_OPENAI || 'true') !== 'false';
         if (!allowFallback) {
+          if (isUnsupportedFormat) {
+            throw new BadRequestException(
+              `当前浏览器上传的是 ${mimeType}，腾讯云一句话识别不支持该容器格式；请开启 STT_FALLBACK_OPENAI 或改用支持 ogg-opus/m4a 的录音格式。`,
+            );
+          }
           throw error;
         }
         this.logger.warn(`腾讯云转写失败，回退兼容STT: ${(error as Error).message}`);
@@ -1126,6 +1136,12 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     const provider = (process.env.STT_PROVIDER || process.env.LLM_STT_PROVIDER || '').trim().toLowerCase();
     if (provider === 'tencent' || provider === 'tencentcloud') return true;
     return !!(process.env.TENCENTCLOUD_SECRET_ID?.trim() && process.env.TENCENTCLOUD_SECRET_KEY?.trim());
+  }
+
+  private canUseOpenAiFallback(): boolean {
+    const apiKey = process.env.LLM_API_KEY?.trim();
+    const endpoint = resolveSttTranscriptionsUrl();
+    return !!(apiKey && endpoint);
   }
 
   private mapTencentVoiceFormat(mimeType: string, filename: string): string | null {
