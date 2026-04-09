@@ -1113,19 +1113,27 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
       } catch (error) {
         const errMsg = String((error as Error)?.message || '');
         const isUnsupportedFormat = /暂不支持该录音格式|Unsupported audio data format/i.test(errMsg);
-        const allowFallback =
-          isUnsupportedFormat
-            ? this.canUseOpenAiFallback()
-            : (process.env.STT_FALLBACK_OPENAI || 'true') !== 'false';
+        const allowFallback = this.shouldAllowOpenAiFallback();
         if (!allowFallback) {
           if (isUnsupportedFormat) {
             throw new BadRequestException(
-              `当前浏览器上传的是 ${mimeType}，腾讯云一句话识别不支持该容器格式；请开启 STT_FALLBACK_OPENAI 或改用支持 ogg-opus/m4a 的录音格式。`,
+              `当前浏览器上传的是 ${mimeType}，腾讯云一句话识别不支持该容器格式；请改用支持 ogg-opus/m4a 的录音格式，或显式开启 STT_FALLBACK_OPENAI=true。`,
             );
           }
           throw error;
         }
         this.logger.warn(`腾讯云转写失败，回退兼容STT: ${(error as Error).message}`);
+        try {
+          return await this.transcribeWithOpenAiCompatible(buffer, mimeType, filename);
+        } catch (fallbackError) {
+          const fallbackMsg = String((fallbackError as Error)?.message || '');
+          if (/无可用渠道|no available channel/i.test(fallbackMsg)) {
+            throw new BadRequestException(
+              `腾讯云转写失败，且兼容 STT 通道不可用。建议设置 STT_FALLBACK_OPENAI=false，并优先上传 ogg-opus/m4a 音频。原始错误：${errMsg}`,
+            );
+          }
+          throw fallbackError;
+        }
       }
     }
 
@@ -1142,6 +1150,18 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     const apiKey = process.env.LLM_API_KEY?.trim();
     const endpoint = resolveSttTranscriptionsUrl();
     return !!(apiKey && endpoint);
+  }
+
+  /**
+   * 仅在显式配置为 true 时才允许回退，避免腾讯模式下默认误打到 whisper-1
+   */
+  private shouldAllowOpenAiFallback(): boolean {
+    const raw = String(process.env.STT_FALLBACK_OPENAI || '')
+      .trim()
+      .toLowerCase();
+    if (!raw) return false;
+    if (raw === 'true' || raw === '1' || raw === 'yes') return this.canUseOpenAiFallback();
+    return false;
   }
 
   private mapTencentVoiceFormat(mimeType: string, filename: string): string | null {
