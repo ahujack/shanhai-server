@@ -1,10 +1,15 @@
 import { Controller, Get, Post, Body, UseGuards, Request, Query } from '@nestjs/common';
 import { PointsService, PointsSummary, PointRecord } from './points.service';
 import { JwtAuthGuard, RequireAuthGuard } from '../auth/jwt-auth.guard';
+import { PrismaService } from '../../prisma.service';
+import { BILLING_RULES } from '../../config/billing-rules';
 
 @Controller('points')
 export class PointsController {
-  constructor(private readonly pointsService: PointsService) {}
+  constructor(
+    private readonly pointsService: PointsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   /**
    * 获取用户积分概况（需要登录）
@@ -29,6 +34,45 @@ export class PointsController {
     const parsed = limit ? parseInt(limit, 10) : 20;
     const n = Number.isFinite(parsed) ? parsed : 20;
     return this.pointsService.getPointRecords(userId, n);
+  }
+
+  /**
+   * 获取扣费与权益规则（用于前端统一展示与引导）
+   */
+  @Get('rules')
+  @UseGuards(JwtAuthGuard)
+  async getBillingRules(@Request() req) {
+    const userId = req.user?.sub ?? req.user?.id;
+    let membership: 'free' | 'premium' | 'vip' = 'free';
+    if (userId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { membership: true, membershipExpiryAt: true },
+      });
+      const m = user?.membership;
+      if ((m === 'premium' || m === 'vip') && (!user?.membershipExpiryAt || user.membershipExpiryAt > new Date())) {
+        membership = m;
+      }
+    }
+    return {
+      gateEnabled: !this.pointsService.isPointsGateDisabled(),
+      costs: {
+        zi: BILLING_RULES.points.zi,
+        reading: BILLING_RULES.points.reading,
+      },
+      membershipExemptions: {
+        zi: true,
+        reading: true,
+        baziAdvanced: true,
+      },
+      paywalls: {
+        baziAdvancedMode: BILLING_RULES.baziAdvancedMode,
+      },
+      currentUser: {
+        membership,
+        isMember: membership === 'premium' || membership === 'vip',
+      },
+    };
   }
 
   /**

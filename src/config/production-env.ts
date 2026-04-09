@@ -19,6 +19,10 @@ export function assertProductionConfig(): void {
   if (origins.length === 0) {
     throw new Error('生产环境缺少 ALLOWED_ORIGINS，已阻断启动。请配置 CORS 白名单后重启。');
   }
+  const hasCreemApiKey = !!process.env.CREEM_API_KEY?.trim();
+  if (hasCreemApiKey && !process.env.CREEM_WEBHOOK_SECRET?.trim()) {
+    throw new Error('生产环境已启用 Creem，但缺少 CREEM_WEBHOOK_SECRET，已阻断启动。');
+  }
 }
 
 /** 配置了白名单则用白名单；非生产允许 true，生产缺失时抛错 */

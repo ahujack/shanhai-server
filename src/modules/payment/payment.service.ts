@@ -7,7 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
-import { PointsService } from '../points/points.service';
 import axios from 'axios';
 import * as crypto from 'crypto';
 
@@ -40,10 +39,7 @@ export class PaymentService implements OnModuleInit {
     return undefined;
   }
 
-  constructor(
-    private prisma: PrismaService,
-    private pointsService: PointsService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async onModuleInit() {
     // 初始化 Creem
@@ -332,8 +328,15 @@ export class PaymentService implements OnModuleInit {
             : String(opts.rawBody)
         : '';
 
-    let trustWebhook = !secret;
-    if (secret) {
+    let trustWebhook = false;
+    if (!secret) {
+      if (this.creemApiKey) {
+        this.logger.error('Creem Webhook 拒绝处理：CREEM_WEBHOOK_SECRET 未配置');
+        throw new BadRequestException('Webhook secret not configured');
+      }
+      // 本地未接 Creem API Key 的调试环境允许透传
+      trustWebhook = true;
+    } else {
       if (!opts?.signature) {
         this.logger.warn('Creem Webhook 已配置 CREEM_WEBHOOK_SECRET 但缺少 creem-signature 请求头');
         throw new BadRequestException('Webhook signature required');
@@ -416,66 +419,90 @@ export class PaymentService implements OnModuleInit {
   }
 
   // 处理支付成功
-  async processPaymentSuccess(paymentId: string, providerPaymentId?: string, status?: string) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { id: paymentId },
-      include: { product: true },
-    });
-
-    if (!payment) {
-      throw new NotFoundException('支付记录不存在');
-    }
-
-    // 如果已经处理过，跳过
-    if (payment.status === 'completed') {
-      return payment;
-    }
-
-    // 更新支付状态
-    const updatedPayment = await this.prisma.payment.update({
-      where: { id: paymentId },
-      data: {
-        creemCheckoutId: providerPaymentId,
-        status: 'completed',
-        completedAt: new Date(),
-      },
-    });
-
-    // 1. 如果是积分产品，添加积分
-    if (payment.points > 0) {
-      await this.pointsService.awardPoints(
-        payment.userId,
-        payment.points,
-        'recharge',
-        `充值：${payment.product.name}`,
-      );
-    }
-
-    // 2. 如果是订阅产品，更新用户会员状态及到期时间（在现有未过期会员上叠加时长）
-    if (payment.product.type === 'subscription') {
-      const periodDays = payment.product.periodDays || 30;
-      const existing = await this.prisma.user.findUnique({
-        where: { id: payment.userId },
-        select: { membershipExpiryAt: true },
+  async processPaymentSuccess(paymentId: string, providerPaymentId?: string, _status?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.findUnique({
+        where: { id: paymentId },
+        include: { product: true },
       });
-      const now = new Date();
-      let base = now;
-      if (existing?.membershipExpiryAt && existing.membershipExpiryAt > now) {
-        base = existing.membershipExpiryAt;
-      }
-      const expiryDate = new Date(base);
-      expiryDate.setDate(expiryDate.getDate() + periodDays);
 
-      await this.prisma.user.update({
-        where: { id: payment.userId },
+      if (!payment) {
+        throw new NotFoundException('支付记录不存在');
+      }
+
+      // 如果已经处理过，跳过
+      if (payment.status === 'completed') {
+        return payment;
+      }
+
+      // 更新支付状态
+      const updatedPayment = await tx.payment.update({
+        where: { id: paymentId },
         data: {
-          membership: payment.product.code.includes('vip') ? 'vip' : 'premium',
-          membershipExpiryAt: expiryDate,
+          creemCheckoutId: providerPaymentId,
+          status: 'completed',
+          completedAt: new Date(),
         },
       });
-    }
 
-    return updatedPayment;
+      // 1. 如果是积分产品，添加积分与流水（同事务）
+      if (payment.points > 0) {
+        const currentPoints = await tx.userPoints.findUnique({
+          where: { userId: payment.userId },
+        });
+        if (!currentPoints) {
+          await tx.userPoints.create({
+            data: {
+              userId: payment.userId,
+              totalPoints: payment.points,
+              availablePoints: payment.points,
+            },
+          });
+        } else {
+          await tx.userPoints.update({
+            where: { userId: payment.userId },
+            data: {
+              totalPoints: { increment: payment.points },
+              availablePoints: { increment: payment.points },
+            },
+          });
+        }
+        await tx.pointRecord.create({
+          data: {
+            userId: payment.userId,
+            points: payment.points,
+            type: 'recharge',
+            description: `充值：${payment.product.name}`,
+          },
+        });
+      }
+
+      // 2. 如果是订阅产品，更新用户会员状态及到期时间（在现有未过期会员上叠加时长）
+      if (payment.product.type === 'subscription') {
+        const periodDays = payment.product.periodDays || 30;
+        const existing = await tx.user.findUnique({
+          where: { id: payment.userId },
+          select: { membershipExpiryAt: true },
+        });
+        const now = new Date();
+        let base = now;
+        if (existing?.membershipExpiryAt && existing.membershipExpiryAt > now) {
+          base = existing.membershipExpiryAt;
+        }
+        const expiryDate = new Date(base);
+        expiryDate.setDate(expiryDate.getDate() + periodDays);
+
+        await tx.user.update({
+          where: { id: payment.userId },
+          data: {
+            membership: payment.product.code.includes('vip') ? 'vip' : 'premium',
+            membershipExpiryAt: expiryDate,
+          },
+        });
+      }
+
+      return updatedPayment;
+    });
   }
 
   // 模拟支付成功（用于测试）
@@ -578,24 +605,36 @@ export class PaymentService implements OnModuleInit {
       {
         code: 'vip_monthly',
         name: 'VIP 月卡',
-        description: '解锁所有VIP功能，包括无限AI对话、高级命盘解读等',
+        description: '30天会员权益，覆盖高频核心能力',
         type: 'subscription',
         price: 5.9,
         points: 0,
         periodDays: 30,
-        features: JSON.stringify(['无限AI对话', '高级命盘解读', '优先客服', '专属主题']),
+        features: JSON.stringify([
+          '测字按规则免扣积分（受频控限制）',
+          '深度解签按规则免扣积分（受频控限制）',
+          '解锁八字老师傅批注（会员权益）',
+          '解锁测字甲骨文完整异体图与差异解读',
+          '支持到期续费，会员时长可叠加',
+        ]),
         creemPriceId: 'prod_78ZYwOA5jnKNJ8ub1Xwtra',
         sortOrder: 10,
       },
       {
         code: 'vip_yearly',
         name: 'VIP 年卡',
-        description: '解锁所有VIP功能，享受年卡优惠',
+        description: '365天会员权益，同能力更划算',
         type: 'subscription',
-        price: 39.9,
+        price: 49.9,
         points: 0,
         periodDays: 365,
-        features: JSON.stringify(['无限AI对话', '高级命盘解读', '优先客服', '专属主题', '年费专属优惠']),
+        features: JSON.stringify([
+          '包含月卡全部会员权益',
+          '测字/深度解签按规则免扣积分（受频控限制）',
+          '解锁八字老师傅批注（会员权益）',
+          '解锁测字甲骨文完整异体图与差异解读',
+          '年付更省：约等于 8.5 个月月卡价格',
+        ]),
         creemPriceId: 'prod_2mQYQ2Hl5ylTkRKgEhVvbG',
         sortOrder: 11,
       },

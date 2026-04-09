@@ -7,8 +7,9 @@ import { OcrService } from '../ocr/ocr.service';
 import { PointsService } from '../points/points.service';
 import { PrismaService } from '../../prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { BILLING_RULES } from '../../config/billing-rules';
 
-const ZI_POINTS_COST = parseInt(process.env.ZI_POINTS_COST || '10', 10);
+const ZI_POINTS_COST = BILLING_RULES.points.zi;
 
 export class AnalyzeZiDto {
   @IsString()
@@ -61,6 +62,7 @@ export class ZiController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async analyze(@Body() dto: AnalyzeZiDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
+    let consumeRecordId: string | undefined;
     const zi = String(dto.zi || '').trim().charAt(0);
     if (!/[\u4e00-\u9fa5]/.test(zi)) {
       throw new BadRequestException('请输入一个有效的汉字');
@@ -76,16 +78,30 @@ export class ZiController {
       if (!consumed.success) {
         throw new BadRequestException(consumed.message || '积分不足，请签到或前往积分商城获取');
       }
+      consumeRecordId = consumed.recordId;
     }
     const chartCtx = await this.buildZiBaziContext(userId);
-    const result = await this.ziService.analyze(
-      zi,
-      dto.handwriting,
-      membership,
-      dto.focusAspect,
-      chartCtx,
-      { userQuestion: dto.userQuestion },
-    );
+    let result;
+    try {
+      result = await this.ziService.analyze(
+        zi,
+        dto.handwriting,
+        membership,
+        dto.focusAspect,
+        chartCtx,
+        { userQuestion: dto.userQuestion },
+      );
+    } catch (error) {
+      if (userId && consumeRecordId) {
+        await this.pointsService.rollbackConsumption(
+          userId,
+          consumeRecordId,
+          'zi_analyze_failed',
+        );
+      }
+      Logger.error('测字生成失败，已尝试回滚积分', (error as Error).message, ZiController.name);
+      throw new BadRequestException('测字生成失败，本次未扣积分，请稍后重试');
+    }
 
     if (userId) {
       try {
@@ -132,6 +148,7 @@ export class ZiController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async analyzeHandwriting(@Body() dto: AnalyzeHandwritingDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
+    let consumeRecordId: string | undefined;
     try {
       const [ocrResult, visionHw] = await Promise.all([
         this.ocrService.recognizeHandwriting(dto.image),
@@ -160,6 +177,7 @@ export class ZiController {
             error: consumed.message || '积分不足，请签到或前往积分商城获取',
           };
         }
+        consumeRecordId = consumed.recordId;
       }
 
       const chartCtx = await this.buildZiBaziContext(userId);
@@ -225,10 +243,17 @@ export class ZiController {
         analysis,
       };
     } catch (error) {
+      if (userId && consumeRecordId) {
+        await this.pointsService.rollbackConsumption(
+          userId,
+          consumeRecordId,
+          'zi_handwriting_failed',
+        );
+      }
       Logger.error(`analyze-handwriting 错误: ${(error as Error).message}`, undefined, ZiController.name);
       return {
         recognizedZi: null,
-        error: (error as Error).message || '服务器错误',
+        error: '测字生成失败，本次未扣积分，请稍后重试',
       };
     }
   }

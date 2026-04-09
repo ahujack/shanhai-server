@@ -5,8 +5,9 @@ import { CreateReadingDto } from './dto/create-reading.dto';
 import { PointsService } from '../points/points.service';
 import { PrismaService } from '../../prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { BILLING_RULES } from '../../config/billing-rules';
 
-const READING_POINTS_COST = parseInt(process.env.READING_POINTS_COST || '15', 10);
+const READING_POINTS_COST = BILLING_RULES.points.reading;
 
 @Controller('readings')
 export class ReadingController {
@@ -20,6 +21,7 @@ export class ReadingController {
   @UseGuards(JwtAuthGuard)
   async create(@Body() dto: CreateReadingDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
+    let consumeRecordId: string | undefined;
     if (userId) {
       const membership = await this.getMembership(userId);
       if (membership === 'free') {
@@ -32,9 +34,23 @@ export class ReadingController {
         if (!consumed.success) {
           throw new BadRequestException(consumed.message || '积分不足，请签到或前往积分商城获取');
         }
+        consumeRecordId = consumed.recordId;
       }
     }
-    const result = await this.readingService.generate({ ...dto, userId });
+    let result;
+    try {
+      result = await this.readingService.generate({ ...dto, userId });
+    } catch (error) {
+      if (userId && consumeRecordId) {
+        await this.pointsService.rollbackConsumption(
+          userId,
+          consumeRecordId,
+          'reading_generate_failed',
+        );
+      }
+      Logger.error('占卜生成失败，已尝试回滚积分', (error as Error).message, ReadingController.name);
+      throw new BadRequestException('占卜生成失败，本次未扣积分，请稍后重试');
+    }
 
     if (userId) {
       try {

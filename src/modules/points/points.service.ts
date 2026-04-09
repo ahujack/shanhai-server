@@ -122,7 +122,7 @@ export class PointsService implements OnModuleInit {
     points: number, 
     type: string, 
     description: string
-  ): Promise<{ success: boolean; message: string; remainingPoints?: number }> {
+  ): Promise<{ success: boolean; message: string; remainingPoints?: number; recordId?: string }> {
     if (this.isPointsGateDisabled()) {
       const userPoints = await this.prisma.userPoints.findUnique({
         where: { userId },
@@ -150,7 +150,7 @@ export class PointsService implements OnModuleInit {
         data: { availablePoints: { decrement: points } },
       });
       
-      await tx.pointRecord.create({
+      const record = await tx.pointRecord.create({
         data: {
           userId,
           points: -points,
@@ -167,6 +167,59 @@ export class PointsService implements OnModuleInit {
         success: true,
         message: '积分消费成功',
         remainingPoints: updated?.availablePoints ?? 0,
+        recordId: record.id,
+      };
+    });
+  }
+
+  /**
+   * 撤销一笔消费（用于“先扣费后执行”场景下的失败回滚）
+   * - 幂等：同一 record 多次回滚仅首个生效
+   * - 审计：保留原记录，将 points 置 0 并标记 rolled_back
+   */
+  async rollbackConsumption(
+    userId: string,
+    recordId: string,
+    reason = 'service_failed',
+  ): Promise<{ success: boolean; message: string; refundedPoints?: number }> {
+    if (!recordId) {
+      return { success: false, message: 'recordId 不能为空' };
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const record = await tx.pointRecord.findFirst({
+        where: { id: recordId, userId },
+      });
+      if (!record) {
+        return { success: false, message: '消费记录不存在' };
+      }
+      // 已回滚或非消费记录，视为幂等成功
+      if (record.points >= 0 || record.type.endsWith('_rolled_back')) {
+        return {
+          success: true,
+          message: '消费记录已回滚',
+          refundedPoints: Math.max(0, -record.points),
+        };
+      }
+      const refundPoints = Math.abs(record.points);
+      await tx.userPoints.update({
+        where: { userId },
+        data: { availablePoints: { increment: refundPoints } },
+      });
+      await tx.pointRecord.update({
+        where: { id: record.id },
+        data: {
+          points: 0,
+          type: `${record.type}_rolled_back`,
+          description: `${record.description || ''} [ROLLBACK:${reason}]`.trim(),
+        },
+      });
+      this.logger.warn(
+        `积分消费已回滚 userId=${userId} recordId=${record.id} refunded=${refundPoints} reason=${reason}`,
+      );
+      return {
+        success: true,
+        message: '消费已回滚',
+        refundedPoints: refundPoints,
       };
     });
   }
