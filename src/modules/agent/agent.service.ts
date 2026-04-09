@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
+import FormData from 'form-data';
 import { PrismaClient } from '@prisma/client';
 import { PersonaService, PersonaSchema } from '../persona/persona.service';
 import { ReadingService, DivinationCategory } from '../reading/reading.service';
@@ -9,6 +10,20 @@ import { AgentChatDto } from './dto/agent-chat.dto';
 
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
 type AgentAction = { type: string; label: string };
+
+function resolveSttTranscriptionsUrl(): string {
+  const raw =
+    process.env.LLM_STT_API_URL ||
+    process.env.STT_API_URL ||
+    process.env.LLM_API_URL ||
+    process.env.LLM_URL ||
+    '';
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.includes('/audio/transcriptions')) return trimmed;
+  if (trimmed.includes('/chat/completions')) return trimmed.replace('/chat/completions', '/audio/transcriptions');
+  return `${trimmed.replace(/\/$/, '')}/audio/transcriptions`;
+}
 
 @Injectable()
 export class AgentService {
@@ -1083,5 +1098,50 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 
     // 默认回复
     return `我听到了你的心绪。若想更进一步，可告诉我需要抽签、静坐还是查看命盘，我都在。`;
+  }
+
+  async transcribeAudio(buffer: Buffer, mimeType = 'audio/webm', filename = 'recording.webm'): Promise<string> {
+    if (!buffer || buffer.length === 0) {
+      throw new BadRequestException('音频内容为空');
+    }
+    const apiKey = process.env.LLM_API_KEY?.trim();
+    const endpoint = resolveSttTranscriptionsUrl();
+    const model = process.env.LLM_STT_MODEL?.trim() || 'whisper-1';
+    if (!apiKey || !endpoint) {
+      throw new BadRequestException('语音转写服务未配置，请设置 LLM_API_KEY 与 LLM_STT_API_URL');
+    }
+
+    const form = new FormData();
+    form.append('model', model);
+    form.append('language', 'zh');
+    form.append('response_format', 'json');
+    form.append('file', buffer, {
+      filename,
+      contentType: mimeType || 'audio/webm',
+    });
+
+    try {
+      const res = await axios.post(endpoint, form, {
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${apiKey}`,
+        },
+        timeout: 45000,
+        maxBodyLength: Infinity,
+      });
+      const text = String(res.data?.text || res.data?.transcript || '').trim();
+      if (!text) {
+        throw new BadRequestException('未识别到语音文本');
+      }
+      return text;
+    } catch (error) {
+      const msg =
+        (error as any)?.response?.data?.error?.message ||
+        (error as any)?.response?.data?.message ||
+        (error as Error)?.message ||
+        '语音转写失败';
+      this.logger.warn(`语音转写失败: ${msg}`);
+      throw new BadRequestException(`语音转写失败: ${msg}`);
+    }
   }
 }
