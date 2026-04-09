@@ -14,6 +14,18 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = '服务器内部错误';
     let error = 'Internal Server Error';
+    const ex = exception as any;
+
+    if (ex?.name === 'MulterError') {
+      status = HttpStatus.BAD_REQUEST;
+      const code = String(ex?.code || '');
+      if (code === 'LIMIT_FILE_SIZE') {
+        message = '音频文件过大，请缩短录音后重试';
+      } else {
+        message = `音频上传失败：${ex?.message || '文件格式或大小不符合要求'}`;
+      }
+      error = 'Bad Request';
+    } else
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
