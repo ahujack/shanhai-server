@@ -27,28 +27,34 @@ function resolveSttTranscriptionsUrl(): string {
 
 let cachedTencentAsrClientCtor: any | null | undefined = undefined;
 
+function safeRequire(modulePath: string): any | null {
+  try {
+    // 使用 eval 规避 TypeScript 对子路径模块的静态解析报错（TS2307）
+    const req = (0, eval)('require');
+    return req(modulePath);
+  } catch {
+    return null;
+  }
+}
+
 async function resolveTencentAsrClientCtor(): Promise<any | null> {
   if (cachedTencentAsrClientCtor !== undefined) return cachedTencentAsrClientCtor;
-  const candidates = [
-    () => import('tencentcloud-sdk-nodejs'),
-    () => import('tencentcloud-sdk-nodejs/tencentcloud/services/asr/v20190614/asr_client'),
-    () => import('tencentcloud-sdk-nodejs/es/services/asr/v20190614/asr_client'),
+  const modules = [
+    safeRequire('tencentcloud-sdk-nodejs'),
+    safeRequire('tencentcloud-sdk-nodejs/tencentcloud/services/asr/v20190614/asr_client'),
+    safeRequire('tencentcloud-sdk-nodejs/es/services/asr/v20190614/asr_client'),
   ];
-  for (const load of candidates) {
-    try {
-      const mod = (await load()) as any;
-      const clientCtor =
-        mod?.asr?.v20190614?.Client ||
-        mod?.default?.asr?.v20190614?.Client ||
-        mod?.Client ||
-        mod?.default?.Client ||
-        null;
-      if (clientCtor) {
-        cachedTencentAsrClientCtor = clientCtor;
-        return clientCtor;
-      }
-    } catch {
-      // ignore and continue to next candidate
+  for (const mod of modules) {
+    if (!mod) continue;
+    const clientCtor =
+      mod?.asr?.v20190614?.Client ||
+      mod?.default?.asr?.v20190614?.Client ||
+      mod?.Client ||
+      mod?.default?.Client ||
+      null;
+    if (clientCtor) {
+      cachedTencentAsrClientCtor = clientCtor;
+      return clientCtor;
     }
   }
   cachedTencentAsrClientCtor = null;
