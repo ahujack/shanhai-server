@@ -93,6 +93,26 @@ export class AgentService {
     return hasQuestionSignals;
   }
 
+  private isSimpleGreeting(message: string): boolean {
+    const text = String(message || '').trim();
+    if (!text || text.length > 20) return false;
+    return /^(你好|您好|嗨|哈喽|hello|hi|早上好|上午好|中午好|下午好|晚上好|在吗|在不在|你好呀|你好啊|晚安)$/i.test(text);
+  }
+
+  private resolveTimeLabel(clientLocalHour?: number): string {
+    const h = Number.isInteger(clientLocalHour) ? Number(clientLocalHour) : new Date().getHours();
+    if (h >= 0 && h < 6) return '凌晨';
+    if (h < 11) return '早上';
+    if (h < 14) return '中午';
+    if (h < 19) return '下午';
+    return '晚上';
+  }
+
+  private buildGreetingReply(clientLocalHour?: number): string {
+    const label = this.resolveTimeLabel(clientLocalHour);
+    return `${label}好，很高兴见到你。\n\n今天你想轻松聊聊，还是让我陪你把一个具体问题理清楚？`;
+  }
+
   private async buildIntentArtifacts(
     intent: AgentIntent,
     dto: AgentChatDto,
@@ -182,6 +202,38 @@ export class AgentService {
       }
     }
 
+    if (this.isSimpleGreeting(dto.message)) {
+      const reply = this.buildGreetingReply(dto.clientLocalHour);
+      yield { type: 'chunk', content: reply };
+      if (dto.userId) {
+        try {
+          await this.prisma.chatMessage.create({
+            data: {
+              userId: dto.userId,
+              message: dto.message,
+              reply,
+              intent: 'chat',
+              personaId: dto.personaId,
+              mood: dto.mood || undefined,
+              artifacts: JSON.stringify({}),
+            },
+          });
+        } catch {
+          // ignore
+        }
+      }
+      yield {
+        type: 'done',
+        persona: persona.id,
+        intent: 'chat',
+        reply,
+        actions: [],
+        artifacts: {},
+        hasChart: !!userChart,
+      };
+      return;
+    }
+
     const classified = await this.classifyWithDeepSeek(dto, persona, userChart);
     const intent = this.refineIntentByReadiness(classified.intent, dto);
     const intentResult = await this.buildIntentArtifacts(
@@ -268,6 +320,35 @@ export class AgentService {
       } catch (error) {
         this.logger.warn(`获取用户命盘失败: ${(error as Error).message}`);
       }
+    }
+
+    if (this.isSimpleGreeting(dto.message)) {
+      const reply = this.buildGreetingReply(dto.clientLocalHour);
+      if (dto.userId) {
+        try {
+          await this.prisma.chatMessage.create({
+            data: {
+              userId: dto.userId,
+              message: dto.message,
+              reply,
+              intent: 'chat',
+              personaId: dto.personaId,
+              mood: dto.mood || undefined,
+              artifacts: JSON.stringify({}),
+            },
+          });
+        } catch (error) {
+          this.logger.error('保存聊天记录失败', (error as Error).message);
+        }
+      }
+      return {
+        persona: persona.id,
+        intent: 'chat',
+        reply,
+        actions: [],
+        artifacts: {},
+        hasChart: !!userChart,
+      };
     }
     
     const classified = await this.classifyWithDeepSeek(dto, persona, userChart);
