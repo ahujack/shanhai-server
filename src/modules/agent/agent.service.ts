@@ -666,6 +666,9 @@ ${contextInfo}`,
         text = text.replace(new RegExp(`^${escapedName}\\s*[，,:：]\\s*`, 'u'), '');
       }
     }
+    // 去掉 markdown 强调，避免出现 **晨起叩齿** 这类格式噪音
+    text = text.replace(/\*\*([^*]+)\*\*/g, '$1');
+    text = text.replace(/\*([^*\n]+)\*/g, '$1');
     text = text.replace(/[，,][。！？!?]/g, '。');
     text = text.replace(/\n{3,}/g, '\n\n').trim();
     return text;
@@ -788,7 +791,9 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
               const parsed = JSON.parse(data);
               const content = parsed?.choices?.[0]?.delta?.content;
               if (content) {
-                fullContent += content;
+                const cleanedChunk = content.replace(/\*\*/g, '').replace(/\*([^*\n]+)\*/g, '$1');
+                fullContent += cleanedChunk;
+                yield cleanedChunk;
               }
             } catch {
               // ignore parse errors
@@ -797,13 +802,10 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
         }
       }
 
-      const safeContent = this.sanitizeAssistantReply(fullContent, persona.name);
-      if (!safeContent.trim()) {
+      if (!fullContent.trim()) {
         yield this.getDefaultChatReply(persona, userChart);
-      } else {
-        yield safeContent;
       }
-      this.logger.log(`LLM(stream) completed duration=${Date.now() - startedAt}ms size=${safeContent.length}`);
+      this.logger.log(`LLM(stream) completed duration=${Date.now() - startedAt}ms size=${fullContent.length}`);
     } catch (error) {
       this.logger.error(`DeepSeek 流式生成失败: ${(error as Error).message}`);
       yield this.getDefaultChatReply(persona, userChart);
