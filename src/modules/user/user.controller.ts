@@ -15,6 +15,7 @@ import { UserService } from './user.service';
 import type { CreateUserDto } from './user.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
+import { AdminGrantMembershipDto, AdminGrantPointsDto } from './dto/admin-user-ops.dto';
 
 @Controller('users')
 export class UserController {
@@ -42,6 +43,34 @@ export class UserController {
   @UseGuards(RequireAuthGuard, AdminGuard)
   findAll() {
     return this.userService.findAll();
+  }
+
+  @Post('admin/:id/grant-points')
+  @UseGuards(RequireAuthGuard, AdminGuard)
+  grantPoints(
+    @Param('id') id: string,
+    @Body() dto: AdminGrantPointsDto,
+    @Req() req: { user: { sub?: string; id?: string } },
+  ) {
+    const operatorId = String(req.user?.sub || req.user?.id || '');
+    if (!operatorId) {
+      throw new BadRequestException('请先登录');
+    }
+    return this.userService.adminGrantPoints(operatorId, id, dto.points, dto.reason);
+  }
+
+  @Post('admin/:id/grant-membership')
+  @UseGuards(RequireAuthGuard, AdminGuard)
+  grantMembership(
+    @Param('id') id: string,
+    @Body() dto: AdminGrantMembershipDto,
+    @Req() req: { user: { sub?: string; id?: string } },
+  ) {
+    const operatorId = String(req.user?.sub || req.user?.id || '');
+    if (!operatorId) {
+      throw new BadRequestException('请先登录');
+    }
+    return this.userService.adminGrantMembership(operatorId, id, dto.membership, dto.days, dto.reason);
   }
 
   @Get(':id')

@@ -506,6 +506,123 @@ export class UserService {
     return this.formatUser(user);
   }
 
+  // 管理员手动发积分（用于补偿、活动或测试）
+  async adminGrantPoints(
+    operatorId: string,
+    userId: string,
+    points: number,
+    reason?: string,
+  ): Promise<{ user: UserProfile; points: { totalPoints: number; availablePoints: number } }> {
+    const target = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!target) {
+      throw new NotFoundException('目标用户不存在');
+    }
+    const safeReason = reason?.trim().slice(0, 200) || '管理员手动发放';
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userPoints.upsert({
+        where: { userId },
+        create: {
+          userId,
+          totalPoints: points,
+          availablePoints: points,
+        },
+        update: {
+          totalPoints: { increment: points },
+          availablePoints: { increment: points },
+        },
+      });
+      await tx.pointRecord.create({
+        data: {
+          userId,
+          points,
+          type: 'bonus',
+          description: `${safeReason}（admin:${operatorId}）`,
+        },
+      });
+      await tx.analyticsEvent.create({
+        data: {
+          userId,
+          name: 'admin_grant_points',
+          props: {
+            operatorId,
+            points,
+            reason: safeReason,
+          },
+        },
+      });
+    });
+
+    const [updatedUser, summary] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: userId } }),
+      this.prisma.userPoints.findUnique({ where: { userId } }),
+    ]);
+    if (!updatedUser || !summary) {
+      throw new NotFoundException('积分发放后读取用户信息失败');
+    }
+    return {
+      user: this.formatUser(updatedUser),
+      points: {
+        totalPoints: summary.totalPoints,
+        availablePoints: summary.availablePoints,
+      },
+    };
+  }
+
+  // 管理员手动开通/调整会员
+  async adminGrantMembership(
+    operatorId: string,
+    userId: string,
+    membership: 'free' | 'premium' | 'vip',
+    days = 30,
+    reason?: string,
+  ): Promise<UserProfile> {
+    const target = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, membershipExpiryAt: true },
+    });
+    if (!target) {
+      throw new NotFoundException('目标用户不存在');
+    }
+
+    const now = new Date();
+    const safeReason = reason?.trim().slice(0, 200) || '管理员手动调整会员';
+    const safeDays = Math.max(1, Math.min(days, 3650));
+
+    let membershipExpiryAt: Date | null = null;
+    if (membership !== 'free') {
+      const base =
+        target.membershipExpiryAt && target.membershipExpiryAt > now
+          ? target.membershipExpiryAt
+          : now;
+      membershipExpiryAt = new Date(base.getTime() + safeDays * 24 * 60 * 60 * 1000);
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        membership,
+        membershipExpiryAt,
+      },
+    });
+
+    await this.prisma.analyticsEvent.create({
+      data: {
+        userId,
+        name: 'admin_grant_membership',
+        props: {
+          operatorId,
+          membership,
+          days: membership === 'free' ? 0 : safeDays,
+          reason: safeReason,
+          expiresAt: membershipExpiryAt ? membershipExpiryAt.toISOString() : null,
+        },
+      },
+    });
+
+    return this.formatUser(updated);
+  }
+
   // 格式化用户数据（移除敏感信息）
   private formatUser(user: any): UserProfile {
     const { password, ...result } = user;
