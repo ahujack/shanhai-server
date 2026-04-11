@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>山海灵境 · 运营看板</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f0a18;
+      --card: #1a1228;
+      --border: #2c1d3c;
+      --text: #e8e0f0;
+      --muted: #9a8aa8;
+      --accent: #c9a227;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 24px 16px 48px;
+    }
+    h1 { font-size: 1.35rem; margin: 0 0 8px; }
+    p.sub { color: var(--muted); margin: 0 0 20px; font-size: 0.9rem; }
+    .grid { display: grid; gap: 16px; }
+    @media (min-width: 900px) {
+      .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+    .card h2 { margin: 0 0 12px; font-size: 1rem; color: var(--accent); }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #120c1c;
+      color: var(--text);
+      margin-bottom: 10px;
+    }
+    button {
+      cursor: pointer;
+      padding: 10px 18px;
+      border-radius: 8px;
+      border: none;
+      background: linear-gradient(135deg, #5b3a9e, #3d2a6b);
+      color: #fff;
+      font-weight: 600;
+    }
+    button.secondary { background: #2a2038; color: var(--text); border: 1px solid var(--border); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 500; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #2a2038; font-size: 0.75rem; }
+    .err { color: #f87171; font-size: 0.85rem; margin-top: 8px; }
+    pre { white-space: pre-wrap; word-break: break-all; font-size: 0.75rem; color: var(--muted); max-height: 220px; overflow: auto; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>山海灵境 · 运营看板</h1>
+  <p class="sub">查看埋点汇总、登录记录、聊天意图分布与用户主观反馈。需数据库中 <span class="pill">role=admin</span> 的账号登录。</p>
+
+  <div id="login-panel" class="card" style="max-width:420px">
+    <h2>管理员登录</h2>
+    <label>邮箱</label>
+    <input id="email" type="email" autocomplete="username" placeholder="admin@example.com" />
+    <label>密码</label>
+    <input id="password" type="password" autocomplete="current-password" />
+    <div class="row">
+      <button type="button" id="btn-login">登录并加载数据</button>
+    </div>
+    <div id="login-err" class="err hidden"></div>
+  </div>
+
+  <div id="dash" class="hidden">
+    <div class="row" style="margin-bottom:16px">
+      <button type="button" class="secondary" id="btn-logout">退出登录</button>
+      <span class="pill" id="who"></span>
+    </div>
+    <div class="grid cols-2">
+      <div class="card">
+        <h2>概览（可调天数）</h2>
+        <label>统计最近天数</label>
+        <input id="days" type="number" min="1" max="365" value="30" style="max-width:120px" />
+        <div class="row">
+          <button type="button" id="btn-refresh">刷新概览</button>
+        </div>
+        <pre id="overview-json"></pre>
+      </div>
+      <div class="card">
+        <h2>最近登录（埋点）</h2>
+        <button type="button" id="btn-logins">加载登录记录</button>
+        <div style="overflow:auto;max-height:360px;margin-top:10px">
+          <table id="tbl-logins"><thead><tr><th>时间</th><th>用户</th><th>地区/IP</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>用户列表（资料里的地区/时区）</h2>
+        <button type="button" id="btn-users">加载用户</button>
+        <div style="overflow:auto;max-height:320px;margin-top:10px">
+          <table id="tbl-users"><thead><tr><th>邮箱</th><th>地区</th><th>时区</th><th>注册</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>主观反馈</h2>
+        <button type="button" id="btn-feedback">加载反馈</button>
+        <div style="overflow:auto;max-height:360px;margin-top:10px">
+          <table id="tbl-feedback"><thead><tr><th>时间</th><th>分类</th><th>评分</th><th>用户</th><th>留言</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var TOKEN_KEY = 'shanhai_admin_token';
+      function apiBase() {
+        return window.location.origin;
+      }
+      function getToken() {
+        try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
+      }
+      function setToken(t) {
+        try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+      }
+      function authHeaders() {
+        var t = getToken();
+        return { 'Content-Type': 'application/json', Authorization: t ? 'Bearer ' + t : '' };
+      }
+      async function api(path, opts) {
+        var res = await fetch(apiBase() + '/api' + path, Object.assign({ headers: authHeaders() }, opts || {}));
+        var data;
+        try { data = await res.json(); } catch (e) { data = {}; }
+        if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+        return data;
+      }
+      function showErr(id, msg) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = msg || '';
+        el.classList.toggle('hidden', !msg);
+      }
+      document.getElementById('btn-login').onclick = async function () {
+        var email = document.getElementById('email').value.trim();
+        var password = document.getElementById('password').value;
+        showErr('login-err', '');
+        if (!email || !password) { showErr('login-err', '请输入邮箱和密码'); return; }
+        this.disabled = true;
+        try {
+          var r = await fetch(apiBase() + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email, password: password }),
+          });
+          var body = await r.json();
+          if (!body.success || !body.token) throw new Error(body.message || '登录失败');
+          if (body.user && body.user.role !== 'admin') throw new Error('该账号不是管理员');
+          setToken(body.token);
+          document.getElementById('login-panel').classList.add('hidden');
+          document.getElementById('dash').classList.remove('hidden');
+          document.getElementById('who').textContent = body.user.email;
+          await loadOverview();
+        } catch (e) {
+          showErr('login-err', e.message || String(e));
+        } finally {
+          this.disabled = false;
+        }
+      };
+      async function loadOverview() {
+        var days = parseInt(document.getElementById('days').value, 10) || 30;
+        var o = await api('/admin/analytics/overview?days=' + days);
+        document.getElementById('overview-json').textContent = JSON.stringify(o, null, 2);
+      }
+      document.getElementById('btn-refresh').onclick = function () { loadOverview().catch(function (e) { alert(e.message); }); };
+      document.getElementById('btn-logout').onclick = function () {
+        setToken('');
+        document.getElementById('dash').classList.add('hidden');
+        document.getElementById('login-panel').classList.remove('hidden');
+      };
+      document.getElementById('btn-logins').onclick = async function () {
+        this.disabled = true;
+        try {
+          var rows = await api('/admin/analytics/logins?limit=100');
+          var tb = document.querySelector('#tbl-logins tbody');
+          tb.innerHTML = '';
+          rows.forEach(function (r) {
+            var tr = document.createElement('tr');
+            var u = r.user || {};
+            tr.innerHTML =
+              '<td>' + (r.at || '') + '</td>' +
+              '<td>' + (u.email || '—') + '<br/><span class="pill">' + (u.name || '') + '</span></td>' +
+              '<td>' + (r.country || '—') + '<br/><small>' + (r.ip || '') + '</small></td>';
+            tb.appendChild(tr);
+          });
+        } catch (e) {
+          alert(e.message);
+        } finally {
+          this.disabled = false;
+        }
+      };
+      document.getElementById('btn-users').onclick = async function () {
+        this.disabled = true;
+        try {
+          var list = await api('/users');
+          var tb = document.querySelector('#tbl-users tbody');
+          tb.innerHTML = '';
+          (list || []).forEach(function (u) {
+            var tr = document.createElement('tr');
+            tr.innerHTML =
+              '<td>' + (u.email || '') + '</td>' +
+              '<td>' + (u.location || '—') + '</td>' +
+              '<td>' + (u.timezone || '—') + '</td>' +
+              '<td><small>' + (u.createdAt || '') + '</small></td>';
+            tb.appendChild(tr);
+          });
+        } catch (e) {
+          alert(e.message);
+        } finally {
+          this.disabled = false;
+        }
+      };
+      document.getElementById('btn-feedback').onclick = async function () {
+        this.disabled = true;
+        try {
+          var page = await api('/admin/analytics/feedback?page=1&pageSize=50');
+          var tb = document.querySelector('#tbl-feedback tbody');
+          tb.innerHTML = '';
+          (page.items || []).forEach(function (f) {
+            var tr = document.createElement('tr');
+            var ue = f.user ? f.user.email : '—';
+            tr.innerHTML =
+              '<td><small>' + (f.createdAt || '') + '</small></td>' +
+              '<td>' + (f.category || '') + '</td>' +
+              '<td>' + (f.rating != null ? f.rating + ' / 5' : '—') + '</td>' +
+              '<td><small>' + ue + '</small></td>' +
+              '<td>' + (f.comment || '') + '</td>';
+            tb.appendChild(tr);
+          });
+        } catch (e) {
+          alert(e.message);
+        } finally {
+          this.disabled = false;
+        }
+      };
+      if (getToken()) {
+        document.getElementById('login-panel').classList.add('hidden');
+        document.getElementById('dash').classList.remove('hidden');
+        document.getElementById('who').textContent = '已保存 token';
+        loadOverview().catch(function () {
+          setToken('');
+          document.getElementById('dash').classList.add('hidden');
+          document.getElementById('login-panel').classList.remove('hidden');
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -56,6 +56,52 @@ model User {
   userPoints    UserPoints?
   pointRecords  PointRecord[]
   payments     Payment[]
+
+  analyticsEvents AnalyticsEvent[]
+  feedbacks       UserFeedback[]
+}
+
+/// 客户端或服务端埋点（登录、页面曝光、功能使用等）
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  name      String
+  props     Json?
+
+  locale    String?
+  timezone  String?
+  region    String?
+
+  ip        String?
+  country   String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([name])
+  @@index([createdAt])
+  @@index([country])
+}
+
+/// 用户对占卜/测字等准确度的主观反馈
+model UserFeedback {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  category  String
+  rating    Int?
+  comment   String?
+  context   Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([category])
+  @@index([createdAt])
 }
 
 // 聊天消息模型

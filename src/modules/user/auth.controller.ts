@@ -11,6 +11,7 @@ import {
   forwardRef,
   UseGuards,
   Logger,
+  Req,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { JwtService } from '@nestjs/jwt';
@@ -26,6 +27,8 @@ import {
   ResetPasswordDto 
 } from '../auth/dto/auth.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AnalyticsService } from '../analytics/analytics.service';
+import type { Request } from 'express';
 
 @Controller('auth')
 export class AuthController {
@@ -33,6 +36,7 @@ export class AuthController {
 
   constructor(
     private readonly userService: UserService,
+    private readonly analyticsService: AnalyticsService,
     @Inject(forwardRef(() => JwtService)) private readonly jwtService?: JwtService,
     @Inject(forwardRef(() => MailService)) private readonly mailService?: MailService,
   ) {}
@@ -112,7 +116,7 @@ export class AuthController {
   // 注册
   @Post('register')
   @HttpCode(HttpStatus.OK)
-  async register(@Body() dto: RegisterDto) {
+  async register(@Body() dto: RegisterDto, @Req() req: Request) {
     const { email, password, code, name, referralCode } = dto;
     
     // 验证密码长度
@@ -140,6 +144,16 @@ export class AuthController {
       ? this.jwtService.sign(payload)
       : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
 
+    try {
+      void this.analyticsService.recordFromRequest(req, {
+        userId: user.id,
+        name: 'register',
+        props: { referral: !!referralCode },
+      });
+    } catch {
+      /* 埋点失败不影响注册 */
+    }
+
     return {
       success: true,
       token,
@@ -156,7 +170,7 @@ export class AuthController {
   // 密码登录
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Body() dto: LoginDto) {
+  async login(@Body() dto: LoginDto, @Req() req: Request) {
     const { email, password, code } = dto;
     
     if (!email) {
@@ -176,6 +190,16 @@ export class AuthController {
       const token = this.jwtService
         ? this.jwtService.sign(payload)
         : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
+
+      try {
+        void this.analyticsService.recordFromRequest(req, {
+          userId: user.id,
+          name: 'login',
+          props: { method: 'password' },
+        });
+      } catch {
+        /* ignore */
+      }
 
       return {
         success: true,
@@ -203,6 +227,16 @@ export class AuthController {
         ? this.jwtService.sign(payload)
         : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
 
+      try {
+        void this.analyticsService.recordFromRequest(req, {
+          userId: user.id,
+          name: 'login',
+          props: { method: 'code' },
+        });
+      } catch {
+        /* ignore */
+      }
+
       return {
         success: true,
         token,
@@ -222,7 +256,7 @@ export class AuthController {
   // 第三方登录（谷歌/Facebook）
   @Post('social-login')
   @HttpCode(HttpStatus.OK)
-  async socialLogin(@Body() dto: SocialLoginDto) {
+  async socialLogin(@Body() dto: SocialLoginDto, @Req() req: Request) {
     let userInfo: { email?: string; name?: string; sub?: string } | null = null;
 
     if (dto.provider === 'google') {
@@ -255,6 +289,16 @@ export class AuthController {
     const token = this.jwtService
       ? this.jwtService.sign(payload)
       : Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
+
+    try {
+      void this.analyticsService.recordFromRequest(req, {
+        userId: user.id,
+        name: 'login',
+        props: { method: 'social', provider: dto.provider },
+      });
+    } catch {
+      /* ignore */
+    }
 
     return {
       success: true,

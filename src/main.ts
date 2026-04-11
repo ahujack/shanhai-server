@@ -56,6 +56,9 @@ async function bootstrap() {
   // 全局日志拦截器
   app.useGlobalInterceptors(new LoggingInterceptor());
 
+  // 内置管理看板（静态页）：部署后与 API 同源，打开 /admin/index.html
+  app.useStaticAssets(path.join(__dirname, '..', 'public'), { index: false });
+
   const port = process.env.PORT ?? 3000;
   
   await app.listen(port);

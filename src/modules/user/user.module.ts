@@ -7,6 +7,7 @@ import { AdminGuard } from '../auth/admin.guard';
 import { MailModule } from '../mail/mail.module';
 import { PointsModule } from '../points/points.module';
 import { AchievementModule } from '../achievement/achievement.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { getJwtSecret } from '../../config/production-env';
 
 @Module({
@@ -19,6 +20,7 @@ import { getJwtSecret } from '../../config/production-env';
     MailModule,
     forwardRef(() => PointsModule),
     forwardRef(() => AchievementModule),
+    AnalyticsModule,
   ],
   controllers: [UserController, AuthController],
   providers: [UserService, AdminGuard],
