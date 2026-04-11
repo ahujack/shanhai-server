@@ -56,10 +56,18 @@ interface VerificationCode {
   code: string;
   expiresAt: number;
 }
+type VerificationCodePurpose = 'login' | 'register' | 'reset';
+type VerifyCodeFailReason = 'not_found' | 'expired' | 'mismatch' | 'locked';
+export interface VerifyCodeResult {
+  ok: boolean;
+  reason?: VerifyCodeFailReason;
+  retryAfterSec?: number;
+}
 
 @Injectable()
 export class UserService {
   private verificationCodes: Map<string, VerificationCode> = new Map();
+  private lastVerificationCleanupAt = 0;
 
   // 中国传统特色头像 - 使用Emoji作为头像
   private readonly traditionalAvatars = [
@@ -87,6 +95,10 @@ export class UserService {
 
   // 验证码有效期：5分钟
   private readonly CODE_EXPIRE_TIME = 5 * 60 * 1000;
+  // 过期验证码清理节流（避免每次发码都全表 deleteMany）
+  private readonly VERIFICATION_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+  private readonly VERIFICATION_MAX_FAILED_ATTEMPTS = 5;
+  private readonly VERIFICATION_LOCK_MS = 10 * 60 * 1000;
 
   // 密码哈希轮数
   private readonly BCRYPT_ROUNDS = 10;
@@ -365,34 +377,149 @@ export class UserService {
     return `${surname}${givenA}${givenB}${suffix}`;
   }
 
+  private normalizeVerificationIdentifier(identifier: string): string {
+    return String(identifier || '').trim().toLowerCase();
+  }
+
+  private buildVerificationKey(identifier: string, purpose: VerificationCodePurpose): string {
+    return `${identifier}::${purpose}`;
+  }
+
+  private async cleanupExpiredVerificationCodesIfNeeded(nowMs = Date.now()): Promise<void> {
+    if (nowMs - this.lastVerificationCleanupAt < this.VERIFICATION_CLEANUP_INTERVAL_MS) return;
+    this.lastVerificationCleanupAt = nowMs;
+    await this.prisma.verificationCode
+      .deleteMany({ where: { expiresAt: { lt: new Date(nowMs) } } })
+      .catch(() => null);
+  }
+
   // 存储验证码
-  storeCode(identifier: string, code: string): void {
-    this.verificationCodes.set(identifier, {
+  async storeCode(identifier: string, code: string, purpose: VerificationCodePurpose = 'login'): Promise<void> {
+    const normalizedIdentifier = this.normalizeVerificationIdentifier(identifier);
+    const key = this.buildVerificationKey(normalizedIdentifier, purpose);
+    this.verificationCodes.set(key, {
       code,
       expiresAt: Date.now() + this.CODE_EXPIRE_TIME,
     });
+    try {
+      const expiresAt = new Date(Date.now() + this.CODE_EXPIRE_TIME);
+      await this.prisma.verificationCode.upsert({
+        where: {
+          identifier_purpose: {
+            identifier: normalizedIdentifier,
+            purpose,
+          },
+        },
+        create: {
+          identifier: normalizedIdentifier,
+          purpose,
+          code,
+          expiresAt,
+          failedAttempts: 0,
+          lockedUntil: null,
+        },
+        update: {
+          code,
+          expiresAt,
+          failedAttempts: 0,
+          lockedUntil: null,
+        },
+      });
+      await this.cleanupExpiredVerificationCodesIfNeeded();
+    } catch (error) {
+      console.error('验证码持久化失败，已回退内存存储:', error);
+    }
   }
 
   // 验证验证码
-  verifyCode(identifier: string, code: string): boolean {
-    const stored = this.verificationCodes.get(identifier);
+  async verifyCode(identifier: string, code: string, purpose: VerificationCodePurpose = 'login'): Promise<VerifyCodeResult> {
+    const nowMs = Date.now();
+    const normalizedIdentifier = this.normalizeVerificationIdentifier(identifier);
+    const key = this.buildVerificationKey(normalizedIdentifier, purpose);
+    let stored = this.verificationCodes.get(key);
+    let persistedRow: {
+      code: string;
+      expiresAt: Date;
+      failedAttempts: number;
+      lockedUntil: Date | null;
+    } | null = null;
+    try {
+      const persisted = await this.prisma.verificationCode.findUnique({
+        where: {
+          identifier_purpose: {
+            identifier: normalizedIdentifier,
+            purpose,
+          },
+        },
+      });
+      if (persisted) {
+        persistedRow = {
+          code: persisted.code,
+          expiresAt: persisted.expiresAt,
+          failedAttempts: persisted.failedAttempts || 0,
+          lockedUntil: persisted.lockedUntil || null,
+        };
+        stored = {
+          code: persisted.code,
+          expiresAt: persisted.expiresAt.getTime(),
+        };
+        this.verificationCodes.set(key, stored);
+      }
+    } catch (error) {
+      console.error('读取验证码持久化记录失败，回退内存校验:', error);
+    }
+
     if (!stored) {
-      return false;
+      return { ok: false, reason: 'not_found' };
+    }
+
+    const lockedUntilMs = persistedRow?.lockedUntil ? persistedRow.lockedUntil.getTime() : 0;
+    if (lockedUntilMs > nowMs) {
+      const retryAfterSec = Math.max(1, Math.ceil((lockedUntilMs - nowMs) / 1000));
+      return { ok: false, reason: 'locked', retryAfterSec };
     }
 
     // 检查是否过期
-    if (Date.now() > stored.expiresAt) {
-      this.verificationCodes.delete(identifier);
-      return false;
+    if (nowMs > stored.expiresAt) {
+      this.verificationCodes.delete(key);
+      await this.prisma.verificationCode
+        .deleteMany({
+          where: { identifier: normalizedIdentifier, purpose },
+        })
+        .catch(() => null);
+      return { ok: false, reason: 'expired' };
     }
 
     // 验证成功，删除验证码
     if (stored.code === code) {
-      this.verificationCodes.delete(identifier);
-      return true;
+      this.verificationCodes.delete(key);
+      await this.prisma.verificationCode
+        .deleteMany({
+          where: { identifier: normalizedIdentifier, purpose },
+        })
+        .catch(() => null);
+      return { ok: true };
     }
 
-    return false;
+    const nextFailedAttempts = (persistedRow?.failedAttempts || 0) + 1;
+    const shouldLock = nextFailedAttempts >= this.VERIFICATION_MAX_FAILED_ATTEMPTS;
+    const lockUntil = shouldLock ? new Date(nowMs + this.VERIFICATION_LOCK_MS) : null;
+    await this.prisma.verificationCode
+      .updateMany({
+        where: { identifier: normalizedIdentifier, purpose },
+        data: {
+          failedAttempts: nextFailedAttempts,
+          lockedUntil: lockUntil,
+        },
+      })
+      .catch(() => null);
+    return shouldLock
+      ? {
+          ok: false,
+          reason: 'locked',
+          retryAfterSec: Math.ceil(this.VERIFICATION_LOCK_MS / 1000),
+        }
+      : { ok: false, reason: 'mismatch' };
   }
 
   // 通过邮箱查找或创建用户

@@ -65,6 +65,15 @@
     .err { color: #f87171; font-size: 0.85rem; margin-top: 8px; }
     pre { white-space: pre-wrap; word-break: break-all; font-size: 0.75rem; color: var(--muted); max-height: 220px; overflow: auto; }
     .hidden { display: none !important; }
+    mark.hit {
+      background: rgba(201, 162, 39, 0.28);
+      color: #ffe7a3;
+      padding: 0 2px;
+      border-radius: 3px;
+    }
+    tr.row-focus td {
+      background: rgba(91, 58, 158, 0.22);
+    }
   </style>
 </head>
 <body>
@@ -107,6 +116,8 @@
       </div>
       <div class="card">
         <h2>用户列表（资料里的地区/时区）</h2>
+        <label>按用户名 / 邮箱搜索</label>
+        <input id="users-search" type="text" placeholder="输入关键词实时筛选" />
         <button type="button" id="btn-users">加载用户</button>
         <div style="overflow:auto;max-height:320px;margin-top:10px">
           <table id="tbl-users"><thead><tr><th>用户名</th><th>邮箱</th><th>地区</th><th>时区</th><th>注册</th><th>权益操作</th></tr></thead><tbody></tbody></table>
@@ -150,6 +161,82 @@
         if (!el) return;
         el.textContent = msg || '';
         el.classList.toggle('hidden', !msg);
+      }
+      var usersCache = [];
+      var activeUserId = '';
+      function escapeHtml(value) {
+        return String(value == null ? '' : value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+      function highlightMatch(text, keyword) {
+        var raw = String(text == null ? '' : text);
+        if (!keyword) return escapeHtml(raw);
+        var lowerRaw = raw.toLowerCase();
+        var lowerKey = keyword.toLowerCase();
+        var start = lowerRaw.indexOf(lowerKey);
+        if (start < 0) return escapeHtml(raw);
+        var end = start + keyword.length;
+        return (
+          escapeHtml(raw.slice(0, start)) +
+          '<mark class="hit">' + escapeHtml(raw.slice(start, end)) + '</mark>' +
+          escapeHtml(raw.slice(end))
+        );
+      }
+      function renderUsersTable(list) {
+        var keyword = (document.getElementById('users-search').value || '').trim();
+        var tb = document.querySelector('#tbl-users tbody');
+        tb.innerHTML = '';
+        (list || []).forEach(function (u) {
+          var tr = document.createElement('tr');
+          tr.setAttribute('data-user-id', u.id || '');
+          if (activeUserId && String(u.id || '') === activeUserId) {
+            tr.classList.add('row-focus');
+          }
+          var displayName = (u.name || '').trim() || '—';
+          var displayEmail = (u.email || '').trim() || '—';
+          var displayUser = displayName + '（' + displayEmail + '）';
+          tr.innerHTML =
+            '<td>' + highlightMatch(displayName, keyword) + '</td>' +
+            '<td>' + highlightMatch(displayEmail, keyword) + '</td>' +
+            '<td>' + escapeHtml(u.location || '—') + '</td>' +
+            '<td>' + escapeHtml(u.timezone || '—') + '</td>' +
+            '<td><small>' + escapeHtml(u.createdAt || '') + '</small></td>' +
+            '<td>' +
+              '<div class="row" style="margin-top:0">' +
+                '<button type="button" class="secondary btn-grant-points" data-id="' + u.id + '" data-email="' + displayUser + '">补积分</button>' +
+                '<button type="button" class="secondary btn-grant-member" data-id="' + u.id + '" data-email="' + displayUser + '">开会员</button>' +
+              '</div>' +
+            '</td>';
+          tb.appendChild(tr);
+        });
+      }
+      function applyUserFilter() {
+        var keyword = (document.getElementById('users-search').value || '').trim().toLowerCase();
+        if (!keyword) {
+          renderUsersTable(usersCache);
+          return usersCache;
+        }
+        var filtered = usersCache.filter(function (u) {
+          var name = String(u && u.name || '').toLowerCase();
+          var email = String(u && u.email || '').toLowerCase();
+          return name.indexOf(keyword) >= 0 || email.indexOf(keyword) >= 0;
+        });
+        renderUsersTable(filtered);
+        return filtered;
+      }
+      function locateFirstUserMatch() {
+        var filtered = applyUserFilter();
+        activeUserId = filtered && filtered.length ? String(filtered[0].id || '') : '';
+        renderUsersTable(filtered || []);
+        if (!activeUserId) return;
+        var row = document.querySelector('#tbl-users tbody tr[data-user-id="' + activeUserId + '"]');
+        if (row && typeof row.scrollIntoView === 'function') {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
       }
       document.getElementById('btn-login').onclick = async function () {
         var email = document.getElementById('email').value.trim();
@@ -212,34 +299,21 @@
       document.getElementById('btn-users').onclick = async function () {
         this.disabled = true;
         try {
-          var list = await api('/users');
-          var tb = document.querySelector('#tbl-users tbody');
-          tb.innerHTML = '';
-          (list || []).forEach(function (u) {
-            var tr = document.createElement('tr');
-            var displayName = (u.name || '').trim() || '—';
-            var displayEmail = (u.email || '').trim() || '—';
-            var displayUser = displayName + '（' + displayEmail + '）';
-            tr.innerHTML =
-              '<td>' + displayName + '</td>' +
-              '<td>' + displayEmail + '</td>' +
-              '<td>' + (u.location || '—') + '</td>' +
-              '<td>' + (u.timezone || '—') + '</td>' +
-              '<td><small>' + (u.createdAt || '') + '</small></td>' +
-              '<td>' +
-                '<div class="row" style="margin-top:0">' +
-                  '<button type="button" class="secondary btn-grant-points" data-id="' + u.id + '" data-email="' + displayUser + '">补积分</button>' +
-                  '<button type="button" class="secondary btn-grant-member" data-id="' + u.id + '" data-email="' + displayUser + '">开会员</button>' +
-                '</div>' +
-              '</td>';
-            tb.appendChild(tr);
-          });
+          usersCache = await api('/users');
+          applyUserFilter();
         } catch (e) {
           alert(e.message);
         } finally {
           this.disabled = false;
         }
       };
+      document.getElementById('users-search').addEventListener('input', applyUserFilter);
+      document.getElementById('users-search').addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          locateFirstUserMatch();
+        }
+      });
 
       document.querySelector('#tbl-users tbody').addEventListener('click', async function (event) {
         var target = event.target;

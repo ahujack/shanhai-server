@@ -105,7 +105,7 @@ export class AuthController {
     }
 
     // 仅在发送成功后存储验证码（5分钟有效）
-    this.userService.storeCode(email, code);
+    await this.userService.storeCode(email, code, purpose || 'login');
 
     return {
       success: true,
@@ -125,8 +125,11 @@ export class AuthController {
     }
 
     // 验证验证码
-    const isValid = this.userService.verifyCode(email, code);
-    if (!isValid) {
+    const verifyRes = await this.userService.verifyCode(email, code, 'register');
+    if (!verifyRes.ok) {
+      if (verifyRes.reason === 'locked') {
+        return { success: false, message: `验证码输入错误次数过多，请 ${verifyRes.retryAfterSec || 600} 秒后重试` };
+      }
       return { success: false, message: '验证码错误或已过期' };
     }
 
@@ -214,8 +217,11 @@ export class AuthController {
       };
     } else if (code && code.length > 0) {
       // 验证码登录
-      const isValid = this.userService.verifyCode(email, code);
-      if (!isValid) {
+      const verifyRes = await this.userService.verifyCode(email, code, 'login');
+      if (!verifyRes.ok) {
+        if (verifyRes.reason === 'locked') {
+          return { success: false, message: `验证码输入错误次数过多，请 ${verifyRes.retryAfterSec || 600} 秒后重试` };
+        }
         return { success: false, message: '验证码错误或已过期' };
       }
       // 验证码登录时自动创建用户（如果不存在）
@@ -441,8 +447,11 @@ export class AuthController {
     }
 
     // 验证验证码
-    const isValid = this.userService.verifyCode(email, code);
-    if (!isValid) {
+    const verifyRes = await this.userService.verifyCode(email, code, 'reset');
+    if (!verifyRes.ok) {
+      if (verifyRes.reason === 'locked') {
+        return { success: false, message: `验证码输入错误次数过多，请 ${verifyRes.retryAfterSec || 600} 秒后重试` };
+      }
       return { success: false, message: '验证码错误或已过期' };
     }
 

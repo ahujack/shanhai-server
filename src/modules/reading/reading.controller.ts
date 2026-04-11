@@ -1,4 +1,4 @@
-import { Body, Controller, Post, BadRequestException, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, BadRequestException, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { ReadingService } from './reading.service';
 import { CreateReadingDto } from './dto/create-reading.dto';
@@ -21,21 +21,22 @@ export class ReadingController {
   @UseGuards(JwtAuthGuard)
   async create(@Body() dto: CreateReadingDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('请先登录后再进行占卜解读');
+    }
     let consumeRecordId: string | undefined;
-    if (userId) {
-      const membership = await this.getMembership(userId);
-      if (membership === 'free') {
-        const consumed = await this.pointsService.consumePoints(
-          userId,
-          READING_POINTS_COST,
-          'reading',
-          `占卜解读${dto.category ? `（${dto.category}）` : ''}`,
-        );
-        if (!consumed.success) {
-          throw new BadRequestException(consumed.message || '积分不足，请签到或前往积分商城获取');
-        }
-        consumeRecordId = consumed.recordId;
+    const membership = await this.getMembership(userId);
+    if (membership === 'free') {
+      const consumed = await this.pointsService.consumePoints(
+        userId,
+        READING_POINTS_COST,
+        'reading',
+        `占卜解读${dto.category ? `（${dto.category}）` : ''}`,
+      );
+      if (!consumed.success) {
+        throw new BadRequestException(consumed.message || '积分不足，请签到或前往积分商城获取');
       }
+      consumeRecordId = consumed.recordId;
     }
     let result;
     try {

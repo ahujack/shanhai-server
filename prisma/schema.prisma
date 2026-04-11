@@ -104,6 +104,22 @@ model UserFeedback {
   @@index([createdAt])
 }
 
+/// 邮箱验证码（用于注册/登录/重置）
+model VerificationCode {
+  id         String   @id @default(uuid())
+  identifier String   // 邮箱
+  purpose    String   // login | register | reset
+  code       String
+  failedAttempts Int  @default(0)
+  lockedUntil DateTime?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([identifier, purpose])
+  @@index([expiresAt])
+}
+
 // 聊天消息模型
 model ChatMessage {
   id            String    @id @default(uuid())

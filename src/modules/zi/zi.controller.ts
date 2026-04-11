@@ -1,4 +1,4 @@
-import { Body, Controller, Post, BadRequestException, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, BadRequestException, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { IsString, IsOptional, MaxLength } from 'class-validator';
 import { Logger } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
@@ -62,13 +62,16 @@ export class ZiController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async analyze(@Body() dto: AnalyzeZiDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('请先登录后再使用测字功能');
+    }
     let consumeRecordId: string | undefined;
     const zi = String(dto.zi || '').trim().charAt(0);
     if (!/[\u4e00-\u9fa5]/.test(zi)) {
       throw new BadRequestException('请输入一个有效的汉字');
     }
     const membership = await this.getMembership(userId);
-    if (membership === 'free' && userId) {
+    if (membership === 'free') {
       const consumed = await this.pointsService.consumePoints(
         userId,
         ZI_POINTS_COST,
@@ -135,7 +138,11 @@ export class ZiController {
   @Post('recognize')
   @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 30, ttl: 60000 } })
-  async recognize(@Body() dto: RecognizeDto) {
+  async recognize(@Body() dto: RecognizeDto, @Req() req: { user?: { sub?: string; id?: string } }) {
+    const userId = req.user?.sub ?? req.user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('请先登录后再使用测字功能');
+    }
     const result = await this.ocrService.recognizeHandwriting(dto.image);
     return {
       recognizedZi: result.zi,
@@ -148,6 +155,9 @@ export class ZiController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async analyzeHandwriting(@Body() dto: AnalyzeHandwritingDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('请先登录后再使用测字功能');
+    }
     let consumeRecordId: string | undefined;
     try {
       const [ocrResult, visionHw] = await Promise.all([
@@ -164,7 +174,7 @@ export class ZiController {
       }
 
       const membership = await this.getMembership(userId);
-      if (membership === 'free' && userId) {
+      if (membership === 'free') {
         const consumed = await this.pointsService.consumePoints(
           userId,
           ZI_POINTS_COST,

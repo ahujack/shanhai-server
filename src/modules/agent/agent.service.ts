@@ -2,12 +2,12 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import axios from 'axios';
 import FormData from 'form-data';
 import * as TencentCloudSdk from 'tencentcloud-sdk-nodejs';
-import { PrismaClient } from '@prisma/client';
 import { PersonaService, PersonaSchema } from '../persona/persona.service';
 import { ReadingService, DivinationCategory } from '../reading/reading.service';
 import { FortuneService } from '../fortune/fortune.service';
 import { ChartService } from '../chart/chart.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
+import { PrismaService } from '../../prisma.service';
 
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
 type AgentAction = { type: string; label: string };
@@ -66,13 +66,13 @@ function resolveTencentAsrClientCtor(): any | null {
 @Injectable()
 export class AgentService {
   private readonly logger = new Logger(AgentService.name);
-  private prisma = new PrismaClient();
 
   constructor(
     private readonly personaService: PersonaService,
     private readonly readingService: ReadingService,
     private readonly fortuneService: FortuneService,
     private readonly chartService: ChartService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private refineIntentByReadiness(intent: AgentIntent, dto: AgentChatDto): AgentIntent {
