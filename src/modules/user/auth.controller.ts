@@ -136,7 +136,7 @@ export class AuthController {
     }
 
     // 创建用户（带推荐码）
-    const user = await this.userService.registerWithEmail(email, password, name || email.split('@')[0], referralCode);
+    const user = await this.userService.registerWithEmail(email, password, name, referralCode);
 
     // 生成 JWT Token
     const payload = { sub: user.id, id: user.id, email: user.email };

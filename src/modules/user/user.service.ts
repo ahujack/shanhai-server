@@ -72,6 +72,19 @@ export class UserService {
     '🐍', '🐢', '🦄', '🐉', '🦅', '🦉',
   ];
 
+  // 默认昵称：国风随机名（仅在用户未主动填写昵称时使用）
+  private readonly culturalSurnamePool = [
+    '云', '玄', '青', '洛', '长', '沐', '闻', '司', '顾', '沈',
+    '谢', '裴', '苏', '白', '花', '柳', '宋', '宁', '温', '叶',
+  ];
+  private readonly culturalGivenPool = [
+    '清', '遥', '岚', '川', '月', '星', '舟', '霁', '澜', '汐',
+    '霄', '言', '尘', '栖', '禾', '灵', '弦', '棠', '竹', '衡',
+  ];
+  private readonly culturalSuffixPool = [
+    '子', '君', '客', '生', '卿', '人', '师', '者', '舟', '吟',
+  ];
+
   // 验证码有效期：5分钟
   private readonly CODE_EXPIRE_TIME = 5 * 60 * 1000;
 
@@ -106,7 +119,7 @@ export class UserService {
   }
 
   // 注册新用户（需要验证码验证）
-  async registerWithEmail(email: string, password: string, name: string, referralCode?: string): Promise<UserProfile> {
+  async registerWithEmail(email: string, password: string, name?: string, referralCode?: string): Promise<UserProfile> {
     // 检查邮箱是否已存在
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
@@ -133,7 +146,7 @@ export class UserService {
     const user = await this.prisma.user.create({
       data: {
         email,
-        name: name || email.split('@')[0],
+        name: this.resolveDisplayName(name),
         password: await this.hashPassword(password),
         avatar: this.getRandomAvatar(), // 随机分配中国传统特色头像
         timezone: 'Asia/Shanghai',
@@ -336,6 +349,22 @@ export class UserService {
     return this.traditionalAvatars[index];
   }
 
+  private resolveDisplayName(name?: string): string {
+    const normalized = (name || '').trim();
+    if (normalized) {
+      return normalized.slice(0, 20);
+    }
+    return this.getRandomCulturalName();
+  }
+
+  private getRandomCulturalName(): string {
+    const surname = this.culturalSurnamePool[Math.floor(Math.random() * this.culturalSurnamePool.length)];
+    const givenA = this.culturalGivenPool[Math.floor(Math.random() * this.culturalGivenPool.length)];
+    const givenB = this.culturalGivenPool[Math.floor(Math.random() * this.culturalGivenPool.length)];
+    const suffix = this.culturalSuffixPool[Math.floor(Math.random() * this.culturalSuffixPool.length)];
+    return `${surname}${givenA}${givenB}${suffix}`;
+  }
+
   // 存储验证码
   storeCode(identifier: string, code: string): void {
     this.verificationCodes.set(identifier, {
@@ -376,7 +405,7 @@ export class UserService {
       user = await this.prisma.user.create({
         data: {
           email,
-          name: email.split('@')[0],
+          name: this.getRandomCulturalName(),
           timezone: 'Asia/Shanghai',
           role: 'user',
           membership: 'free',
