@@ -54,7 +54,7 @@ export class MailService {
     }
 
     try {
-      const data = await this.resend.emails.send({
+      const result = await this.resend.emails.send({
         from: fromAddress,
         to: email,
         subject: `【${appName}】您的验证码`,
@@ -75,7 +75,14 @@ export class MailService {
         `,
       });
 
-      this.logger.log(`验证码已发送到 ${email}, resend id: ${data.data?.id}`);
+      const resendError = (result as { error?: { message?: string } | null } | null)?.error;
+      if (resendError) {
+        const msg = resendError.message || 'Resend 返回错误';
+        this.logger.error(`验证码发送被 Resend 拒绝: ${msg}`);
+        throw new Error(`邮件发送失败: ${msg}`);
+      }
+
+      this.logger.log(`验证码已发送到 ${email}, resend id: ${(result as { data?: { id?: string } | null } | null)?.data?.id || 'unknown'}`);
       return true;
     } catch (error) {
       this.logger.error(`发送验证码失败: ${error.message}`);
@@ -96,7 +103,7 @@ export class MailService {
     }
 
     try {
-      await this.resend.emails.send({
+      const result = await this.resend.emails.send({
         from: fromAddress,
         to: email,
         subject: `欢迎来到${appName}，开启您的命运探索之旅`,
@@ -123,6 +130,12 @@ export class MailService {
         `,
       });
 
+      const resendError = (result as { error?: { message?: string } | null } | null)?.error;
+      if (resendError) {
+        this.logger.error(`欢迎邮件发送被 Resend 拒绝: ${resendError.message || 'unknown error'}`);
+        return false;
+      }
+
       return true;
     } catch (error) {
       this.logger.error(`发送欢迎邮件失败: ${error.message}`);
@@ -143,7 +156,7 @@ export class MailService {
     }
 
     try {
-      await this.resend.emails.send({
+      const result = await this.resend.emails.send({
         from: fromAddress,
         to: email,
         subject: `【${appName}】密码重置验证码`,
@@ -166,6 +179,12 @@ export class MailService {
           </div>
         `,
       });
+
+      const resendError = (result as { error?: { message?: string } | null } | null)?.error;
+      if (resendError) {
+        this.logger.error(`重置密码邮件发送被 Resend 拒绝: ${resendError.message || 'unknown error'}`);
+        return false;
+      }
 
       return true;
     } catch (error) {
