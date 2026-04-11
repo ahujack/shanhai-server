@@ -205,14 +205,6 @@ export class AgentService {
     }
 
     const persona = this.resolvePersona(dto.personaId);
-    let userChart: any = null;
-    if (dto.userId) {
-      try {
-        userChart = await this.chartService.findOne(dto.userId);
-      } catch {
-        // ignore
-      }
-    }
 
     if (this.isSimpleGreeting(dto.message)) {
       const reply = this.buildGreetingReply(dto.clientLocalHour);
@@ -241,13 +233,22 @@ export class AgentService {
         reply,
         actions: [],
         artifacts: {},
-        hasChart: !!userChart,
+        hasChart: false,
       };
       return;
     }
 
-    const classified = this.classifyByRuleFirst(dto, userChart);
+    const classified = this.classifyByRuleFirst(dto, null);
     const intent = this.refineIntentByReadiness(classified.intent, dto);
+    let userChart: any = null;
+    // 仅在命盘查询场景加载命盘，减少普通聊天首字等待
+    if (dto.userId && intent === 'chart') {
+      try {
+        userChart = await this.chartService.findOne(dto.userId);
+      } catch {
+        // ignore
+      }
+    }
     const intentResult = await this.buildIntentArtifacts(
       intent,
       dto,
@@ -690,8 +691,12 @@ ${contextInfo}`,
       return;
     }
 
-    const recentMemory = dto.userId ? await this.fetchRecentChatMemory(dto.userId) : [];
-    const longTermMemory = dto.userId ? await this.buildLongTermMemory(dto.userId) : '';
+    const [recentMemory, longTermMemory] = dto.userId
+      ? await Promise.all([
+          this.fetchRecentChatMemory(dto.userId),
+          this.buildLongTermMemory(dto.userId),
+        ])
+      : [[], ''];
     const contextLines = (dto.context || []).slice(-8);
     const conversationContext = [...recentMemory, ...contextLines].slice(-12).join('\n');
 
@@ -829,8 +834,12 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
       return this.getDefaultChatReply(persona, userChart);
     }
 
-    const recentMemory = dto.userId ? await this.fetchRecentChatMemory(dto.userId) : [];
-    const longTermMemory = dto.userId ? await this.buildLongTermMemory(dto.userId) : '';
+    const [recentMemory, longTermMemory] = dto.userId
+      ? await Promise.all([
+          this.fetchRecentChatMemory(dto.userId),
+          this.buildLongTermMemory(dto.userId),
+        ])
+      : [[], ''];
     const contextLines = (dto.context || []).slice(-8);
     const conversationContext = [...recentMemory, ...contextLines].slice(-12).join('\n');
 
