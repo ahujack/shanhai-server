@@ -182,6 +182,18 @@ export class AgentService {
     return { artifacts, actions };
   }
 
+  private classifyByRuleFirst(
+    dto: AgentChatDto,
+    userChart: any,
+  ): { intent: AgentIntent; category?: 'career' | 'emotion' | 'growth'; mood?: AgentChatDto['mood'] } {
+    const quickIntent = this.fallbackDetectIntent(dto.message, userChart);
+    if (quickIntent === 'chat') {
+      return { intent: 'chat' };
+    }
+    // 规则已明确命中（测字/占卜/运势/命盘/冥想）时，直接走对应通道，减少意图识别等待
+    return { intent: quickIntent };
+  }
+
   async *handleChatStream(dto: AgentChatDto): AsyncGenerator<Record<string, unknown>> {
     if (!dto.message || dto.message.trim().length === 0) {
       yield { type: 'error', message: '消息不能为空' };
@@ -234,7 +246,7 @@ export class AgentService {
       return;
     }
 
-    const classified = await this.classifyWithDeepSeek(dto, persona, userChart);
+    const classified = this.classifyByRuleFirst(dto, userChart);
     const intent = this.refineIntentByReadiness(classified.intent, dto);
     const intentResult = await this.buildIntentArtifacts(
       intent,
@@ -351,7 +363,7 @@ export class AgentService {
       };
     }
     
-    const classified = await this.classifyWithDeepSeek(dto, persona, userChart);
+    const classified = this.classifyByRuleFirst(dto, userChart);
     const intent = this.refineIntentByReadiness(classified.intent, dto);
     const intentResult = await this.buildIntentArtifacts(
       intent,
