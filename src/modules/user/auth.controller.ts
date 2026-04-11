@@ -77,9 +77,6 @@ export class AuthController {
     // 生成6位验证码
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 存储验证码（5分钟有效）
-    this.userService.storeCode(email, code);
-
     // 发送邮箱验证码
     let sent = false;
     let errorMessage = '';
@@ -106,6 +103,9 @@ export class AuthController {
         message: errorMessage || '邮件发送失败，请稍后重试',
       };
     }
+
+    // 仅在发送成功后存储验证码（5分钟有效）
+    this.userService.storeCode(email, code);
 
     return {
       success: true,

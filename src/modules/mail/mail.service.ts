@@ -28,23 +28,34 @@ export class MailService {
     this.logger.log('Resend 邮件服务已初始化');
   }
 
+  private getFromAddress(): string {
+    const from = this.getConfig('RESEND_FROM') || this.getConfig('MAIL_FROM');
+    return (from && from.trim()) || 'onboarding@resend.dev';
+  }
+
   /**
    * 发送验证码邮件
    */
   async sendVerificationCode(email: string, code: string): Promise<boolean> {
     const appName = this.getConfig('APP_NAME') || '山海灵境';
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const fromAddress = this.getFromAddress();
 
     this.logger.log(`准备发送验证码到 ${email}, resend: ${this.resend ? '已配置' : '未配置'}`);
 
-    // 如果没有配置 RESEND，返回模拟结果
+    // 生产环境必须真实发信；开发环境允许模拟
     if (!this.resend) {
+      if (isProd) {
+        this.logger.error('生产环境未配置 RESEND_API_KEY，无法发送验证码邮件');
+        return false;
+      }
       this.logger.log(`[模拟] 发送验证码 ${code} 到 ${email}`);
       return true;
     }
 
     try {
       const data = await this.resend.emails.send({
-        from: 'onboarding@resend.dev',
+        from: fromAddress,
         to: email,
         subject: `【${appName}】您的验证码`,
         html: `
@@ -77,6 +88,7 @@ export class MailService {
    */
   async sendWelcomeEmail(email: string, name: string): Promise<boolean> {
     const appName = this.getConfig('APP_NAME') || '山海灵境';
+    const fromAddress = this.getFromAddress();
 
     if (!this.resend) {
       this.logger.log(`[模拟] 发送欢迎邮件到 ${email}`);
@@ -85,7 +97,7 @@ export class MailService {
 
     try {
       await this.resend.emails.send({
-        from: 'onboarding@resend.dev',
+        from: fromAddress,
         to: email,
         subject: `欢迎来到${appName}，开启您的命运探索之旅`,
         html: `
@@ -123,6 +135,7 @@ export class MailService {
    */
   async sendPasswordResetEmail(email: string, code: string): Promise<boolean> {
     const appName = this.getConfig('APP_NAME') || '山海灵境';
+    const fromAddress = this.getFromAddress();
 
     if (!this.resend) {
       this.logger.log(`[模拟] 发送密码重置邮件到 ${email}, 验证码: ${code}`);
@@ -131,7 +144,7 @@ export class MailService {
 
     try {
       await this.resend.emails.send({
-        from: 'onboarding@resend.dev',
+        from: fromAddress,
         to: email,
         subject: `【${appName}】密码重置验证码`,
         html: `
