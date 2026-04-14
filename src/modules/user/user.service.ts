@@ -52,6 +52,29 @@ export interface CreateUserDto {
   focusGod?: string;
 }
 
+export interface AdminUserPointsDetail {
+  user: Pick<UserProfile, 'id' | 'name' | 'email' | 'referralCode' | 'referredBy' | 'createdAt'>;
+  summary: {
+    totalPoints: number;
+    availablePoints: number;
+    totalEarned: number;
+    totalSpent: number;
+  };
+  referral: {
+    referrer: { id: string; name: string; email: string | null } | null;
+    invitees: number;
+    inviteeBonuses: number;
+    referralRewards: number;
+  };
+  records: Array<{
+    id: string;
+    points: number;
+    type: string;
+    description: string | null;
+    createdAt: Date;
+  }>;
+}
+
 interface VerificationCode {
   code: string;
   expiresAt: number;
@@ -140,20 +163,8 @@ export class UserService {
       throw new BadRequestException('该邮箱已注册');
     }
 
-    // 生成随机推荐码
-    const userReferralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-
-    // 处理推荐关系
-    let referredBy: string | null = null;
-    if (referralCode) {
-      // 查找推荐人
-      const referrer = await this.prisma.user.findFirst({
-        where: { referralCode },
-      });
-      if (referrer) {
-        referredBy = referrer.id;
-      }
-    }
+    const userReferralCode = await this.generateUniqueReferralCode();
+    const referredBy = await this.resolveReferredBy(referralCode);
 
     const user = await this.prisma.user.create({
       data: {
@@ -169,36 +180,7 @@ export class UserService {
       },
     });
 
-    // 处理推荐奖励
-    if (referredBy) {
-      try {
-        // 给新用户50积分
-        if (this.pointsService) {
-          await this.pointsService.awardPoints(user.id, 50, 'referral_bonus', '新用户注册奖励');
-          // 给推荐人50积分
-          await this.pointsService.awardPoints(referredBy, 50, 'referral_reward', '推荐好友奖励');
-        }
-        // 解锁成就
-        if (this.achievementService) {
-          await this.achievementService.unlockAchievementByCode(user.id, 'login_1');
-          await this.achievementService.unlockAchievementByCode(referredBy, 'invite_1');
-        }
-      } catch (e) {
-        console.error('推荐奖励发放失败:', e);
-      }
-    } else {
-      // 新用户首次注册奖励
-      try {
-        if (this.pointsService) {
-          await this.pointsService.awardPoints(user.id, 20, 'register_bonus', '新用户注册奖励');
-        }
-        if (this.achievementService) {
-          await this.achievementService.unlockAchievementByCode(user.id, 'login_1');
-        }
-      } catch (e) {
-        console.error('注册奖励发放失败:', e);
-      }
-    }
+    await this.grantRegistrationRewards(user.id, referredBy);
 
     return this.formatUser(user);
   }
@@ -549,6 +531,7 @@ export class UserService {
     socialId: string,
     userInfo?: { email?: string; name?: string },
     legacyOAuthToken?: string,
+    referralCode?: string,
   ): Promise<UserProfile> {
     if (!socialId?.trim()) {
       throw new BadRequestException('第三方账号标识无效');
@@ -623,6 +606,9 @@ export class UserService {
       throw new BadRequestException('无法获取第三方账号邮箱，请在授权时勾选邮箱权限或稍后重试');
     }
 
+    const userReferralCode = await this.generateUniqueReferralCode();
+    const referredBy = await this.resolveReferredBy(referralCode);
+
     const data: Prisma.UserCreateInput = {
       email: emailForCreate,
       name: userInfo?.name?.trim() || emailForCreate.split('@')[0],
@@ -630,6 +616,8 @@ export class UserService {
       timezone: 'Asia/Shanghai',
       role: 'user',
       membership: 'free',
+      referralCode: userReferralCode,
+      referredBy,
     };
 
     if (provider === 'google') {
@@ -639,7 +627,58 @@ export class UserService {
     }
 
     user = await this.prisma.user.create({ data });
+    await this.grantRegistrationRewards(user.id, referredBy);
     return this.formatUser(user);
+  }
+
+  private async generateUniqueReferralCode(): Promise<string> {
+    for (let i = 0; i < 8; i += 1) {
+      const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const existed = await this.prisma.user.findFirst({
+        where: { referralCode: code },
+        select: { id: true },
+      });
+      if (!existed) return code;
+    }
+    throw new BadRequestException('推荐码生成失败，请稍后重试');
+  }
+
+  private async resolveReferredBy(referralCode?: string): Promise<string | null> {
+    const normalized = (referralCode || '').trim().toUpperCase();
+    if (!normalized) return null;
+    const referrer = await this.prisma.user.findFirst({
+      where: { referralCode: normalized },
+      select: { id: true },
+    });
+    return referrer?.id || null;
+  }
+
+  private async grantRegistrationRewards(userId: string, referredBy: string | null): Promise<void> {
+    if (referredBy) {
+      try {
+        if (this.pointsService) {
+          await this.pointsService.awardPoints(userId, 50, 'referral_bonus', '新用户注册奖励');
+          await this.pointsService.awardPoints(referredBy, 50, 'referral_reward', '推荐好友奖励');
+        }
+        if (this.achievementService) {
+          await this.achievementService.unlockAchievementByCode(userId, 'login_1');
+          await this.achievementService.unlockAchievementByCode(referredBy, 'invite_1');
+        }
+      } catch (e) {
+        console.error('推荐奖励发放失败:', e);
+      }
+      return;
+    }
+    try {
+      if (this.pointsService) {
+        await this.pointsService.awardPoints(userId, 20, 'register_bonus', '新用户注册奖励');
+      }
+      if (this.achievementService) {
+        await this.achievementService.unlockAchievementByCode(userId, 'login_1');
+      }
+    } catch (e) {
+      console.error('注册奖励发放失败:', e);
+    }
   }
 
   // 更新用户角色（管理员功能）
@@ -777,6 +816,94 @@ export class UserService {
     });
 
     return this.formatUser(updated);
+  }
+
+  // 管理员查看用户积分明细（含推荐奖励汇总）
+  async getAdminUserPointsDetail(userId: string, limit = 100): Promise<AdminUserPointsDetail> {
+    const take = Math.max(1, Math.min(Number(limit) || 100, 300));
+    const target = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        referralCode: true,
+        referredBy: true,
+        createdAt: true,
+      },
+    });
+    if (!target) {
+      throw new NotFoundException('目标用户不存在');
+    }
+
+    const [wallet, records, earnedAgg, spentAgg, invitees, inviteeBonusAgg, referralRewardAgg, referrer] =
+      await Promise.all([
+        this.prisma.userPoints.findUnique({
+          where: { userId },
+          select: { totalPoints: true, availablePoints: true },
+        }),
+        this.prisma.pointRecord.findMany({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+          take,
+          select: {
+            id: true,
+            points: true,
+            type: true,
+            description: true,
+            createdAt: true,
+          },
+        }),
+        this.prisma.pointRecord.aggregate({
+          where: { userId, points: { gt: 0 } },
+          _sum: { points: true },
+        }),
+        this.prisma.pointRecord.aggregate({
+          where: { userId, points: { lt: 0 } },
+          _sum: { points: true },
+        }),
+        this.prisma.user.count({
+          where: { referredBy: userId },
+        }),
+        this.prisma.pointRecord.aggregate({
+          where: { userId, type: 'referral_bonus' },
+          _sum: { points: true },
+        }),
+        this.prisma.pointRecord.aggregate({
+          where: { userId, type: 'referral_reward' },
+          _sum: { points: true },
+        }),
+        target.referredBy
+          ? this.prisma.user.findUnique({
+              where: { id: target.referredBy },
+              select: { id: true, name: true, email: true },
+            })
+          : Promise.resolve(null),
+      ]);
+
+    return {
+      user: {
+        id: target.id,
+        name: target.name,
+        email: target.email,
+        referralCode: target.referralCode || undefined,
+        referredBy: target.referredBy || undefined,
+        createdAt: target.createdAt,
+      },
+      summary: {
+        totalPoints: wallet?.totalPoints || 0,
+        availablePoints: wallet?.availablePoints || 0,
+        totalEarned: earnedAgg._sum.points || 0,
+        totalSpent: Math.abs(spentAgg._sum.points || 0),
+      },
+      referral: {
+        referrer,
+        invitees,
+        inviteeBonuses: inviteeBonusAgg._sum.points || 0,
+        referralRewards: referralRewardAgg._sum.points || 0,
+      },
+      records,
+    };
   }
 
   // 格式化用户数据（移除敏感信息）

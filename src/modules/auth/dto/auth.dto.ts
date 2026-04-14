@@ -52,6 +52,10 @@ export class SocialLoginDto {
 
   @IsString({ message: 'ID Token 必须是字符串' })
   idToken: string;
+
+  @IsOptional()
+  @IsString()
+  referralCode?: string;
 }
 
 export class RefreshTokenDto {

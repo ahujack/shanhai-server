@@ -74,6 +74,64 @@
     tr.row-focus td {
       background: rgba(91, 58, 158, 0.22);
     }
+    .modal-mask {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 7, 16, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    }
+    .modal {
+      width: min(920px, 100%);
+      max-height: 86vh;
+      overflow: auto;
+      background: #161126;
+      border: 1px solid #3a2b5a;
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .modal h3 {
+      margin: 0;
+      color: var(--accent);
+      font-size: 1rem;
+    }
+    .modal-meta {
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin: 8px 0 0;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    @media (min-width: 900px) {
+      .summary-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+    }
+    .summary-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: #120c1c;
+    }
+    .summary-card .k {
+      color: var(--muted);
+      font-size: 0.75rem;
+    }
+    .summary-card .v {
+      margin-top: 4px;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #ffe7a3;
+    }
+    .num-plus { color: #86efac; font-weight: 700; }
+    .num-minus { color: #fca5a5; font-weight: 700; }
   </style>
 </head>
 <body>
@@ -120,7 +178,7 @@
         <input id="users-search" type="text" placeholder="输入关键词实时筛选" />
         <button type="button" id="btn-users">加载用户</button>
         <div style="overflow:auto;max-height:320px;margin-top:10px">
-          <table id="tbl-users"><thead><tr><th>用户名</th><th>邮箱</th><th>地区</th><th>时区</th><th>注册</th><th>权益操作</th></tr></thead><tbody></tbody></table>
+          <table id="tbl-users"><thead><tr><th>用户名</th><th>邮箱</th><th>地区</th><th>时区</th><th>注册</th><th>管理操作</th></tr></thead><tbody></tbody></table>
         </div>
       </div>
       <div class="card">
@@ -129,6 +187,30 @@
         <div style="overflow:auto;max-height:360px;margin-top:10px">
           <table id="tbl-feedback"><thead><tr><th>时间</th><th>分类</th><th>评分</th><th>用户</th><th>留言</th></tr></thead><tbody></tbody></table>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="points-detail-mask" class="modal-mask hidden">
+    <div class="modal">
+      <div class="row" style="justify-content:space-between;margin-top:0">
+        <h3>用户积分明细</h3>
+        <button type="button" class="secondary" id="btn-close-points-detail">关闭</button>
+      </div>
+      <p id="points-detail-meta" class="modal-meta"></p>
+      <div id="points-detail-summary" class="summary-grid"></div>
+      <div style="margin-top:12px;overflow:auto;max-height:42vh">
+        <table id="tbl-points-detail">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>类型</th>
+              <th>变动</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -207,6 +289,7 @@
             '<td><small>' + escapeHtml(u.createdAt || '') + '</small></td>' +
             '<td>' +
               '<div class="row" style="margin-top:0">' +
+                '<button type="button" class="secondary btn-points-detail" data-id="' + u.id + '" data-email="' + displayUser + '">积分明细</button>' +
                 '<button type="button" class="secondary btn-grant-points" data-id="' + u.id + '" data-email="' + displayUser + '">补积分</button>' +
                 '<button type="button" class="secondary btn-grant-member" data-id="' + u.id + '" data-email="' + displayUser + '">开会员</button>' +
               '</div>' +
@@ -237,6 +320,60 @@
         if (row && typeof row.scrollIntoView === 'function') {
           row.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
+      }
+      function formatDateTime(value) {
+        if (!value) return '—';
+        var d = new Date(value);
+        if (isNaN(d.getTime())) return escapeHtml(String(value));
+        return (
+          d.getFullYear() + '-' +
+          String(d.getMonth() + 1).padStart(2, '0') + '-' +
+          String(d.getDate()).padStart(2, '0') + ' ' +
+          String(d.getHours()).padStart(2, '0') + ':' +
+          String(d.getMinutes()).padStart(2, '0')
+        );
+      }
+      function renderPointsDetail(detail) {
+        var user = detail && detail.user ? detail.user : {};
+        var summary = detail && detail.summary ? detail.summary : {};
+        var referral = detail && detail.referral ? detail.referral : {};
+        var meta = document.getElementById('points-detail-meta');
+        var summaryWrap = document.getElementById('points-detail-summary');
+        var tbody = document.querySelector('#tbl-points-detail tbody');
+        var referrerLabel = referral.referrer
+          ? ((referral.referrer.name || '未命名') + ' / ' + (referral.referrer.email || '无邮箱'))
+          : '无';
+        meta.textContent =
+          '用户：' + (user.name || '—') +
+          '（' + (user.email || '—') + '）' +
+          ' | 推荐码：' + (user.referralCode || '—') +
+          ' | 推荐人：' + referrerLabel +
+          ' | 邀请人数：' + (referral.invitees || 0);
+        summaryWrap.innerHTML =
+          '<div class="summary-card"><div class="k">可用积分</div><div class="v">' + (summary.availablePoints || 0) + '</div></div>' +
+          '<div class="summary-card"><div class="k">累计总积分</div><div class="v">' + (summary.totalPoints || 0) + '</div></div>' +
+          '<div class="summary-card"><div class="k">累计获得</div><div class="v">' + (summary.totalEarned || 0) + '</div></div>' +
+          '<div class="summary-card"><div class="k">累计消耗</div><div class="v">' + (summary.totalSpent || 0) + '</div></div>' +
+          '<div class="summary-card"><div class="k">被邀请奖励（自己）</div><div class="v">' + (referral.inviteeBonuses || 0) + '</div></div>' +
+          '<div class="summary-card"><div class="k">邀请他人奖励</div><div class="v">' + (referral.referralRewards || 0) + '</div></div>';
+        tbody.innerHTML = '';
+        (detail.records || []).forEach(function (r) {
+          var tr = document.createElement('tr');
+          var points = Number(r.points || 0);
+          var cls = points >= 0 ? 'num-plus' : 'num-minus';
+          var display = (points >= 0 ? '+' : '') + points;
+          tr.innerHTML =
+            '<td><small>' + formatDateTime(r.createdAt) + '</small></td>' +
+            '<td>' + escapeHtml(r.type || '—') + '</td>' +
+            '<td class="' + cls + '">' + escapeHtml(display) + '</td>' +
+            '<td>' + escapeHtml(r.description || '') + '</td>';
+          tbody.appendChild(tr);
+        });
+      }
+      async function openPointsDetail(userId) {
+        var detail = await api('/users/admin/' + userId + '/points-detail?limit=120');
+        renderPointsDetail(detail);
+        document.getElementById('points-detail-mask').classList.remove('hidden');
       }
       document.getElementById('btn-login').onclick = async function () {
         var email = document.getElementById('email').value.trim();
@@ -314,13 +451,22 @@
           locateFirstUserMatch();
         }
       });
+      document.getElementById('btn-close-points-detail').addEventListener('click', function () {
+        document.getElementById('points-detail-mask').classList.add('hidden');
+      });
+      document.getElementById('points-detail-mask').addEventListener('click', function (event) {
+        if (event.target && event.target.id === 'points-detail-mask') {
+          document.getElementById('points-detail-mask').classList.add('hidden');
+        }
+      });
 
       document.querySelector('#tbl-users tbody').addEventListener('click', async function (event) {
         var target = event.target;
         if (!target || !(target instanceof HTMLElement)) return;
+        var isPointsDetail = target.classList.contains('btn-points-detail');
         var isGrantPoints = target.classList.contains('btn-grant-points');
         var isGrantMember = target.classList.contains('btn-grant-member');
-        if (!isGrantPoints && !isGrantMember) return;
+        if (!isPointsDetail && !isGrantPoints && !isGrantMember) return;
 
         var userId = target.getAttribute('data-id') || '';
         var email = target.getAttribute('data-email') || '该用户';
@@ -328,6 +474,10 @@
 
         target.setAttribute('disabled', 'disabled');
         try {
+          if (isPointsDetail) {
+            await openPointsDetail(userId);
+            return;
+          }
           if (isGrantPoints) {
             var rawPoints = prompt('给 ' + email + ' 补多少积分？', '100');
             if (rawPoints == null) return;

@@ -288,6 +288,7 @@ export class AuthController {
       socialId,
       userInfo,
       dto.idToken,
+      dto.referralCode,
     );
 
     // 生成 JWT Token

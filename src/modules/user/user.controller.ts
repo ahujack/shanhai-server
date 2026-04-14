@@ -9,6 +9,7 @@ import {
   Req,
   UseGuards,
   BadRequestException,
+  Query,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { UserService } from './user.service';
@@ -71,6 +72,13 @@ export class UserController {
       throw new BadRequestException('请先登录');
     }
     return this.userService.adminGrantMembership(operatorId, id, dto.membership, dto.days, dto.reason);
+  }
+
+  @Get('admin/:id/points-detail')
+  @UseGuards(RequireAuthGuard, AdminGuard)
+  getPointsDetail(@Param('id') id: string, @Query('limit') limit?: string) {
+    const parsed = Number.parseInt(limit || '100', 10);
+    return this.userService.getAdminUserPointsDetail(id, Number.isFinite(parsed) ? parsed : 100);
   }
 
   @Get(':id')
