@@ -132,6 +132,98 @@
     }
     .num-plus { color: #86efac; font-weight: 700; }
     .num-minus { color: #fca5a5; font-weight: 700; }
+    .overview-metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    @media (min-width: 900px) {
+      .overview-metrics {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+    }
+    .metric-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: #120c1c;
+      min-height: 74px;
+    }
+    .metric-card .label {
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+    .metric-card .value {
+      margin-top: 6px;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #ffe7a3;
+    }
+    .overview-sections {
+      margin-top: 12px;
+      display: grid;
+      gap: 10px;
+    }
+    .overview-section {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: #120c1c;
+    }
+    .overview-section h4 {
+      margin: 0 0 8px;
+      font-size: 0.86rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .kv-list {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px 10px;
+      font-size: 0.82rem;
+    }
+    .kv-list .k {
+      color: var(--muted);
+    }
+    .kv-list .v {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .muted-tip {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-top: 8px;
+    }
+    details.raw-json {
+      margin-top: 12px;
+      border-top: 1px dashed var(--border);
+      padding-top: 10px;
+    }
+    details.raw-json > summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    .privacy-note {
+      margin-top: 8px;
+      color: #f8dba1;
+      background: rgba(201, 162, 39, 0.1);
+      border: 1px solid rgba(201, 162, 39, 0.3);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 0.8rem;
+    }
+    .split-grid {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    @media (min-width: 980px) {
+      .split-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -163,13 +255,19 @@
         <div class="row">
           <button type="button" id="btn-refresh">刷新概览</button>
         </div>
-        <pre id="overview-json"></pre>
+        <div id="overview-metrics" class="overview-metrics"></div>
+        <div id="overview-sections" class="overview-sections"></div>
+        <details class="raw-json">
+          <summary>查看原始 JSON</summary>
+          <pre id="overview-json"></pre>
+        </details>
       </div>
       <div class="card">
-        <h2>最近登录（埋点）</h2>
-        <button type="button" id="btn-logins">加载登录记录</button>
+        <h2>最近活跃</h2>
+        <button type="button" id="btn-logins">加载活跃记录</button>
+        <p class="muted-tip">若登录埋点为空，将自动展示最近注册用户，避免空看板。</p>
         <div style="overflow:auto;max-height:360px;margin-top:10px">
-          <table id="tbl-logins"><thead><tr><th>时间</th><th>用户</th><th>地区/IP</th></tr></thead><tbody></tbody></table>
+          <table id="tbl-logins"><thead><tr><th>时间</th><th>用户</th><th>来源</th></tr></thead><tbody></tbody></table>
         </div>
       </div>
       <div class="card">
@@ -186,6 +284,49 @@
         <button type="button" id="btn-feedback">加载反馈</button>
         <div style="overflow:auto;max-height:360px;margin-top:10px">
           <table id="tbl-feedback"><thead><tr><th>时间</th><th>分类</th><th>评分</th><th>用户</th><th>留言</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="activity-detail-mask" class="modal-mask hidden">
+    <div class="modal">
+      <div class="row" style="justify-content:space-between;margin-top:0">
+        <h3>用户聊天与功能使用</h3>
+        <button type="button" class="secondary" id="btn-close-activity-detail">关闭</button>
+      </div>
+      <p id="activity-detail-meta" class="modal-meta"></p>
+      <div class="privacy-note">为保护隐私，邮箱、IP、聊天内容默认脱敏显示；仅用于运营排查与产品优化，请勿导出或二次传播。</div>
+      <div class="row">
+        <input id="activity-keyword" type="text" placeholder="关键词查询（聊天内容/意图）" style="max-width:320px;margin-bottom:0" />
+        <button type="button" class="secondary" id="btn-activity-search">查询</button>
+      </div>
+      <div id="activity-summary" class="summary-grid"></div>
+      <div class="split-grid">
+        <div style="overflow:auto;max-height:34vh">
+          <table id="tbl-activity-chats">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>意图/情绪</th>
+                <th>用户消息（脱敏）</th>
+                <th>回复（脱敏）</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div style="overflow:auto;max-height:34vh">
+          <table id="tbl-activity-events">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>功能事件</th>
+                <th>来源（国家/IP脱敏）</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -246,6 +387,7 @@
       }
       var usersCache = [];
       var activeUserId = '';
+      var currentActivityUserId = '';
       function escapeHtml(value) {
         return String(value == null ? '' : value)
           .replace(/&/g, '&amp;')
@@ -289,6 +431,7 @@
             '<td><small>' + escapeHtml(u.createdAt || '') + '</small></td>' +
             '<td>' +
               '<div class="row" style="margin-top:0">' +
+                '<button type="button" class="secondary btn-activity-detail" data-id="' + u.id + '" data-email="' + displayUser + '">聊天/功能</button>' +
                 '<button type="button" class="secondary btn-points-detail" data-id="' + u.id + '" data-email="' + displayUser + '">积分明细</button>' +
                 '<button type="button" class="secondary btn-grant-points" data-id="' + u.id + '" data-email="' + displayUser + '">补积分</button>' +
                 '<button type="button" class="secondary btn-grant-member" data-id="' + u.id + '" data-email="' + displayUser + '">开会员</button>' +
@@ -332,6 +475,210 @@
           String(d.getHours()).padStart(2, '0') + ':' +
           String(d.getMinutes()).padStart(2, '0')
         );
+      }
+      function formatMetricLabel(key) {
+        var map = {
+          users: '用户总数',
+          newUsersInPeriod: '周期内新增用户',
+          loginsInPeriod: '周期内登录次数',
+          referredUsersTotal: '累计被邀请注册',
+          newReferredUsersInPeriod: '周期内被邀请注册',
+          referralBonusInPeriod: '周期内新用户邀请奖励',
+          referralRewardInPeriod: '周期内邀请人奖励',
+          referralBonusTotal: '累计新用户邀请奖励',
+          referralRewardTotal: '累计邀请人奖励',
+          registrationsByDay: '每日注册趋势',
+          loginsByDay: '每日登录趋势',
+          day: '日期',
+          totalUsers: '用户总数',
+          activeUsers: '活跃用户',
+          loginCount: '登录次数',
+          paidOrders: '付费订单',
+          paidRevenue: '付费金额',
+          feedbackCount: '反馈条数',
+          newUsers: '新增用户',
+          retentionRate: '留存率',
+        };
+        return map[key] || String(key || '指标').replace(/([a-z])([A-Z])/g, '$1 $2');
+      }
+      function formatMetricValue(value) {
+        if (value == null) return '—';
+        if (typeof value === 'number') {
+          if (!Number.isFinite(value)) return '—';
+          return Number.isInteger(value) ? String(value) : value.toFixed(2);
+        }
+        if (typeof value === 'boolean') return value ? '是' : '否';
+        return String(value);
+      }
+      function appendEmptyRow(tbody, message) {
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="3"><span class="muted-tip">' + escapeHtml(message) + '</span></td>';
+        tbody.appendChild(tr);
+      }
+      function renderOverview(overview) {
+        var metricsWrap = document.getElementById('overview-metrics');
+        var sectionsWrap = document.getElementById('overview-sections');
+        var raw = document.getElementById('overview-json');
+        var obj = overview && typeof overview === 'object' ? overview : {};
+        var totals = obj.totals && typeof obj.totals === 'object' ? obj.totals : {};
+        var referral = obj.referral && typeof obj.referral === 'object' ? obj.referral : {};
+        var trends = obj.trends && typeof obj.trends === 'object' ? obj.trends : {};
+        metricsWrap.innerHTML = '';
+        sectionsWrap.innerHTML = '';
+        raw.textContent = JSON.stringify(obj, null, 2);
+
+        var priorityMetrics = [
+          { key: 'users', value: totals.users },
+          { key: 'newUsersInPeriod', value: totals.newUsersInPeriod },
+          { key: 'loginsInPeriod', value: totals.loginsInPeriod },
+          { key: 'newReferredUsersInPeriod', value: referral.newReferredUsersInPeriod },
+          { key: 'referralBonusInPeriod', value: referral.referralBonusInPeriod },
+          { key: 'referralRewardInPeriod', value: referral.referralRewardInPeriod },
+          { key: 'referredUsersTotal', value: referral.referredUsersTotal },
+          { key: 'periodDays', value: obj.periodDays }
+        ];
+
+        priorityMetrics.forEach(function (metric) {
+          var card = document.createElement('div');
+          card.className = 'metric-card';
+          card.innerHTML =
+            '<div class="label">' + escapeHtml(formatMetricLabel(metric.key)) + '</div>' +
+            '<div class="value">' + escapeHtml(formatMetricValue(metric.value)) + '</div>';
+          metricsWrap.appendChild(card);
+        });
+
+        var sections = [
+          { key: 'registrationsByDay', value: trends.registrationsByDay },
+          { key: 'loginsByDay', value: trends.loginsByDay },
+          { key: 'eventsByName', value: obj.eventsByName },
+          { key: 'chatIntents', value: obj.chatIntents },
+          { key: 'feedbackByCategory', value: obj.feedbackByCategory },
+          { key: 'visitsByCountry', value: obj.visitsByCountry }
+        ];
+
+        sections.forEach(function (entry) {
+          var key = entry.key;
+          var value = entry.value;
+          if (!Array.isArray(value) && (!value || typeof value !== 'object')) return;
+          var section = document.createElement('section');
+          section.className = 'overview-section';
+          var title = document.createElement('h4');
+          title.textContent = formatMetricLabel(key);
+          section.appendChild(title);
+
+          if (Array.isArray(value)) {
+            if (!value.length) {
+              var empty = document.createElement('div');
+              empty.className = 'muted-tip';
+              empty.textContent = '暂无数据';
+              section.appendChild(empty);
+            } else {
+              var list = document.createElement('div');
+              list.className = 'kv-list';
+              value.slice(0, 8).forEach(function (item, idx) {
+                if (item && typeof item === 'object') {
+                  var k = item.day || item.category || item.country || item.intent || item.type || item.name || ('项 ' + (idx + 1));
+                  var v = item.count != null ? item.count : item.value != null ? item.value : JSON.stringify(item);
+                  list.innerHTML +=
+                    '<div class="k">' + escapeHtml(String(k)) + '</div>' +
+                    '<div class="v">' + escapeHtml(formatMetricValue(v)) + '</div>';
+                } else {
+                  list.innerHTML +=
+                    '<div class="k">项 ' + (idx + 1) + '</div>' +
+                    '<div class="v">' + escapeHtml(formatMetricValue(item)) + '</div>';
+                }
+              });
+              section.appendChild(list);
+            }
+          } else if (value && typeof value === 'object') {
+            var kv = document.createElement('div');
+            kv.className = 'kv-list';
+            Object.keys(value).slice(0, 10).forEach(function (subKey) {
+              kv.innerHTML +=
+                '<div class="k">' + escapeHtml(formatMetricLabel(subKey)) + '</div>' +
+                '<div class="v">' + escapeHtml(formatMetricValue(value[subKey])) + '</div>';
+            });
+            section.appendChild(kv);
+          }
+          sectionsWrap.appendChild(section);
+        });
+      }
+      function renderActivityDetail(detail) {
+        var user = detail && detail.user ? detail.user : {};
+        var usage = detail && detail.usage ? detail.usage : {};
+        var privacy = detail && detail.privacy ? detail.privacy : {};
+        var chats = detail && Array.isArray(detail.chats) ? detail.chats : [];
+        var events = detail && Array.isArray(detail.events) ? detail.events : [];
+        var summaryWrap = document.getElementById('activity-summary');
+        var meta = document.getElementById('activity-detail-meta');
+        var chatTbody = document.querySelector('#tbl-activity-chats tbody');
+        var eventTbody = document.querySelector('#tbl-activity-events tbody');
+        var intentTop = (usage.chatByIntent || []).slice(0, 3).map(function (x) {
+          return (x.intent || 'unknown') + ':' + (x.count || 0);
+        }).join(' / ');
+        var featureTop = (usage.featureUsage || []).slice(0, 3).map(function (x) {
+          return (x.feature || 'unknown') + ':' + (x.count || 0);
+        }).join(' / ');
+
+        meta.textContent =
+          '用户：' + (user.name || '—') +
+          '（' + (user.emailMasked || '—') + '）' +
+          ' | 注册：' + formatDateTime(user.createdAt) +
+          ' | 统计周期：最近' + (usage.periodDays || 30) + '天';
+
+        summaryWrap.innerHTML =
+          '<div class="summary-card"><div class="k">周期内聊天数</div><div class="v">' + (usage.totalChatsInPeriod || 0) + '</div></div>' +
+          '<div class="summary-card"><div class="k">周期内功能事件</div><div class="v">' + (usage.totalEventsInPeriod || 0) + '</div></div>' +
+          '<div class="summary-card"><div class="k">聊天意图TOP</div><div class="v">' + escapeHtml(intentTop || '—') + '</div></div>' +
+          '<div class="summary-card"><div class="k">功能使用TOP</div><div class="v">' + escapeHtml(featureTop || '—') + '</div></div>' +
+          '<div class="summary-card"><div class="k">隐私保护</div><div class="v">' +
+            ((privacy.messageMasked ? '消息脱敏 ' : '') + (privacy.ipMasked ? 'IP脱敏' : '') || '默认启用') +
+          '</div></div>';
+
+        chatTbody.innerHTML = '';
+        if (!chats.length) {
+          var emptyChat = document.createElement('tr');
+          emptyChat.innerHTML = '<td colspan="4"><span class="muted-tip">暂无聊天记录</span></td>';
+          chatTbody.appendChild(emptyChat);
+        } else {
+          chats.forEach(function (c) {
+            var tr = document.createElement('tr');
+            var tag = (c.intent || 'unknown') + (c.mood ? (' / ' + c.mood) : '');
+            tr.innerHTML =
+              '<td><small>' + formatDateTime(c.createdAt) + '</small></td>' +
+              '<td>' + escapeHtml(tag) + '</td>' +
+              '<td>' + escapeHtml(c.messageMasked || '—') + '</td>' +
+              '<td>' + escapeHtml(c.replyMasked || '—') + '</td>';
+            chatTbody.appendChild(tr);
+          });
+        }
+
+        eventTbody.innerHTML = '';
+        if (!events.length) {
+          var emptyEvent = document.createElement('tr');
+          emptyEvent.innerHTML = '<td colspan="3"><span class="muted-tip">暂无功能事件</span></td>';
+          eventTbody.appendChild(emptyEvent);
+        } else {
+          events.forEach(function (e) {
+            var tr2 = document.createElement('tr');
+            tr2.innerHTML =
+              '<td><small>' + formatDateTime(e.at) + '</small></td>' +
+              '<td>' + escapeHtml(e.name || '—') + '</td>' +
+              '<td>' + escapeHtml(e.country || '—') + ' / ' + escapeHtml(e.ipMasked || '—') + '</td>';
+            eventTbody.appendChild(tr2);
+          });
+        }
+      }
+      async function loadActivityDetail(userId, keyword) {
+        var q = keyword ? ('&keyword=' + encodeURIComponent(keyword)) : '';
+        var detail = await api('/users/admin/' + userId + '/activity-detail?chatLimit=50&eventLimit=80&days=30' + q);
+        renderActivityDetail(detail);
+      }
+      async function openActivityDetail(userId) {
+        currentActivityUserId = userId;
+        document.getElementById('activity-keyword').value = '';
+        await loadActivityDetail(userId, '');
+        document.getElementById('activity-detail-mask').classList.remove('hidden');
       }
       function renderPointsDetail(detail) {
         var user = detail && detail.user ? detail.user : {};
@@ -404,7 +751,7 @@
       async function loadOverview() {
         var days = parseInt(document.getElementById('days').value, 10) || 30;
         var o = await api('/admin/analytics/overview?days=' + days);
-        document.getElementById('overview-json').textContent = JSON.stringify(o, null, 2);
+        renderOverview(o);
       }
       document.getElementById('btn-refresh').onclick = function () { loadOverview().catch(function (e) { alert(e.message); }); };
       document.getElementById('btn-logout').onclick = function () {
@@ -418,13 +765,34 @@
           var rows = await api('/admin/analytics/logins?limit=100');
           var tb = document.querySelector('#tbl-logins tbody');
           tb.innerHTML = '';
-          rows.forEach(function (r) {
+          if (rows && rows.length) {
+            rows.forEach(function (r) {
+              var tr = document.createElement('tr');
+              var u = r.user || {};
+              tr.innerHTML =
+                '<td><small>' + formatDateTime(r.at) + '</small></td>' +
+                '<td>' + escapeHtml(u.email || '—') + '<br/><span class="pill">' + escapeHtml(u.name || '未命名') + '</span></td>' +
+                '<td>' + escapeHtml(r.country || '—') + '<br/><small>' + escapeHtml(r.ip || '—') + '</small></td>';
+              tb.appendChild(tr);
+            });
+            return;
+          }
+
+          // 埋点为空时，自动回退到最近注册用户，避免看板空白。
+          var users = await api('/users');
+          var sorted = (users || []).slice().sort(function (a, b) {
+            return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+          }).slice(0, 30);
+          if (!sorted.length) {
+            appendEmptyRow(tb, '暂无登录埋点，也暂无最近注册用户');
+            return;
+          }
+          sorted.forEach(function (u) {
             var tr = document.createElement('tr');
-            var u = r.user || {};
             tr.innerHTML =
-              '<td>' + (r.at || '') + '</td>' +
-              '<td>' + (u.email || '—') + '<br/><span class="pill">' + (u.name || '') + '</span></td>' +
-              '<td>' + (r.country || '—') + '<br/><small>' + (r.ip || '') + '</small></td>';
+              '<td><small>' + formatDateTime(u.createdAt) + '</small></td>' +
+              '<td>' + escapeHtml(u.email || '—') + '<br/><span class="pill">' + escapeHtml(u.name || '未命名') + '</span></td>' +
+              '<td><span class="pill">最近注册（回退视图）</span><br/><small>' + escapeHtml(u.location || '未知地区') + '</small></td>';
             tb.appendChild(tr);
           });
         } catch (e) {
@@ -451,6 +819,26 @@
           locateFirstUserMatch();
         }
       });
+      document.getElementById('btn-close-activity-detail').addEventListener('click', function () {
+        document.getElementById('activity-detail-mask').classList.add('hidden');
+      });
+      document.getElementById('activity-detail-mask').addEventListener('click', function (event) {
+        if (event.target && event.target.id === 'activity-detail-mask') {
+          document.getElementById('activity-detail-mask').classList.add('hidden');
+        }
+      });
+      document.getElementById('btn-activity-search').addEventListener('click', function () {
+        if (!currentActivityUserId) return;
+        var keyword = (document.getElementById('activity-keyword').value || '').trim();
+        loadActivityDetail(currentActivityUserId, keyword).catch(function (e) { alert(e.message || String(e)); });
+      });
+      document.getElementById('activity-keyword').addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        if (!currentActivityUserId) return;
+        var keyword = (document.getElementById('activity-keyword').value || '').trim();
+        loadActivityDetail(currentActivityUserId, keyword).catch(function (e) { alert(e.message || String(e)); });
+      });
       document.getElementById('btn-close-points-detail').addEventListener('click', function () {
         document.getElementById('points-detail-mask').classList.add('hidden');
       });
@@ -463,10 +851,11 @@
       document.querySelector('#tbl-users tbody').addEventListener('click', async function (event) {
         var target = event.target;
         if (!target || !(target instanceof HTMLElement)) return;
+        var isActivityDetail = target.classList.contains('btn-activity-detail');
         var isPointsDetail = target.classList.contains('btn-points-detail');
         var isGrantPoints = target.classList.contains('btn-grant-points');
         var isGrantMember = target.classList.contains('btn-grant-member');
-        if (!isPointsDetail && !isGrantPoints && !isGrantMember) return;
+        if (!isActivityDetail && !isPointsDetail && !isGrantPoints && !isGrantMember) return;
 
         var userId = target.getAttribute('data-id') || '';
         var email = target.getAttribute('data-email') || '该用户';
@@ -474,6 +863,10 @@
 
         target.setAttribute('disabled', 'disabled');
         try {
+          if (isActivityDetail) {
+            await openActivityDetail(userId);
+            return;
+          }
           if (isPointsDetail) {
             await openPointsDetail(userId);
             return;

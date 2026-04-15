@@ -81,6 +81,26 @@ export class UserController {
     return this.userService.getAdminUserPointsDetail(id, Number.isFinite(parsed) ? parsed : 100);
   }
 
+  @Get('admin/:id/activity-detail')
+  @UseGuards(RequireAuthGuard, AdminGuard)
+  getActivityDetail(
+    @Param('id') id: string,
+    @Query('chatLimit') chatLimit?: string,
+    @Query('eventLimit') eventLimit?: string,
+    @Query('days') days?: string,
+    @Query('keyword') keyword?: string,
+  ) {
+    const parsedChatLimit = Number.parseInt(chatLimit || '40', 10);
+    const parsedEventLimit = Number.parseInt(eventLimit || '60', 10);
+    const parsedDays = Number.parseInt(days || '30', 10);
+    return this.userService.getAdminUserActivityDetail(id, {
+      chatLimit: Number.isFinite(parsedChatLimit) ? parsedChatLimit : 40,
+      eventLimit: Number.isFinite(parsedEventLimit) ? parsedEventLimit : 60,
+      periodDays: Number.isFinite(parsedDays) ? parsedDays : 30,
+      keyword: (keyword || '').trim(),
+    });
+  }
+
   @Get(':id')
   @UseGuards(RequireAuthGuard)
   async findOne(@Param('id') id: string, @Req() req: { user: { sub?: string; id?: string } }) {

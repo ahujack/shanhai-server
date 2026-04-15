@@ -30,6 +30,33 @@ function pickCountry(req: Request): string | null {
 export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private dayKey(date: Date): string {
+    return date.toISOString().slice(0, 10);
+  }
+
+  private buildDailyTrend(
+    since: Date,
+    days: number,
+    rows: Array<{ createdAt: Date }>,
+  ): Array<{ day: string; count: number }> {
+    const safeDays = Math.min(Math.max(days, 1), 365);
+    const start = new Date(since);
+    start.setHours(0, 0, 0, 0);
+
+    const map = new Map<string, number>();
+    for (let i = 0; i < safeDays; i += 1) {
+      const day = new Date(start.getTime() + i * 86400000);
+      map.set(this.dayKey(day), 0);
+    }
+    rows.forEach((row) => {
+      const key = this.dayKey(row.createdAt);
+      if (map.has(key)) {
+        map.set(key, (map.get(key) || 0) + 1);
+      }
+    });
+    return Array.from(map.entries()).map(([day, count]) => ({ day, count }));
+  }
+
   recordFromRequest(
     req: Request,
     params: { userId: string; name: string; props?: Record<string, unknown> },
@@ -82,9 +109,25 @@ export class AnalyticsService {
   }
 
   async adminOverview(days: number) {
-    const since = new Date(Date.now() - Math.min(Math.max(days, 1), 365) * 86400000);
+    const safeDays = Math.min(Math.max(days, 1), 365);
+    const since = new Date(Date.now() - safeDays * 86400000);
 
-    const [eventGroups, intentGroups, feedbackGroups, loginCount, userTotal, usersNew] =
+    const [
+      eventGroups,
+      intentGroups,
+      feedbackGroups,
+      loginCount,
+      userTotal,
+      usersNew,
+      referredUsersTotal,
+      referredUsersInPeriod,
+      referralBonusInPeriod,
+      referralRewardInPeriod,
+      referralBonusTotal,
+      referralRewardTotal,
+      registrationsSince,
+      loginsSince,
+    ] =
       await Promise.all([
         this.prisma.analyticsEvent.groupBy({
           by: ['name'],
@@ -109,6 +152,46 @@ export class AnalyticsService {
         }),
         this.prisma.user.count(),
         this.prisma.user.count({ where: { createdAt: { gte: since } } }),
+        this.prisma.user.count({ where: { referredBy: { not: null } } }),
+        this.prisma.user.count({
+          where: {
+            createdAt: { gte: since },
+            referredBy: { not: null },
+          },
+        }),
+        this.prisma.pointRecord.aggregate({
+          where: {
+            type: 'referral_bonus',
+            createdAt: { gte: since },
+          },
+          _sum: { points: true },
+        }),
+        this.prisma.pointRecord.aggregate({
+          where: {
+            type: 'referral_reward',
+            createdAt: { gte: since },
+          },
+          _sum: { points: true },
+        }),
+        this.prisma.pointRecord.aggregate({
+          where: { type: 'referral_bonus' },
+          _sum: { points: true },
+        }),
+        this.prisma.pointRecord.aggregate({
+          where: { type: 'referral_reward' },
+          _sum: { points: true },
+        }),
+        this.prisma.user.findMany({
+          where: { createdAt: { gte: since } },
+          select: { createdAt: true },
+        }),
+        this.prisma.analyticsEvent.findMany({
+          where: {
+            createdAt: { gte: since },
+            name: 'login',
+          },
+          select: { createdAt: true },
+        }),
       ]);
 
     const byCountry = await this.prisma.analyticsEvent.groupBy({
@@ -120,13 +203,28 @@ export class AnalyticsService {
       _count: { _all: true },
     });
 
+    const registrationsByDay = this.buildDailyTrend(since, safeDays, registrationsSince);
+    const loginsByDay = this.buildDailyTrend(since, safeDays, loginsSince);
+
     return {
-      periodDays: days,
+      periodDays: safeDays,
       since: since.toISOString(),
       totals: {
         users: userTotal,
         newUsersInPeriod: usersNew,
         loginsInPeriod: loginCount,
+      },
+      referral: {
+        referredUsersTotal,
+        newReferredUsersInPeriod: referredUsersInPeriod,
+        referralBonusInPeriod: referralBonusInPeriod._sum.points || 0,
+        referralRewardInPeriod: referralRewardInPeriod._sum.points || 0,
+        referralBonusTotal: referralBonusTotal._sum.points || 0,
+        referralRewardTotal: referralRewardTotal._sum.points || 0,
+      },
+      trends: {
+        registrationsByDay,
+        loginsByDay,
       },
       eventsByName: eventGroups.map((g) => ({ name: g.name, count: g._count._all })),
       chatIntents: intentGroups.map((g) => ({

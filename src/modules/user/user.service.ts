@@ -75,6 +75,41 @@ export interface AdminUserPointsDetail {
   }>;
 }
 
+export interface AdminUserActivityDetail {
+  user: Pick<UserProfile, 'id' | 'name' | 'createdAt'> & {
+    emailMasked: string;
+  };
+  privacy: {
+    messageMasked: boolean;
+    replyMasked: boolean;
+    emailMasked: boolean;
+    ipMasked: boolean;
+  };
+  usage: {
+    periodDays: number;
+    totalChatsInPeriod: number;
+    totalEventsInPeriod: number;
+    chatByIntent: Array<{ intent: string; count: number }>;
+    featureUsage: Array<{ feature: string; count: number }>;
+  };
+  chats: Array<{
+    id: string;
+    createdAt: Date;
+    intent: string | null;
+    mood: string | null;
+    personaId: string | null;
+    messageMasked: string;
+    replyMasked: string;
+  }>;
+  events: Array<{
+    id: string;
+    at: Date;
+    name: string;
+    country: string | null;
+    ipMasked: string;
+  }>;
+}
+
 interface VerificationCode {
   code: string;
   expiresAt: number;
@@ -903,6 +938,186 @@ export class UserService {
         referralRewards: referralRewardAgg._sum.points || 0,
       },
       records,
+    };
+  }
+
+  private maskEmail(email?: string | null): string {
+    const raw = (email || '').trim();
+    if (!raw) return '—';
+    const at = raw.indexOf('@');
+    if (at <= 0) return '***';
+    const name = raw.slice(0, at);
+    const domain = raw.slice(at + 1);
+    const left = name.length <= 2 ? name.slice(0, 1) : name.slice(0, 2);
+    return `${left}***@${domain}`;
+  }
+
+  private maskIp(ip?: string | null): string {
+    const raw = (ip || '').trim();
+    if (!raw) return '—';
+    if (raw.includes(':')) {
+      const parts = raw.split(':').filter(Boolean);
+      if (parts.length <= 2) return '***';
+      return `${parts.slice(0, 2).join(':')}:***`;
+    }
+    const parts = raw.split('.');
+    if (parts.length === 4) {
+      return `${parts[0]}.${parts[1]}.*.*`;
+    }
+    return '***';
+  }
+
+  private maskText(content?: string | null): string {
+    const raw = (content || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return '—';
+    if (raw.length <= 8) {
+      return `${raw.slice(0, 1)}***${raw.slice(-1)}`;
+    }
+    if (raw.length <= 20) {
+      return `${raw.slice(0, 4)}***${raw.slice(-3)}`;
+    }
+    return `${raw.slice(0, 8)}***${raw.slice(-4)}`;
+  }
+
+  // 管理员查询用户聊天/功能使用（默认脱敏）
+  async getAdminUserActivityDetail(
+    userId: string,
+    options?: { chatLimit?: number; eventLimit?: number; periodDays?: number; keyword?: string },
+  ): Promise<AdminUserActivityDetail> {
+    const chatTake = Math.max(1, Math.min(Number(options?.chatLimit) || 40, 100));
+    const eventTake = Math.max(1, Math.min(Number(options?.eventLimit) || 60, 150));
+    const periodDays = Math.max(1, Math.min(Number(options?.periodDays) || 30, 365));
+    const keyword = (options?.keyword || '').trim();
+    const since = new Date(Date.now() - periodDays * 86400000);
+
+    const target = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        createdAt: true,
+      },
+    });
+    if (!target) {
+      throw new NotFoundException('目标用户不存在');
+    }
+
+    const chatWhere: Prisma.ChatMessageWhereInput = {
+      userId,
+      ...(keyword
+        ? {
+            OR: [
+              { message: { contains: keyword, mode: 'insensitive' } },
+              { reply: { contains: keyword, mode: 'insensitive' } },
+              { intent: { contains: keyword, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const [chatRows, eventRows, chatGroups, eventGroups, totalChatsInPeriod, totalEventsInPeriod] = await Promise.all([
+      this.prisma.chatMessage.findMany({
+        where: chatWhere,
+        orderBy: { createdAt: 'desc' },
+        take: chatTake,
+        select: {
+          id: true,
+          createdAt: true,
+          intent: true,
+          mood: true,
+          personaId: true,
+          message: true,
+          reply: true,
+        },
+      }),
+      this.prisma.analyticsEvent.findMany({
+        where: {
+          userId,
+          createdAt: { gte: since },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: eventTake,
+        select: {
+          id: true,
+          createdAt: true,
+          name: true,
+          country: true,
+          ip: true,
+        },
+      }),
+      this.prisma.chatMessage.groupBy({
+        by: ['intent'],
+        where: {
+          userId,
+          createdAt: { gte: since },
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.analyticsEvent.groupBy({
+        by: ['name'],
+        where: {
+          userId,
+          createdAt: { gte: since },
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.chatMessage.count({
+        where: {
+          userId,
+          createdAt: { gte: since },
+        },
+      }),
+      this.prisma.analyticsEvent.count({
+        where: {
+          userId,
+          createdAt: { gte: since },
+        },
+      }),
+    ]);
+
+    return {
+      user: {
+        id: target.id,
+        name: target.name,
+        emailMasked: this.maskEmail(target.email),
+        createdAt: target.createdAt,
+      },
+      privacy: {
+        messageMasked: true,
+        replyMasked: true,
+        emailMasked: true,
+        ipMasked: true,
+      },
+      usage: {
+        periodDays,
+        totalChatsInPeriod,
+        totalEventsInPeriod,
+        chatByIntent: chatGroups.map((g) => ({
+          intent: g.intent || 'unknown',
+          count: g._count._all,
+        })),
+        featureUsage: eventGroups.map((g) => ({
+          feature: g.name,
+          count: g._count._all,
+        })),
+      },
+      chats: chatRows.map((row) => ({
+        id: row.id,
+        createdAt: row.createdAt,
+        intent: row.intent,
+        mood: row.mood,
+        personaId: row.personaId,
+        messageMasked: this.maskText(row.message),
+        replyMasked: this.maskText(row.reply),
+      })),
+      events: eventRows.map((row) => ({
+        id: row.id,
+        at: row.createdAt,
+        name: row.name,
+        country: row.country,
+        ipMasked: this.maskIp(row.ip),
+      })),
     };
   }
 
