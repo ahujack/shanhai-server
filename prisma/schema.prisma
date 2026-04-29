@@ -12,49 +12,49 @@ datasource db {
 
 // 用户模型
 model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  name          String
-  password      String?   // 加密后的密码，第三方登录为 null
-  avatar        String?
-  phone         String?
-  birthDate     String?
-  birthTime     String?
-  calendarType  String    @default("solar") // solar | lunar
-  isLeapMonth   Boolean   @default(false)
-  birthLocation String?
-  birthLongitude Float?
-  birthLatitude  Float?
-  gender        String?
-  timezone      String    @default("Asia/Shanghai")
-  location      String?
-  focusGod      String?   // 用户长期关注十神（用于跨设备个性化）
-  role          String    @default("user") // user | admin
-  membership    String    @default("free") // free | premium | vip
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  name               String
+  password           String? // 加密后的密码，第三方登录为 null
+  avatar             String?
+  phone              String?
+  birthDate          String?
+  birthTime          String?
+  calendarType       String    @default("solar") // solar | lunar
+  isLeapMonth        Boolean   @default(false)
+  birthLocation      String?
+  birthLongitude     Float?
+  birthLatitude      Float?
+  gender             String?
+  timezone           String    @default("Asia/Shanghai")
+  location           String?
+  focusGod           String? // 用户长期关注十神（用于跨设备个性化）
+  role               String    @default("user") // user | admin
+  membership         String    @default("free") // free | premium | vip
   membershipExpiryAt DateTime? // 会员到期时间，过期后自动降级为 free
-  
+
   // 社交登录绑定
-  googleId      String?   @unique
-  facebookId    String?   @unique
-  
+  googleId   String? @unique
+  facebookId String? @unique
+
   // 推荐系统
-  referredBy    String?   // 推荐人用户ID
-  referralCode  String?   @unique // 自己的推荐码
-  
+  referredBy   String? // 推荐人用户ID
+  referralCode String? @unique // 自己的推荐码
+
   // 时间戳
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // 关联
-  charts        BaziChart[]
-  fortunes      Fortune[]
-  chatMessages  ChatMessage[]
+  charts       BaziChart[]
+  fortunes     Fortune[]
+  chatMessages ChatMessage[]
   ziAnalyses   ZiAnalysis[]
   readings     Reading[]
   checkIns     CheckIn[]
-  achievements  UserAchievement[]
-  userPoints    UserPoints?
-  pointRecords  PointRecord[]
+  achievements UserAchievement[]
+  userPoints   UserPoints?
+  pointRecords PointRecord[]
   payments     Payment[]
 
   analyticsEvents AnalyticsEvent[]
@@ -63,16 +63,16 @@ model User {
 
 /// 客户端或服务端埋点（登录、页面曝光、功能使用等）
 model AnalyticsEvent {
-  id        String   @id @default(uuid())
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id     String  @id @default(uuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  name      String
-  props     Json?
+  name  String
+  props Json?
 
-  locale    String?
-  timezone  String?
-  region    String?
+  locale   String?
+  timezone String?
+  region   String?
 
   ip        String?
   country   String?
@@ -88,14 +88,14 @@ model AnalyticsEvent {
 
 /// 用户对占卜/测字等准确度的主观反馈
 model UserFeedback {
-  id        String   @id @default(uuid())
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id     String  @id @default(uuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  category  String
-  rating    Int?
-  comment   String?
-  context   Json?
+  category String
+  rating   Int?
+  comment  String?
+  context  Json?
 
   createdAt DateTime @default(now())
 
@@ -106,15 +106,15 @@ model UserFeedback {
 
 /// 邮箱验证码（用于注册/登录/重置）
 model VerificationCode {
-  id         String   @id @default(uuid())
-  identifier String   // 邮箱
-  purpose    String   // login | register | reset
-  code       String
-  failedAttempts Int  @default(0)
-  lockedUntil DateTime?
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id             String    @id @default(uuid())
+  identifier     String // 邮箱
+  purpose        String // login | register | reset
+  code           String
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@unique([identifier, purpose])
   @@index([expiresAt])
@@ -122,80 +122,80 @@ model VerificationCode {
 
 // 聊天消息模型
 model ChatMessage {
-  id            String    @id @default(uuid())
-  userId        String?
-  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id     String  @id @default(uuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // 消息内容
-  message       String    // 用户消息
-  reply         String?   // AI 回复
-  intent        String?   // 意图：chat, divination, meditation, chart, fortune, zi
-  
+  message String // 用户消息
+  reply   String? // AI 回复
+  intent  String? // 意图：chat, divination, meditation, chart, fortune, zi
+
   // 上下文
-  personaId    String?   // 使用的人格 ID
-  mood          String?   // 用户情绪：calm, anxious, sad, excited
-  
+  personaId String? // 使用的人格 ID
+  mood      String? // 用户情绪：calm, anxious, sad, excited
+
   // 额外数据 (存储为 JSON)
-  artifacts     String?   // 生成的 artifacts，如运势、命盘等
-  
-  createdAt     DateTime  @default(now())
-  
+  artifacts String? // 生成的 artifacts，如运势、命盘等
+
+  createdAt DateTime @default(now())
+
   @@index([userId])
   @@index([createdAt])
 }
 
 // 测字分析模型
 model ZiAnalysis {
-  id            String    @id @default(uuid())
-  userId        String?
-  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id     String  @id @default(uuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // 测的字
-  zi            String    // 分析的字
-  
+  zi String // 分析的字
+
   // 笔迹分析结果
-  pressure          String?   // 力度：heavy, light, medium
-  pressureInterpretation String?
-  stability         String?   // 稳定性：stable, shaky, average
-  stabilityInterpretation String?
-  structure         String?   // 结构：compact, loose, balanced
-  structureInterpretation String?
-  continuity        String?   // 连贯性：connected, broken, average
+  pressure                 String? // 力度：heavy, light, medium
+  pressureInterpretation   String?
+  stability                String? // 稳定性：stable, shaky, average
+  stabilityInterpretation  String?
+  structure                String? // 结构：compact, loose, balanced
+  structureInterpretation  String?
+  continuity               String? // 连贯性：connected, broken, average
   continuityInterpretation String?
-  overallStyle      String?   // 整体风格
-  personalityInsights String? // 性格洞察 (JSON 数组)
-  
+  overallStyle             String? // 整体风格
+  personalityInsights      String? // 性格洞察 (JSON 数组)
+
   // 解读结果
-  interpretation   String?   // 综合解读
-  coldReadings     String?   // 冷读语录 (JSON 数组)
+  interpretation    String? // 综合解读
+  coldReadings      String? // 冷读语录 (JSON 数组)
   followUpQuestions String? // 跟进问题 (JSON 数组)
-  
+
   // 置信度
-  confidence    Float?     // 识别置信度
-  
-  createdAt     DateTime  @default(now())
-  
+  confidence Float? // 识别置信度
+
+  createdAt DateTime @default(now())
+
   @@index([userId])
   @@index([createdAt])
 }
 
 // 占卜解读模型
 model Reading {
-  id            String    @id @default(uuid())
-  userId        String?
-  user          User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id     String  @id @default(uuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // 问题
-  question      String    // 用户问题
-  
+  question String // 用户问题
+
   // 分类
-  category      String?   // 分类：career, love, wealth, health, growth, general
-  
+  category String? // 分类：career, love, wealth, health, growth, general
+
   // 解读内容 (JSON 字符串)
-  result        String?   // 解读结果
-  
-  createdAt     DateTime  @default(now())
-  
+  result String? // 解读结果
+
+  createdAt DateTime @default(now())
+
   @@index([userId])
   @@index([category])
   @@index([createdAt])
@@ -203,61 +203,61 @@ model Reading {
 
 // 八字命盘模型
 model BaziChart {
-  id              String    @id @default(uuid())
-  userId          String    @unique
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // 基本信息
-  birthDate       String
-  birthTime       String
-  gender          String
-  
+  birthDate String
+  birthTime String
+  gender    String
+
   // 八字
-  yearGanZhi      String    // 年柱
-  monthGanZhi     String    // 月柱
-  dayGanZhi       String    // 日柱
-  hourGanZhi      String    // 时柱
-  
+  yearGanZhi  String // 年柱
+  monthGanZhi String // 月柱
+  dayGanZhi   String // 日柱
+  hourGanZhi  String // 时柱
+
   // 十神
-  dayMaster       String    // 日主
-  sun             String    // 太阳星座
-  moon            String    // 月亮星座
-  
+  dayMaster String // 日主
+  sun       String // 太阳星座
+  moon      String // 月亮星座
+
   // 五行强弱 (存储为 JSON 字符串)
-  wuxingStrength  String    // {"wood": 20, "fire": 15, ...}
-  
+  wuxingStrength String // {"wood": 20, "fire": 15, ...}
+
   // 性格特点 (存储为 JSON 字符串数组)
-  personalityTraits String   // ["性格1", "性格2", ...]
-  
+  personalityTraits String // ["性格1", "性格2", ...]
+
   // 运势简述 (存储为 JSON 字符串)
-  fortuneSummary  String    // {"career": "...", "wealth": "...", ...}
-  
+  fortuneSummary String // {"career": "...", "wealth": "...", ...}
+
   // 建议 (存储为 JSON 字符串数组)
-  suggestions     String    // ["建议1", "建议2", ...]
-  
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  suggestions String // ["建议1", "建议2", ...]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // 每日运势模型
 model Fortune {
-  id              String    @id @default(uuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  date            String    // 日期格式：2024-01-15
-  zodiac          String?   // 星座
-  overall         String    // 总体运势
-  love            String    // 爱情运势
-  career          String    // 事业运势
-  wealth          String    // 财运
-  health          String    // 健康运势
-  luckyColor      String?   // 幸运颜色
-  luckyNumber     String?   // 幸运数字
-  luckyDirection  String?   // 幸运方向
-  advice          String    // 建议
-  
-  createdAt       DateTime  @default(now())
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  date           String // 日期格式：2024-01-15
+  zodiac         String? // 星座
+  overall        String // 总体运势
+  love           String // 爱情运势
+  career         String // 事业运势
+  wealth         String // 财运
+  health         String // 健康运势
+  luckyColor     String? // 幸运颜色
+  luckyNumber    String? // 幸运数字
+  luckyDirection String? // 幸运方向
+  advice         String // 建议
+
+  createdAt DateTime @default(now())
 
   @@unique([userId, date]) // 每个用户每天只能有一条运势
   @@index([userId])
@@ -265,16 +265,16 @@ model Fortune {
 
 // 每日签到模型
 model CheckIn {
-  id              String    @id @default(uuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  date            String    // 日期格式：2024-01-15
-  streak          Int       @default(1)   // 连续签到天数
-  points          Int       @default(10)  // 获得积分
-  reward          String?   // 奖励描述
-  
-  createdAt       DateTime  @default(now())
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  date   String // 日期格式：2024-01-15
+  streak Int     @default(1) // 连续签到天数
+  points Int     @default(10) // 获得积分
+  reward String? // 奖励描述
+
+  createdAt DateTime @default(now())
 
   @@unique([userId, date]) // 每个用户每天只能签到一次
   @@index([userId])
@@ -282,132 +282,132 @@ model CheckIn {
 
 // 成就定义模型
 model Achievement {
-  id              String    @id @default(uuid())
-  code            String    @unique // 成就代码，如 "login_1", "login_3", "login_7", "first_draw" 等
-  name            String    // 成就名称
-  description     String    // 成就描述
-  icon            String?   // 成就图标
-  category        String    // 成就分类：login, draw, chart, chat, vip 等
-  requirement     Int       @default(1) // 达成条件（数值）
-  points          Int       @default(0) // 成就奖励积分
-  createdAt       DateTime  @default(now())
-  
+  id          String   @id @default(uuid())
+  code        String   @unique // 成就代码，如 "login_1", "login_3", "login_7", "first_draw" 等
+  name        String // 成就名称
+  description String // 成就描述
+  icon        String? // 成就图标
+  category    String // 成就分类：login, draw, chart, chat, vip 等
+  requirement Int      @default(1) // 达成条件（数值）
+  points      Int      @default(0) // 成就奖励积分
+  createdAt   DateTime @default(now())
+
   // 关联
   userAchievements UserAchievement[]
-  
+
   @@index([category])
 }
 
 // 用户成就关联模型
 model UserAchievement {
-  id              String    @id @default(uuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  achievementId   String
-  achievement     Achievement @relation(fields: [achievementId], references: [id])
-  unlockedAt      DateTime  @default(now()) // 解锁时间
-  
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  unlockedAt    DateTime    @default(now()) // 解锁时间
+
   @@unique([userId, achievementId]) // 每个用户每个成就只能解锁一次
   @@index([userId])
 }
 
 // 用户积分模型
 model UserPoints {
-  id              String    @id @default(uuid())
-  userId          String    @unique
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  totalPoints     Int       @default(0) // 总积分
-  availablePoints Int       @default(0) // 可用积分
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  totalPoints     Int      @default(0) // 总积分
+  availablePoints Int      @default(0) // 可用积分
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 // 积分记录模型
 model PointRecord {
-  id              String    @id @default(uuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  points          Int       // 积分变动数量（正数为增加，负数为消耗）
-  type            String    // 积分类型：checkin, reward, draw, exchange, bonus, recharge 等
-  description     String?  // 描述
-  createdAt       DateTime  @default(now())
-  
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  points      Int // 积分变动数量（正数为增加，负数为消耗）
+  type        String // 积分类型：checkin, reward, draw, exchange, bonus, recharge 等
+  description String? // 描述
+  createdAt   DateTime @default(now())
+
   @@index([userId])
   @@index([createdAt])
 }
 
 // 支付产品/套餐模型
 model PaymentProduct {
-  id              String    @id @default(uuid())
-  code            String    @unique // 产品代码，如 "points_100", "vip_monthly"
-  name            String    // 产品名称
-  description     String?   // 产品描述
-  
+  id          String  @id @default(uuid())
+  code        String  @unique // 产品代码，如 "points_100", "vip_monthly"
+  name        String // 产品名称
+  description String? // 产品描述
+
   // 产品类型：points - 积分包, subscription - 订阅
-  type            String    @default("points")
-  
+  type String @default("points")
+
   // 金额（美元）
-  price           Float
-  
+  price Float
+
   // 获得积分数量（type=points时）
-  points          Int       @default(0)
-  
+  points Int @default(0)
+
   // 订阅相关（type=subscription时）
-  periodDays      Int?      // 订阅天数
-  features        String?   // 功能列表（JSON数组）
-  
+  periodDays Int? // 订阅天数
+  features   String? // 功能列表（JSON数组）
+
   // Stripe相关
-  stripePriceId  String?   // Stripe Price ID
-  
+  stripePriceId String? // Stripe Price ID
+
   // Creem相关
-  creemPriceId   String?   // Creem Price ID
-  
+  creemPriceId String? // Creem Price ID
+
   // 状态
-  isActive        Boolean   @default(true)
-  sortOrder       Int       @default(0)
-  
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // 关联
-  payments        Payment[]
+  payments Payment[]
 }
 
 // 支付记录模型
 model Payment {
-  id              String    @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   // 用户
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   // 产品
-  productId       String
-  product         PaymentProduct @relation(fields: [productId], references: [id])
-  
+  productId String
+  product   PaymentProduct @relation(fields: [productId], references: [id])
+
   // 金额
-  amount          Float     // 支付金额（美元）
-  currency        String    @default("usd")
-  
+  amount   Float // 支付金额（美元）
+  currency String @default("usd")
+
   // 积分
-  points          Int       // 获得的积分
-  
+  points Int // 获得的积分
+
   // Stripe相关
-  stripePaymentId String?   // Stripe Payment Intent ID
-  stripeSessionId String?   // Stripe Checkout Session ID
-  
+  stripePaymentId String? // Stripe Payment Intent ID
+  stripeSessionId String? // Stripe Checkout Session ID
+
   // Creem相关
-  creemCheckoutId String?   // Creem Checkout ID
-  
-  status          String    @default("pending") // pending, completed, failed, refunded
-  
+  creemCheckoutId String? @unique // Creem Checkout ID
+
+  status String @default("pending") // pending, completed, failed, refunded
+
   // 支付方式
-  paymentMethod   String?   // payment_method 类型
-  
+  paymentMethod String? // payment_method 类型
+
   // 时间
-  createdAt       DateTime  @default(now())
-  completedAt     DateTime? // 支付完成时间
-  
+  createdAt   DateTime  @default(now())
+  completedAt DateTime? // 支付完成时间
+
   @@index([userId])
   @@index([status])
   @@index([createdAt])

@@ -13,7 +13,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { PaymentService } from './payment.service';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -86,6 +86,7 @@ export class PaymentController {
 
   // Stripe Webhook 回调
   @Post('webhook')
+  @SkipThrottle()
   async handleWebhook(@Req() req: any) {
     const signature = req.headers['stripe-signature'];
     const rawBody = req.rawBody;
@@ -105,6 +106,7 @@ export class PaymentController {
   // Creem Webhook 回调（需配置 rawBody 以验证签名）
   @Post('webhook/creem')
   @HttpCode(HttpStatus.OK)
+  @SkipThrottle()
   async handleCreemWebhook(@Req() req: any) {
     const signature = req.headers['creem-signature'] as string | undefined;
     const rawBody = (() => {

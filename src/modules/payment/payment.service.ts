@@ -17,6 +17,7 @@ export class PaymentService implements OnModuleInit {
   private readonly logger = new Logger(PaymentService.name);
   private creemApiKey: string | null = null;
   private creemApiUrl = 'https://api.creem.io/v1';
+  private readonly creemRequestTimeoutMs = Number(process.env.CREEM_TIMEOUT_MS || 15000);
 
   /**
    * 代码内默认 Creem product_id（可被环境变量 CREEM_PRODUCT_<CODE> 覆盖，CODE 为大写+下划线，如 POINTS_100）
@@ -171,8 +172,15 @@ export class PaymentService implements OnModuleInit {
     const creemPriceId = this.resolvedCreemProductId(product.code, product.creemPriceId);
     this.logger.log(`Product code: ${product.code}, creemPriceId: ${creemPriceId}, creemApiKey set: ${!!this.creemApiKey}`);
 
-    // 未配置 API Key：本地/测试用模拟支付
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const allowMockInProd = process.env.ALLOW_MOCK_PAYMENT === 'true';
+
+    // 未配置 API Key：仅本地/测试允许模拟支付；生产默认拒绝
     if (!this.creemApiKey) {
+      if (isProd && !allowMockInProd) {
+        this.logger.error('Creem API key missing in production, checkout blocked');
+        throw new InternalServerErrorException('支付服务配置异常，请稍后重试');
+      }
       this.logger.warn('Creem not configured, returning mock payment');
       return {
         paymentId: payment.id,
@@ -219,6 +227,7 @@ export class PaymentService implements OnModuleInit {
             'x-api-key': this.creemApiKey,
             'Content-Type': 'application/json',
           },
+          timeout: this.creemRequestTimeoutMs,
         },
       );
 
@@ -300,6 +309,7 @@ export class PaymentService implements OnModuleInit {
       const { data: checkout } = await axios.get(`${this.creemApiUrl}/checkouts`, {
         params: { checkout_id: checkoutId },
         headers: { 'x-api-key': this.creemApiKey },
+        timeout: this.creemRequestTimeoutMs,
       });
       if (checkout?.status !== 'completed') return false;
       const trustedPid = checkout.metadata?.paymentId;
@@ -401,6 +411,7 @@ export class PaymentService implements OnModuleInit {
       const response = await axios.get(`${this.creemApiUrl}/checkouts`, {
         params: { checkout_id: row.creemCheckoutId },
         headers: { 'x-api-key': this.creemApiKey },
+        timeout: this.creemRequestTimeoutMs,
       });
       const checkout = response.data;
       const status = checkout?.status;
@@ -435,15 +446,31 @@ export class PaymentService implements OnModuleInit {
         return payment;
       }
 
-      // 更新支付状态
-      const updatedPayment = await tx.payment.update({
-        where: { id: paymentId },
+      // 原子幂等：仅允许 pending -> completed
+      const updateResult = await tx.payment.updateMany({
+        where: {
+          id: paymentId,
+          status: 'pending',
+        },
         data: {
           creemCheckoutId: providerPaymentId,
           status: 'completed',
           completedAt: new Date(),
         },
       });
+
+      if (updateResult.count === 0) {
+        const latest = await tx.payment.findUnique({ where: { id: paymentId } });
+        if (!latest) {
+          throw new NotFoundException('支付记录不存在');
+        }
+        return latest;
+      }
+
+      const updatedPayment = await tx.payment.findUnique({ where: { id: paymentId } });
+      if (!updatedPayment) {
+        throw new NotFoundException('支付记录不存在');
+      }
 
       // 1. 如果是积分产品，添加积分与流水（同事务）
       if (payment.points > 0) {
