@@ -34,6 +34,10 @@ export interface UserProfile {
   referredBy?: string;   // 推荐人ID
   createdAt: Date;
   updatedAt: Date;
+  /** 最近活跃模块（仅管理端列表使用） */
+  lastActiveModule?: string;
+  /** 最近活跃时间（仅管理端列表使用） */
+  lastActiveAt?: Date;
 }
 
 export interface CreateUserDto {
@@ -307,8 +311,75 @@ export class UserService {
 
   // 获取所有用户
   async findAll(): Promise<UserProfile[]> {
-    const users = await this.prisma.user.findMany();
-    return users.map(this.formatUser);
+    const users = await this.prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!users.length) return [];
+
+    const userIds = users.map((u) => u.id);
+    const [latestEvents, latestChats] = await Promise.all([
+      this.prisma.analyticsEvent.findMany({
+        where: {
+          userId: { in: userIds },
+        },
+        orderBy: { createdAt: 'desc' },
+        distinct: ['userId'],
+        select: {
+          userId: true,
+          name: true,
+          props: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.chatMessage.findMany({
+        where: {
+          userId: { in: userIds },
+        },
+        orderBy: { createdAt: 'desc' },
+        distinct: ['userId'],
+        select: {
+          userId: true,
+          intent: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    const eventMap = new Map(
+      latestEvents.map((item) => [
+        item.userId,
+        {
+          module: this.resolveModuleByEvent(item.name, item.props),
+          at: item.createdAt,
+        },
+      ]),
+    );
+    const chatMap = new Map(
+      latestChats.map((item) => [
+        item.userId,
+        {
+          module: this.resolveModuleByIntent(item.intent),
+          at: item.createdAt,
+        },
+      ]),
+    );
+
+    return users.map((user) => {
+      const profile = this.formatUser(user);
+      const eventHit = eventMap.get(user.id);
+      const chatHit = chatMap.get(user.id);
+      const latest =
+        eventHit && chatHit
+          ? eventHit.at >= chatHit.at
+            ? eventHit
+            : chatHit
+          : eventHit || chatHit || null;
+      if (latest) {
+        profile.lastActiveModule = latest.module;
+        profile.lastActiveAt = latest.at;
+      }
+      return profile;
+    });
   }
 
   // 获取单个用户
@@ -977,6 +1048,38 @@ export class UserService {
       return `${raw.slice(0, 4)}***${raw.slice(-3)}`;
     }
     return `${raw.slice(0, 8)}***${raw.slice(-4)}`;
+  }
+
+  private resolveModuleByIntent(intent?: string | null): string {
+    const key = String(intent || '').trim().toLowerCase();
+    const map: Record<string, string> = {
+      chat: 'AI对话',
+      divination: '占卜',
+      meditation: '冥想',
+      chart: '八字命盘',
+      fortune: '抽签运势',
+      zi: '测字',
+    };
+    return map[key] || 'AI对话';
+  }
+
+  private resolveModuleByEvent(eventName?: string | null, props?: Prisma.JsonValue): string {
+    const event = String(eventName || '').trim();
+    const propsObj = props && typeof props === 'object' && !Array.isArray(props) ? (props as Record<string, unknown>) : {};
+    const hinted =
+      String(propsObj.module || propsObj.feature || propsObj.page || '')
+        .trim()
+        .toLowerCase() || event.toLowerCase();
+
+    if (/bazi|chart|命盘/.test(hinted)) return '八字命盘';
+    if (/zi|测字|handwriting/.test(hinted)) return '测字';
+    if (/reading|divination|占卜|hexagram/.test(hinted)) return '占卜';
+    if (/fortune|sign|运势|draw/.test(hinted)) return '抽签运势';
+    if (/points|payment|checkout|vip|membership|subscribe/.test(hinted)) return '积分/支付';
+    if (/checkin|achievement|签到|成就/.test(hinted)) return '签到/成就';
+    if (/profile|user|个人/.test(hinted)) return '个人中心';
+    if (/chat|agent|message|dialog/.test(hinted)) return 'AI对话';
+    return event ? `事件:${event}` : '未知';
   }
 
   // 管理员查询用户聊天/功能使用（默认脱敏）

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import { PrismaService } from '../../prisma.service';
 
 export type DivinationCategory = 'career' | 'love' | 'wealth' | 'health' | 'growth' | 'general';
 
@@ -49,9 +50,12 @@ export interface DivinationResult {
   };
 }
 
+type MembershipTier = 'free' | 'premium' | 'vip';
+
 @Injectable()
 export class ReadingService {
   private readonly logger = new Logger(ReadingService.name);
+  constructor(private readonly prisma: PrismaService) {}
 
   // 六十四卦数据
   private hexagrams: Record<string, {
@@ -540,6 +544,7 @@ export class ReadingService {
       const llmResult = await this.generateInterpretationWithLLM({
         question: dto.question,
         category: dto.category ?? 'general',
+        userId: dto.userId,
         originalName,
         changedName,
         original,
@@ -726,6 +731,7 @@ export class ReadingService {
   private async generateInterpretationWithLLM(ctx: {
     question: string;
     category: DivinationCategory;
+    userId?: string;
     originalName: string;
     changedName: string;
     original: number;
@@ -734,33 +740,23 @@ export class ReadingService {
     movingLines: number;
   }): Promise<DivinationResult['interpretation'] & { recommendations?: string[] }> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
-    const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
+    const selection = await this.resolveReadingLlmSelection(ctx.userId);
+    const model = selection.model;
     if (!apiKey) throw new Error('DEEPSEEK_API_KEY 未配置');
+    const startedAt = Date.now();
 
     const yaoLabels = ['初', '二', '三', '四', '五', '上'];
     const yaoDesc = ctx.lines.map((l, i) => `${yaoLabels[i]}：${this.getYaoDescription(l)}`).join('\n');
 
-    const response = await axios.post(
-      process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
-      {
-        model,
-        temperature: 0.75,
-        max_tokens: 3000,
-        messages: [
-          {
-            role: 'system',
-            content: `你是易经占卜解读师。解读必须紧扣用户的具体问题和占卜方向，禁止泛泛而谈。
+    const systemPrompt = `你是易经占卜解读师。解读必须紧扣用户的具体问题和占卜方向，禁止泛泛而谈。
 
 【核心要求】
 1. 占卜方向（career/love/wealth/health/growth）决定解读重心，至少 80% 内容围绕该方向
 2. 用户问题要逐句回应，不能一笔带过
 3. 结合本卦、变卦、动爻数做具体分析，引用卦名和爻象
 4. 讲解要详细、有层次，每条 200-400 字
-5. 避免套话，每条建议都要可执行、有针对性`,
-          },
-          {
-            role: 'user',
-            content: `用户问题：${ctx.question}
+5. 避免套话，每条建议都要可执行、有针对性`;
+    const userPrompt = `用户问题：${ctx.question}
 占卜方向：${ctx.category}（必须围绕此方向深入解读）
 本卦：${ctx.originalName}
 变卦：${ctx.changedName}
@@ -774,27 +770,157 @@ export class ReadingService {
   "guidance": "具体可执行建议，针对用户问题，150-300字",
   "recommendations": ["建议1，针对用户问题，可执行", "建议2", "建议3"]
 }
-recommendations 必须紧扣用户问题和占卜方向，每条不同、可执行，禁止泛泛而谈。`,
-          },
-        ],
-      },
-      {
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        timeout: 30000,
-      },
-    );
+recommendations 必须紧扣用户问题和占卜方向，每条不同、可执行，禁止泛泛而谈。`;
 
-    const raw = response.data?.choices?.[0]?.message?.content ?? '{}';
-    const parsed = JSON.parse(raw.replace(/```json\n?|\n?```/g, '').trim());
-    const recs = parsed.recommendations;
+    try {
+      const response = await axios.post(
+        process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
+        {
+          model,
+          temperature: 0.75,
+          max_tokens: 3000,
+          messages: [
+            {
+              role: 'system',
+              content: systemPrompt,
+            },
+            {
+              role: 'user',
+              content: userPrompt,
+            },
+          ],
+        },
+        {
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 30000,
+        },
+      );
+
+      const raw = response.data?.choices?.[0]?.message?.content ?? '{}';
+      const usage = this.resolveTokenUsage(response.data, `${systemPrompt}\n${userPrompt}`, String(raw));
+      const parsed = JSON.parse(raw.replace(/```json\n?|\n?```/g, '').trim());
+      await this.trackReadingLlmTelemetry({
+        userId: ctx.userId,
+        membership: selection.membership,
+        model,
+        durationMs: Date.now() - startedAt,
+        usage,
+        success: true,
+      });
+      const recs = parsed.recommendations;
+      return {
+        overall: String(parsed.overall ?? '').slice(0, 2000),
+        situation: String(parsed.situation ?? '').slice(0, 1500),
+        guidance: String(parsed.guidance ?? '').slice(0, 1200),
+        recommendations: Array.isArray(recs) && recs.length >= 2
+          ? recs.slice(0, 5).map((r: unknown) => String(r ?? '').slice(0, 150))
+          : undefined,
+      };
+    } catch (error) {
+      await this.trackReadingLlmTelemetry({
+        userId: ctx.userId,
+        membership: selection.membership,
+        model,
+        durationMs: Date.now() - startedAt,
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, estimated: true },
+        success: false,
+        errorMessage: (error as Error).message,
+      });
+      throw error;
+    }
+  }
+
+  private async resolveReadingLlmSelection(userId?: string): Promise<{ model: string; membership: MembershipTier | 'guest' }> {
+    const forcedModel = String(process.env.READING_LLM_MODEL || '').trim();
+    if (forcedModel) {
+      return { model: forcedModel, membership: userId ? 'free' : 'guest' };
+    }
+
+    if (!userId) {
+      return { model: process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash', membership: 'guest' };
+    }
+
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { membership: true, membershipExpiryAt: true },
+      });
+      const tier = user?.membership;
+      const isPaid =
+        (tier === 'premium' || tier === 'vip') &&
+        (!user?.membershipExpiryAt || user.membershipExpiryAt > new Date());
+      if (isPaid) {
+        return { model: 'deepseek-v4-pro', membership: tier };
+      }
+    } catch (error) {
+      this.logger.warn(`读取占卜会员信息失败，回退默认模型: ${(error as Error).message}`);
+    }
+
+    return { model: process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash', membership: 'free' };
+  }
+
+  private estimateTokens(text: string): number {
+    const normalized = String(text || '').trim();
+    if (!normalized) return 0;
+    return Math.max(1, Math.ceil(normalized.length / 2));
+  }
+
+  private resolveTokenUsage(
+    responseData: unknown,
+    promptText: string,
+    completionText: string,
+  ): { promptTokens: number; completionTokens: number; totalTokens: number; estimated: boolean } {
+    const usage = (responseData as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } })?.usage;
+    if (usage && typeof usage.total_tokens === 'number') {
+      const promptTokens = Number(usage.prompt_tokens || 0);
+      const completionTokens = Number(usage.completion_tokens || 0);
+      const totalTokens = Number(usage.total_tokens || promptTokens + completionTokens);
+      return { promptTokens, completionTokens, totalTokens, estimated: false };
+    }
+    const promptTokens = this.estimateTokens(promptText);
+    const completionTokens = this.estimateTokens(completionText);
     return {
-      overall: String(parsed.overall ?? '').slice(0, 2000),
-      situation: String(parsed.situation ?? '').slice(0, 1500),
-      guidance: String(parsed.guidance ?? '').slice(0, 1200),
-      recommendations: Array.isArray(recs) && recs.length >= 2
-        ? recs.slice(0, 5).map((r: unknown) => String(r ?? '').slice(0, 150))
-        : undefined,
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      estimated: true,
     };
+  }
+
+  private async trackReadingLlmTelemetry(input: {
+    userId?: string;
+    membership: MembershipTier | 'guest';
+    model: string;
+    durationMs: number;
+    usage: { promptTokens: number; completionTokens: number; totalTokens: number; estimated: boolean };
+    success: boolean;
+    errorMessage?: string;
+  }): Promise<void> {
+    const safeUserId = input.userId && !input.userId.startsWith('guest_') ? input.userId : undefined;
+    try {
+      await this.prisma.analyticsEvent.create({
+        data: {
+          userId: safeUserId,
+          name: 'llm.call',
+          props: {
+            module: 'reading',
+            feature: 'reading_interpretation',
+            membership: input.membership,
+            model: input.model,
+            durationMs: input.durationMs,
+            promptTokens: input.usage.promptTokens,
+            completionTokens: input.usage.completionTokens,
+            totalTokens: input.usage.totalTokens,
+            tokenEstimated: input.usage.estimated,
+            success: input.success,
+            errorMessage: input.errorMessage || null,
+            happenedAt: new Date().toISOString(),
+          },
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`写入占卜 LLM 埋点失败: ${(err as Error).message}`);
+    }
   }
 
   private buildSeed(question: string, category?: DivinationCategory, userId?: string): number {

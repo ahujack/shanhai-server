@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import axios from 'axios';
 import { ORACLE_BONE_SNAPSHOT } from './oracle-bone.snapshot';
+import { PrismaService } from '../../prisma.service';
 
 // 汉典笔画部首数据（zdic），懒加载
 let zdicData: Record<string, [string, number]> | null = null;
@@ -61,6 +62,8 @@ export interface ZiAnalyzeOptions {
   preserveVisionHandwriting?: boolean;
   /** 用户当下想问的具体问题，用于把测字和真实困扰绑定 */
   userQuestion?: string;
+  /** 用于 LLM 调用埋点（可选） */
+  userId?: string;
 }
 
 // 笔迹特征库
@@ -305,6 +308,8 @@ export class ZiService {
   private readonly oracleBoneCacheMs = 24 * 60 * 60 * 1000;
   // 测试阶段默认全放开；如需恢复分层，将环境变量设为 false
   private readonly unlockAllForTest = process.env.ZI_UNLOCK_ALL_FOR_TEST !== 'false';
+
+  constructor(private readonly prisma: PrismaService) {}
   
   /**
    * 测字主入口
@@ -346,6 +351,8 @@ export class ZiService {
           chartContext: chartContext ?? undefined,
           visionHandwritingNote: analyzeOpts?.visionHandwritingNote,
           userQuestion: analyzeOpts?.userQuestion,
+          membership,
+          userId: analyzeOpts?.userId,
         });
         if (llmResult) {
           // 技法细化：离合法、填字格、象形投射
@@ -779,6 +786,8 @@ export class ZiService {
       chartContext?: ZiBaziContext;
       visionHandwritingNote?: string;
       userQuestion?: string;
+      membership?: MembershipTier;
+      userId?: string;
     },
   ): Promise<{
     overall?: string;
@@ -812,9 +821,10 @@ export class ZiService {
       return null;
     }
     
+    const startedAt = Date.now();
     try {
       const apiUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
-      const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+      const model = this.resolveZiLlmModel(ctx?.membership || 'free');
       // 原 5500 tokens + 30s 超时极易未完成即断开，前端表现为 net::ERR_CONNECTION_TIMED_OUT
       const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || '3800', 10);
       const maxTokens = Math.min(8192, Math.max(1500, Number.isFinite(maxTokensRaw) ? maxTokensRaw : 3800));
@@ -945,19 +955,130 @@ export class ZiService {
       );
 
       const content = response.data?.choices?.[0]?.message?.content;
+      const promptText = JSON.stringify({
+        focusAspect: focus.label,
+        userQuestion: ctx?.userQuestion?.trim() || null,
+        zi,
+      });
+      const usage = this.resolveTokenUsage(
+        response.data,
+        promptText,
+        typeof content === 'string' ? content : '',
+      );
       if (content) {
         try {
           const raw = String(content).replace(/```json\n?|\n?```/g, '').trim();
-          return JSON.parse(raw);
+          const parsed = JSON.parse(raw);
+          await this.trackZiLlmTelemetry({
+            userId: ctx?.userId,
+            membership: ctx?.membership || 'free',
+            model,
+            durationMs: Date.now() - startedAt,
+            usage,
+            success: true,
+          });
+          return parsed;
         } catch (parseErr) {
           this.logger.warn(`LLM 测字 JSON 解析失败: ${(parseErr as Error).message}`);
+          await this.trackZiLlmTelemetry({
+            userId: ctx?.userId,
+            membership: ctx?.membership || 'free',
+            model,
+            durationMs: Date.now() - startedAt,
+            usage,
+            success: false,
+            errorMessage: `json_parse_failed: ${(parseErr as Error).message}`,
+          });
         }
+      } else {
+        await this.trackZiLlmTelemetry({
+          userId: ctx?.userId,
+          membership: ctx?.membership || 'free',
+          model,
+          durationMs: Date.now() - startedAt,
+          usage,
+          success: false,
+          errorMessage: 'empty_content',
+        });
       }
     } catch (error) {
       this.logger.warn('LLM增强调用失败', error);
+      await this.trackZiLlmTelemetry({
+        userId: ctx?.userId,
+        membership: ctx?.membership || 'free',
+        model: this.resolveZiLlmModel(ctx?.membership || 'free'),
+        durationMs: Date.now() - startedAt,
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, estimated: true },
+        success: false,
+        errorMessage: (error as Error).message,
+      });
     }
     
     return null;
+  }
+
+  private estimateTokens(text: string): number {
+    const normalized = String(text || '').trim();
+    if (!normalized) return 0;
+    return Math.max(1, Math.ceil(normalized.length / 2));
+  }
+
+  private resolveTokenUsage(
+    responseData: unknown,
+    promptText: string,
+    completionText: string,
+  ): { promptTokens: number; completionTokens: number; totalTokens: number; estimated: boolean } {
+    const usage = (responseData as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } })?.usage;
+    if (usage && typeof usage.total_tokens === 'number') {
+      const promptTokens = Number(usage.prompt_tokens || 0);
+      const completionTokens = Number(usage.completion_tokens || 0);
+      const totalTokens = Number(usage.total_tokens || promptTokens + completionTokens);
+      return { promptTokens, completionTokens, totalTokens, estimated: false };
+    }
+    const promptTokens = this.estimateTokens(promptText);
+    const completionTokens = this.estimateTokens(completionText);
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      estimated: true,
+    };
+  }
+
+  private async trackZiLlmTelemetry(input: {
+    userId?: string;
+    membership: MembershipTier;
+    model: string;
+    durationMs: number;
+    usage: { promptTokens: number; completionTokens: number; totalTokens: number; estimated: boolean };
+    success: boolean;
+    errorMessage?: string;
+  }): Promise<void> {
+    const safeUserId = input.userId && !input.userId.startsWith('guest_') ? input.userId : undefined;
+    try {
+      await this.prisma.analyticsEvent.create({
+        data: {
+          userId: safeUserId,
+          name: 'llm.call',
+          props: {
+            module: 'zi',
+            feature: 'zi_enhancement',
+            membership: input.membership,
+            model: input.model,
+            durationMs: input.durationMs,
+            promptTokens: input.usage.promptTokens,
+            completionTokens: input.usage.completionTokens,
+            totalTokens: input.usage.totalTokens,
+            tokenEstimated: input.usage.estimated,
+            success: input.success,
+            errorMessage: input.errorMessage || null,
+            happenedAt: new Date().toISOString(),
+          },
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`写入测字 LLM 埋点失败: ${(err as Error).message}`);
+    }
   }
 
   private normalizeFocusAspect(raw?: string): FocusProfile {
@@ -1149,6 +1270,13 @@ export class ZiService {
       hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
     }
     return hash;
+  }
+
+  private resolveZiLlmModel(membership: MembershipTier): string {
+    const forcedModel = String(process.env.ZI_LLM_MODEL || '').trim();
+    if (forcedModel) return forcedModel;
+    if (membership === 'premium' || membership === 'vip') return 'deepseek-v4-pro';
+    return process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
   }
 
   private pickBySeed<T>(arr: T[], seed: number): T {

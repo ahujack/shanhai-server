@@ -49,6 +49,8 @@ export interface FortuneSlip {
   socialLine?: string;
 }
 
+type MembershipTier = 'free' | 'premium' | 'vip';
+
 // 完整签库 - 64 支签对应六十四卦
 const fortuneSlips: FortuneSlip[] = [
   {
@@ -471,15 +473,17 @@ export class FortuneService {
     };
   }
 
-  private async enhanceWithLLM(slip: FortuneSlip): Promise<FortuneSlip> {
+  private async enhanceWithLLM(slip: FortuneSlip, userId?: string): Promise<FortuneSlip> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) return slip;
     try {
+      const membership = await this.resolveMembershipTier(userId);
+      const model = this.resolveFortuneLlmModel(membership);
       const poemText = `${slip.poem.title}：${slip.poem.line1} ${slip.poem.line2} ${slip.poem.line3} ${slip.poem.line4}`;
       const res = await axios.post(
         process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
         {
-          model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
+          model,
           temperature: 0.8,
           max_tokens: 2000,
           response_format: { type: 'json_object' },
@@ -524,6 +528,42 @@ export class FortuneService {
     }
   }
 
+  private async resolveMembershipTier(userId?: string): Promise<MembershipTier> {
+    if (!userId) return 'free';
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { membership: true, membershipExpiryAt: true },
+      });
+      const tier = user?.membership;
+      const activePaid =
+        (tier === 'premium' || tier === 'vip') &&
+        (!user?.membershipExpiryAt || user.membershipExpiryAt > new Date());
+      if (activePaid) return tier;
+    } catch (error) {
+      this.logger.warn(`读取运势会员失败，回退免费模型: ${(error as Error).message}`);
+    }
+    return 'free';
+  }
+
+  private resolveFortuneLlmModel(membership: MembershipTier): string {
+    const forcedModel = String(process.env.FORTUNE_LLM_MODEL || '').trim();
+    if (forcedModel) return forcedModel;
+
+    if (membership === 'premium' || membership === 'vip') {
+      const enableStrong = /^(1|true|yes|on)$/i.test(
+        String(process.env.FORTUNE_MEMBER_STRONG_MODEL_ENABLED || 'false').trim(),
+      );
+      if (enableStrong) {
+        return String(process.env.FORTUNE_MEMBER_STRONG_MODEL || 'deepseek-v4-pro').trim();
+      }
+      return String(process.env.FORTUNE_MEMBER_FAST_MODEL || 'deepseek-v4-flash').trim();
+    }
+
+    // 免费用户固定快模型，控制成本与时延。
+    return 'deepseek-v4-flash';
+  }
+
   // 获取今日运势
   async getDailyFortune(userId?: string): Promise<FortuneSlip> {
     const today = new Date().toISOString().split('T')[0];
@@ -540,7 +580,7 @@ export class FortuneService {
     
     const index = seed % fortuneSlips.length;
     let slip = this.decorateSlip(fortuneSlips[index], rng, seedKey);
-    slip = await this.enhanceWithLLM(slip);
+    slip = await this.enhanceWithLLM(slip, userId);
 
     // 缓存
     this.lastUserId = userId || null;

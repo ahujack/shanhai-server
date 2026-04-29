@@ -1251,6 +1251,7 @@ export class ChartService {
       return this.applyMembershipLayer(this.mergeLuckPatch(input.baseDetailedReading, cached.patch), input.membership);
     }
 
+    const startedAt = Date.now();
     try {
       const payload = {
         birthInput: {
@@ -1277,7 +1278,12 @@ export class ChartService {
       };
 
       const apiUrl = process.env.BAZI_LLM_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
-      const model = process.env.BAZI_LLM_MODEL || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+      const model = this.resolveBaziLlmModel(input.membership);
+      const systemPrompt =
+        '你是资深命理老师。必须严格基于输入排盘结果写大运流年，不可改动干支与起运信息。' +
+        '输出JSON，字段可包含：corePattern,relationship,career,wealth,health,decadeRhythm(string[]),yearlyTips(string[])。' +
+        '文风偏口语老师傅、温和、不制造焦虑；每条建议具体可执行。' +
+        '表达策略使用“硬锚点+弹性缓冲”：每段先给1个可验证锚点（如起运年龄/十神主线/某个干支），再给1个概率表达（如通常、多半、往往、这几年更容易）。';
       const response = await axios.post(
         apiUrl,
         {
@@ -1288,11 +1294,7 @@ export class ChartService {
           messages: [
             {
               role: 'system',
-              content:
-                '你是资深命理老师。必须严格基于输入排盘结果写大运流年，不可改动干支与起运信息。' +
-                '输出JSON，字段可包含：corePattern,relationship,career,wealth,health,decadeRhythm(string[]),yearlyTips(string[])。' +
-                '文风偏口语老师傅、温和、不制造焦虑；每条建议具体可执行。' +
-                '表达策略使用“硬锚点+弹性缓冲”：每段先给1个可验证锚点（如起运年龄/十神主线/某个干支），再给1个概率表达（如通常、多半、往往、这几年更容易）。',
+              content: systemPrompt,
             },
             {
               role: 'user',
@@ -1310,14 +1312,43 @@ export class ChartService {
       );
 
       const content = response.data?.choices?.[0]?.message?.content;
-      if (!content) return input.baseDetailedReading;
+      const usage = this.resolveTokenUsage(response.data, `${systemPrompt}\n${JSON.stringify(payload)}`, String(content || ''));
+      if (!content) {
+        await this.trackChartLlmTelemetry({
+          userId: input.userId,
+          membership: input.membership,
+          model,
+          durationMs: Date.now() - startedAt,
+          usage,
+          success: false,
+          errorMessage: 'empty_content',
+        });
+        return input.baseDetailedReading;
+      }
       const parsed = JSON.parse(content) as LuckReadingPatch;
       const patch = this.normalizeLuckPatch(parsed);
       const styledPatch = this.applyPrecisionAmbiguityStyle(patch);
       const merged = this.mergeLuckPatch(input.baseDetailedReading, styledPatch);
       this.llmCache.set(cacheKey, { expiresAt: now + 6 * 60 * 60 * 1000, patch: styledPatch });
+      await this.trackChartLlmTelemetry({
+        userId: input.userId,
+        membership: input.membership,
+        model,
+        durationMs: Date.now() - startedAt,
+        usage,
+        success: true,
+      });
       return this.applyMembershipLayer(merged, input.membership);
     } catch (error) {
+      await this.trackChartLlmTelemetry({
+        userId: input.userId,
+        membership: input.membership,
+        model: this.resolveBaziLlmModel(input.membership),
+        durationMs: Date.now() - startedAt,
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, estimated: true },
+        success: false,
+        errorMessage: (error as Error).message,
+      });
       this.logger.warn(`八字LLM增强失败，使用规则结果回退: ${(error as Error).message}`);
       return this.applyMembershipLayer(input.baseDetailedReading, input.membership);
     }
@@ -1327,7 +1358,19 @@ export class ChartService {
     reading: BaziChart['detailedReading'],
     membership: MembershipTier,
   ): BaziChart['detailedReading'] {
-    if (membership === 'premium' || membership === 'vip') {
+    if (membership === 'vip') {
+      return {
+        ...reading,
+        paywallHint: undefined,
+        yearlyTips: [...reading.yearlyTips, ...this.buildVipYearlyTips()].slice(0, 8),
+        annualForecast: reading.annualForecast.map((item) => ({
+          ...item,
+          masterCommentary: this.getVipMasterCommentary(item),
+        })),
+      };
+    }
+
+    if (membership === 'premium') {
       return {
         ...reading,
         paywallHint: undefined,
@@ -1340,13 +1383,14 @@ export class ChartService {
 
     return {
       ...reading,
-      paywallHint: '升级会员可解锁每年「老师傅点评」与完整五年细化建议。',
+      paywallHint: '当前为简版：可先看年度提点。升级会员可解锁每年「老师傅点评」与完整五年细化建议。',
+      yearlyTips: reading.yearlyTips.slice(0, 3),
       annualForecast: reading.annualForecast.map((item, idx) => ({
         ...item,
         favorable: idx <= 1 ? item.favorable : '升级会员解锁该年详细「宜」策略',
         caution: idx <= 1 ? item.caution : '升级会员解锁该年详细「忌」提醒',
         windowMonths: idx <= 1 ? item.windowMonths : ['升级会员解锁关键窗口月'],
-        masterCommentary: undefined,
+        masterCommentary: idx === 0 ? this.getFreeTeaserCommentary(item) : undefined,
       })),
     };
   }
@@ -1370,6 +1414,121 @@ export class ChartService {
       日主: '这一年先顾好自己节奏，稳住了才有余力发力。',
     };
     return `${stylePrefix}：${toneMap[item.tenGod] || '先稳后进，顺势而为。'}`;
+  }
+
+  private getFreeTeaserCommentary(
+    item: BaziChart['detailedReading']['annualForecast'][number],
+  ): string {
+    return `老师傅年度提点：${item.hint}（年度简版）`;
+  }
+
+  private getVipMasterCommentary(
+    item: BaziChart['detailedReading']['annualForecast'][number],
+  ): string {
+    const actionByTenGod: Record<string, string> = {
+      比肩: '先定唯一主线，再做资源配置。',
+      劫财: '先筛合作，再投时间与金钱。',
+      食神: '持续输出作品，建立可见度。',
+      伤官: '创新要配合节奏，先试点再放大。',
+      正印: '先补证书/方法论，再冲结果。',
+      偏印: '把研究结论转成可执行清单。',
+      正财: '先稳现金流，再谈增量收益。',
+      偏财: '先设风险边界，再抓机会窗口。',
+      正官: '先做规范化流程，结果更稳。',
+      七杀: '高压期先稳状态，再强攻关键点。',
+      日主: '先恢复节奏，避免多线并行。',
+    };
+    return (
+      `老师傅批注（深度版）：${item.hint}` +
+      ` 关键词：${item.tenGod}。` +
+      ` 年度一招：${actionByTenGod[item.tenGod] || '先稳后进，顺势而为。'}` +
+      ` 避坑提醒：${item.caution}`
+    );
+  }
+
+  private buildVipYearlyTips(): string[] {
+    return [
+      'VIP进阶：每个季度只设1个核心目标，季度末复盘“保留/停止/加码”。',
+      'VIP进阶：把年度机会月提前写入日程，至少提前2周完成资源准备。',
+    ];
+  }
+
+  private resolveBaziLlmModel(membership: MembershipTier): string {
+    // 允许通过环境变量强制覆盖（便于紧急回滚或压测）
+    const forcedModel = String(process.env.BAZI_LLM_MODEL || '').trim();
+    if (forcedModel) return forcedModel;
+
+    // 付费用户默认走更强模型，用于增强「老师傅点评」体验与付费感知
+    if (membership === 'premium' || membership === 'vip') {
+      return 'deepseek-v4-pro';
+    }
+
+    // 免费用户默认走性价比模型，控制成本
+    return process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
+  }
+
+  private estimateTokens(text: string): number {
+    const normalized = String(text || '').trim();
+    if (!normalized) return 0;
+    return Math.max(1, Math.ceil(normalized.length / 2));
+  }
+
+  private resolveTokenUsage(
+    responseData: unknown,
+    promptText: string,
+    completionText: string,
+  ): { promptTokens: number; completionTokens: number; totalTokens: number; estimated: boolean } {
+    const usage = (responseData as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } })?.usage;
+    if (usage && typeof usage.total_tokens === 'number') {
+      const promptTokens = Number(usage.prompt_tokens || 0);
+      const completionTokens = Number(usage.completion_tokens || 0);
+      const totalTokens = Number(usage.total_tokens || promptTokens + completionTokens);
+      return { promptTokens, completionTokens, totalTokens, estimated: false };
+    }
+    const promptTokens = this.estimateTokens(promptText);
+    const completionTokens = this.estimateTokens(completionText);
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      estimated: true,
+    };
+  }
+
+  private async trackChartLlmTelemetry(input: {
+    userId?: string;
+    membership: MembershipTier;
+    model: string;
+    durationMs: number;
+    usage: { promptTokens: number; completionTokens: number; totalTokens: number; estimated: boolean };
+    success: boolean;
+    errorMessage?: string;
+  }): Promise<void> {
+    const safeUserId = input.userId && !input.userId.startsWith('guest_') ? input.userId : undefined;
+    try {
+      await this.prisma.analyticsEvent.create({
+        data: {
+          userId: safeUserId,
+          name: 'llm.call',
+          props: {
+            module: 'chart',
+            feature: 'bazi_detailed_reading',
+            membership: input.membership,
+            model: input.model,
+            durationMs: input.durationMs,
+            promptTokens: input.usage.promptTokens,
+            completionTokens: input.usage.completionTokens,
+            totalTokens: input.usage.totalTokens,
+            tokenEstimated: input.usage.estimated,
+            success: input.success,
+            errorMessage: input.errorMessage || null,
+            happenedAt: new Date().toISOString(),
+          },
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`写入八字 LLM 埋点失败: ${(err as Error).message}`);
+    }
   }
 
   private normalizeLuckPatch(raw: LuckReadingPatch): LuckReadingPatch {

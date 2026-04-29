@@ -276,7 +276,7 @@
         <input id="users-search" type="text" placeholder="输入关键词实时筛选" />
         <button type="button" id="btn-users">加载用户</button>
         <div style="overflow:auto;max-height:320px;margin-top:10px">
-          <table id="tbl-users"><thead><tr><th>用户名</th><th>邮箱</th><th>地区</th><th>时区</th><th>注册</th><th>管理操作</th></tr></thead><tbody></tbody></table>
+          <table id="tbl-users"><thead><tr><th>用户名</th><th>邮箱</th><th>地区</th><th>时区</th><th>最近模块</th><th>注册</th><th>管理操作</th></tr></thead><tbody></tbody></table>
         </div>
       </div>
       <div class="card">
@@ -423,11 +423,14 @@
           var displayName = (u.name || '').trim() || '—';
           var displayEmail = (u.email || '').trim() || '—';
           var displayUser = displayName + '（' + displayEmail + '）';
+          var lastModule = (u.lastActiveModule || '').trim() || '—';
+          var lastAt = u.lastActiveAt ? formatDateTime(u.lastActiveAt) : '—';
           tr.innerHTML =
             '<td>' + highlightMatch(displayName, keyword) + '</td>' +
             '<td>' + highlightMatch(displayEmail, keyword) + '</td>' +
             '<td>' + escapeHtml(u.location || '—') + '</td>' +
             '<td>' + escapeHtml(u.timezone || '—') + '</td>' +
+            '<td>' + escapeHtml(lastModule) + '<br/><small>' + escapeHtml(lastAt) + '</small></td>' +
             '<td><small>' + escapeHtml(u.createdAt || '') + '</small></td>' +
             '<td>' +
               '<div class="row" style="margin-top:0">' +

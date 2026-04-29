@@ -436,7 +436,7 @@ export class AgentService {
     userChart: any,
   ): Promise<{ intent: AgentIntent; category?: 'career' | 'emotion' | 'growth'; mood?: AgentChatDto['mood'] }> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
-    const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
+    const model = this.resolveAgentIntentModel();
 
     if (!apiKey) {
       this.logger.warn('DEEPSEEK_API_KEY 未配置，回退到本地规则意图识别');
@@ -685,7 +685,7 @@ ${contextInfo}`,
     dto: AgentChatDto,
   ): AsyncGenerator<string> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
-    const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
+    const model = await this.resolveAgentLlmModel(dto.userId);
     if (!apiKey) {
       yield this.getDefaultChatReply(persona, userChart);
       return;
@@ -755,21 +755,30 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 
     try {
       const apiUrl = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions';
+      const timeoutMs = this.resolveAgentStreamTimeoutMs();
       const startedAt = Date.now();
-      const res = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0.8,
-          max_tokens: 300,
-          stream: true,
-          messages,
-        }),
-      });
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+      let res: Response;
+      try {
+        res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          signal: abortController.signal,
+          body: JSON.stringify({
+            model,
+            temperature: 0.8,
+            max_tokens: 300,
+            stream: true,
+            messages,
+          }),
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!res.ok || !res.body) {
         this.logger.warn(`LLM(stream) 响应异常 status=${res.status} duration=${Date.now() - startedAt}ms`);
@@ -827,7 +836,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     dto: AgentChatDto,
   ): Promise<string> {
     const apiKey = process.env.DEEPSEEK_API_KEY;
-    const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
+    const model = await this.resolveAgentLlmModel(dto.userId);
 
     // 如果没有配置APIKey，使用默认回复
     if (!apiKey) {
@@ -1095,6 +1104,27 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     } catch {
       return 'free';
     }
+  }
+
+  private async resolveAgentLlmModel(userId?: string): Promise<string> {
+    const forcedModel = String(process.env.AGENT_REPLY_LLM_MODEL || process.env.AGENT_LLM_MODEL || '').trim();
+    if (forcedModel) return forcedModel;
+    const membership = await this.getUserMembership(userId);
+    if (membership === 'premium' || membership === 'vip') return 'deepseek-v4-pro';
+    return process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
+  }
+
+  private resolveAgentIntentModel(): string {
+    // 意图识别属于轻任务，优先使用快模型以降低成本和首字延迟
+    const forcedModel = String(process.env.AGENT_INTENT_LLM_MODEL || '').trim();
+    if (forcedModel) return forcedModel;
+    return process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
+  }
+
+  private resolveAgentStreamTimeoutMs(): number {
+    const raw = Number.parseInt(process.env.AGENT_STREAM_TIMEOUT_MS || '25000', 10);
+    if (!Number.isFinite(raw)) return 25000;
+    return Math.max(8000, Math.min(60000, raw));
   }
 
   private buildConversionHint(intent: AgentIntent, membership: 'free' | 'premium' | 'vip'): string {

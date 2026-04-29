@@ -11,6 +11,17 @@ export class ChartController {
     private readonly userService: UserService,
   ) {}
 
+  private resolveMembershipTier(user: {
+    membership?: 'free' | 'premium' | 'vip' | string | null;
+    membershipExpiryAt?: Date | null;
+  }): 'free' | 'premium' | 'vip' {
+    const tier = (user.membership as 'free' | 'premium' | 'vip') || 'free';
+    if ((tier === 'premium' || tier === 'vip') && (!user.membershipExpiryAt || user.membershipExpiryAt > new Date())) {
+      return tier;
+    }
+    return 'free';
+  }
+
   /** 游客试算：不落库，无需登录 */
   @Post('preview')
   @Throttle({ default: { limit: 12, ttl: 60000 } })
@@ -73,7 +84,7 @@ export class ChartController {
         birthLongitude: user.birthLongitude,
         birthLocation: user.birthLocation,
         timezone: user.timezone,
-        membership: (user.membership as 'free' | 'premium' | 'vip') || 'free',
+        membership: this.resolveMembershipTier(user),
       },
     );
   }
@@ -93,7 +104,7 @@ export class ChartController {
     const user = await this.userService.findOne(targetUserId);
     const chart = await this.chartService.findOne(
       targetUserId,
-      (user.membership as 'free' | 'premium' | 'vip') || 'free',
+      this.resolveMembershipTier(user),
     );
     if (!chart) {
       return { message: '请先创建命盘', hasChart: false };
