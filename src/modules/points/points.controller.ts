@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Body, UseGuards, Request, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  UseGuards,
+  Request,
+  Query,
+} from '@nestjs/common';
 import { PointsService, PointsSummary, PointRecord } from './points.service';
 import { JwtAuthGuard, RequireAuthGuard } from '../auth/jwt-auth.guard';
 import { PrismaService } from '../../prisma.service';
@@ -28,7 +36,7 @@ export class PointsController {
   @UseGuards(RequireAuthGuard)
   async getPointRecords(
     @Request() req,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
   ): Promise<PointRecord[]> {
     const userId = req.user.sub;
     const parsed = limit ? parseInt(limit, 10) : 20;
@@ -50,7 +58,10 @@ export class PointsController {
         select: { membership: true, membershipExpiryAt: true },
       });
       const m = user?.membership;
-      if ((m === 'premium' || m === 'vip') && (!user?.membershipExpiryAt || user.membershipExpiryAt > new Date())) {
+      if (
+        (m === 'premium' || m === 'vip') &&
+        (!user?.membershipExpiryAt || user.membershipExpiryAt > new Date())
+      ) {
         membership = m;
       }
     }
@@ -76,25 +87,35 @@ export class PointsController {
   }
 
   /**
+   * 会员价值快照（用于会员页展示“已节省/使用情况”）
+   */
+  @Get('membership-value')
+  @UseGuards(RequireAuthGuard)
+  async getMembershipValue(@Request() req) {
+    const userId = req.user.sub;
+    return this.pointsService.getMembershipValueSnapshot(userId);
+  }
+
+  /**
    * 消费积分（需要登录）
    */
   @Post('consume')
   @UseGuards(RequireAuthGuard)
   async consumePoints(
     @Request() req,
-    @Body() dto: { points: number; type: string; description: string }
+    @Body() dto: { points: number; type: string; description: string },
   ) {
     const userId = req.user.sub;
-    
+
     if (dto.points <= 0) {
       return { success: false, message: '积分数量必须大于0' };
     }
-    
+
     return this.pointsService.consumePoints(
       userId,
       dto.points,
       dto.type,
-      dto.description
+      dto.description,
     );
   }
 
@@ -103,10 +124,7 @@ export class PointsController {
    */
   @Post('check')
   @UseGuards(JwtAuthGuard)
-  async checkPoints(
-    @Request() req,
-    @Body() dto: { points: number }
-  ) {
+  async checkPoints(@Request() req, @Body() dto: { points: number }) {
     const need = Number(dto?.points);
     if (!Number.isFinite(need) || need <= 0) {
       return { success: true, hasEnough: true };

@@ -29,6 +29,8 @@
 | `POINTS_GATE_ENFORCED` | 设为 `true` 时对测字/占卜等按规则扣积分 |
 | `FRONTEND_URL` | 支付成功/取消跳转页所在域名 |
 | `CREEM_API_KEY` | 正式支付；未配置时为模拟收银台 |
+| `CREEM_WEBHOOK_SECRET` | Creem 回调签名校验 secret（强烈建议生产必配） |
+| `PAYMENT_SOURCE_TAG` | 支付成交埋点来源标签（默认 `server_payment`） |
 | `SMTP_*` | 发邮件验证码；生产发送失败时接口不再在响应中返回验证码 |
 
 ## 勿在生产开启
@@ -62,3 +64,8 @@ E2E_DATABASE_URL="postgresql://user:pass@host:5432/db" npm run test:e2e
 
 - 所有 HTTP 响应（含异常）都会返回 `x-request-id` 响应头。
 - 后端错误 JSON 中也会包含 `requestId` 字段，建议前端/客服反馈时携带该值。
+- 管理员可使用以下接口做上线巡检：
+  - `GET /api/admin/analytics/funnel?days=14`（核心漏斗）
+  - `GET /api/admin/analytics/ops-health?days=7`（支付健康）
+- Webhook 异常补偿可用脚本：
+  - `npm run reconcile-payment -- --payment-id <paymentId>`

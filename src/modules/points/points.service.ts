@@ -23,6 +23,15 @@ export interface PointsSummary {
   totalSpent: number;
 }
 
+export interface MembershipValueSnapshot {
+  membership: 'free' | 'premium' | 'vip';
+  membershipExpiryAt: string | null;
+  daysLeft: number;
+  deepReadings30d: number;
+  estimatedSavedPoints30d: number;
+  estimatedSavedUsd30d: number;
+}
+
 /**
  * 积分与流水约定：
  * - 凡变动 UserPoints（available/total），须在同一业务路径写入 PointRecord（awardPoints / consumePoints / 与之一致的事务）。
@@ -46,7 +55,11 @@ export class PointsService implements OnModuleInit {
       return false;
     }
     const disableGate = process.env.DISABLE_POINTS_GATE?.trim().toLowerCase();
-    if (disableGate === 'false' || disableGate === '0' || disableGate === 'no') {
+    if (
+      disableGate === 'false' ||
+      disableGate === '0' ||
+      disableGate === 'no'
+    ) {
       return false;
     }
     return true;
@@ -69,7 +82,7 @@ export class PointsService implements OnModuleInit {
     const userPoints = await this.prisma.userPoints.findUnique({
       where: { userId },
     });
-    
+
     if (!userPoints) {
       return {
         totalPoints: 0,
@@ -92,12 +105,56 @@ export class PointsService implements OnModuleInit {
 
     const totalEarned = earnedAgg._sum.points ?? 0;
     const totalSpent = Math.abs(spentAgg._sum.points ?? 0);
-    
+
     return {
       totalPoints: userPoints.totalPoints,
       availablePoints: userPoints.availablePoints,
       totalEarned,
       totalSpent,
+    };
+  }
+
+  async getMembershipValueSnapshot(
+    userId: string,
+  ): Promise<MembershipValueSnapshot> {
+    const [user, deepReadingEvents] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { membership: true, membershipExpiryAt: true },
+      }),
+      this.prisma.analyticsEvent.count({
+        where: {
+          userId,
+          name: 'feature_use',
+          createdAt: { gte: new Date(Date.now() - 30 * 86400000) },
+          props: {
+            path: ['feature'],
+            equals: 'reading_complete',
+          },
+        },
+      }),
+    ]);
+    const membership =
+      (user?.membership as 'free' | 'premium' | 'vip' | null) || 'free';
+    const expiry = user?.membershipExpiryAt ?? null;
+    const now = Date.now();
+    const daysLeft = expiry
+      ? Math.max(0, Math.ceil((expiry.getTime() - now) / 86400000))
+      : 0;
+    const readingCost = 15;
+    const estimatedSavedPoints30d =
+      membership === 'free' ? 0 : deepReadingEvents * readingCost;
+    // 以当前最优积分包单价约 $0.008/点估算节省金额
+    const estimatedSavedUsd30d = Number(
+      (estimatedSavedPoints30d * 0.008).toFixed(2),
+    );
+    return {
+      membership,
+      membershipExpiryAt: expiry ? expiry.toISOString() : null,
+      daysLeft,
+      deepReadings30d: deepReadingEvents,
+      estimatedSavedPoints30d,
+      estimatedSavedUsd30d,
     };
   }
 
@@ -118,11 +175,16 @@ export class PointsService implements OnModuleInit {
    * 消费积分（用于兑换服务）- 使用事务保证原子性
    */
   async consumePoints(
-    userId: string, 
-    points: number, 
-    type: string, 
-    description: string
-  ): Promise<{ success: boolean; message: string; remainingPoints?: number; recordId?: string }> {
+    userId: string,
+    points: number,
+    type: string,
+    description: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    remainingPoints?: number;
+    recordId?: string;
+  }> {
     if (this.isPointsGateDisabled()) {
       const userPoints = await this.prisma.userPoints.findUnique({
         where: { userId },
@@ -137,19 +199,19 @@ export class PointsService implements OnModuleInit {
       const userPoints = await tx.userPoints.findUnique({
         where: { userId },
       });
-      
+
       if (!userPoints || userPoints.availablePoints < points) {
         return {
           success: false,
           message: '积分不足',
         };
       }
-      
+
       await tx.userPoints.update({
         where: { userId },
         data: { availablePoints: { decrement: points } },
       });
-      
+
       const record = await tx.pointRecord.create({
         data: {
           userId,
@@ -158,11 +220,11 @@ export class PointsService implements OnModuleInit {
           description,
         },
       });
-      
+
       const updated = await tx.userPoints.findUnique({
         where: { userId },
       });
-      
+
       return {
         success: true,
         message: '积分消费成功',
@@ -210,7 +272,8 @@ export class PointsService implements OnModuleInit {
         data: {
           points: 0,
           type: `${record.type}_rolled_back`,
-          description: `${record.description || ''} [ROLLBACK:${reason}]`.trim(),
+          description:
+            `${record.description || ''} [ROLLBACK:${reason}]`.trim(),
         },
       });
       this.logger.warn(
@@ -231,13 +294,13 @@ export class PointsService implements OnModuleInit {
     userId: string,
     points: number,
     type: string,
-    description: string
+    description: string,
   ): Promise<{ success: boolean; newBalance?: number }> {
     return this.prisma.$transaction(async (tx) => {
       let userPoints = await tx.userPoints.findUnique({
         where: { userId },
       });
-      
+
       if (!userPoints) {
         userPoints = await tx.userPoints.create({
           data: {
@@ -255,7 +318,7 @@ export class PointsService implements OnModuleInit {
           },
         });
       }
-      
+
       await tx.pointRecord.create({
         data: {
           userId,
@@ -264,11 +327,11 @@ export class PointsService implements OnModuleInit {
           description,
         },
       });
-      
+
       const updated = await tx.userPoints.findUnique({
         where: { userId },
       });
-      
+
       return {
         success: true,
         newBalance: updated?.availablePoints ?? 0,
@@ -287,9 +350,17 @@ export class PointsService implements OnModuleInit {
     const pts = achievement.points;
     if (!pts || pts <= 0) return;
     try {
-      await this.awardPoints(userId, pts, 'achievement', `成就奖励：${achievement.name}`);
+      await this.awardPoints(
+        userId,
+        pts,
+        'achievement',
+        `成就奖励：${achievement.name}`,
+      );
     } catch (e) {
-      this.logger.error(`成就积分发放失败 userId=${userId} achievement=${achievement.name}`, (e as Error)?.stack);
+      this.logger.error(
+        `成就积分发放失败 userId=${userId} achievement=${achievement.name}`,
+        (e as Error)?.stack,
+      );
     }
   }
 
@@ -303,7 +374,7 @@ export class PointsService implements OnModuleInit {
     const userPoints = await this.prisma.userPoints.findUnique({
       where: { userId },
     });
-    
+
     return !!userPoints && userPoints.availablePoints >= points;
   }
 }

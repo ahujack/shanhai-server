@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../prisma.service';
 import axios from 'axios';
 import * as crypto from 'crypto';
+import type { Prisma } from '@prisma/client';
 
 // Creem 支付服务 - 仅使用 Creem
 
@@ -17,7 +18,11 @@ export class PaymentService implements OnModuleInit {
   private readonly logger = new Logger(PaymentService.name);
   private creemApiKey: string | null = null;
   private creemApiUrl = 'https://api.creem.io/v1';
-  private readonly creemRequestTimeoutMs = Number(process.env.CREEM_TIMEOUT_MS || 15000);
+  private readonly creemRequestTimeoutMs = Number(
+    process.env.CREEM_TIMEOUT_MS || 15000,
+  );
+  private readonly paymentSourceTag =
+    process.env.PAYMENT_SOURCE_TAG || 'server_payment';
 
   /**
    * 代码内默认 Creem product_id（可被环境变量 CREEM_PRODUCT_<CODE> 覆盖，CODE 为大写+下划线，如 POINTS_100）
@@ -29,7 +34,10 @@ export class PaymentService implements OnModuleInit {
   };
 
   /** 解析最终用于下单的 Creem 产品 ID（env > 代码映射 > 数据库） */
-  private resolvedCreemProductId(productCode: string, dbCreemPriceId: string | null | undefined): string | undefined {
+  private resolvedCreemProductId(
+    productCode: string,
+    dbCreemPriceId: string | null | undefined,
+  ): string | undefined {
     const envKey = `CREEM_PRODUCT_${productCode.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
     const fromEnv = process.env[envKey]?.trim();
     if (fromEnv) return fromEnv;
@@ -45,7 +53,9 @@ export class PaymentService implements OnModuleInit {
   async onModuleInit() {
     // 初始化 Creem
     this.creemApiKey = process.env.CREEM_API_KEY || null;
-    const base = (process.env.CREEM_API_URL || 'https://api.creem.io/v1').replace(/\/$/, '');
+    const base = (
+      process.env.CREEM_API_URL || 'https://api.creem.io/v1'
+    ).replace(/\/$/, '');
     this.creemApiUrl = base;
     if (this.creemApiKey) {
       this.logger.log('Creem initialized successfully');
@@ -92,7 +102,9 @@ export class PaymentService implements OnModuleInit {
       productCount: products.length,
       products: products.map((product) => {
         const envKey = `CREEM_PRODUCT_${product.code.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
-        const resolved = this.resolvedCreemProductId(product.code, product.creemPriceId) || null;
+        const resolved =
+          this.resolvedCreemProductId(product.code, product.creemPriceId) ||
+          null;
         const fromEnv = !!process.env[envKey]?.trim();
         return {
           id: product.id,
@@ -101,7 +113,13 @@ export class PaymentService implements OnModuleInit {
           dbCreemProductId: product.creemPriceId,
           envVarHint: envKey,
           resolvedCreemProductId: resolved,
-          source: fromEnv ? 'env' : this.CREEM_PRICE_IDS[product.code] ? 'code_map' : product.creemPriceId ? 'database' : 'none',
+          source: fromEnv
+            ? 'env'
+            : this.CREEM_PRICE_IDS[product.code]
+              ? 'code_map'
+              : product.creemPriceId
+                ? 'database'
+                : 'none',
         };
       }),
     };
@@ -113,7 +131,7 @@ export class PaymentService implements OnModuleInit {
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
     });
-    
+
     return products;
   }
 
@@ -125,8 +143,15 @@ export class PaymentService implements OnModuleInit {
   }
 
   // 创建支付会话（使用 Creem）
-  async createCheckoutSession(userId: string, productId: string, successUrl: string, cancelUrl: string) {
-    this.logger.log(`Creating checkout - userId: ${userId}, productId: ${productId}`);
+  async createCheckoutSession(
+    userId: string,
+    productId: string,
+    successUrl: string,
+    cancelUrl: string,
+  ) {
+    this.logger.log(
+      `Creating checkout userId=${userId} productRef=${productId} source=${this.paymentSourceTag}`,
+    );
 
     if (!userId) {
       throw new BadRequestException('缺少用户信息，请重新登录后重试');
@@ -167,10 +192,17 @@ export class PaymentService implements OnModuleInit {
         status: 'pending',
       },
     });
-    this.logger.log(`Payment record created: ${payment.id}, amount: ${payment.amount}`);
+    this.logger.log(
+      `Payment created paymentId=${payment.id} userId=${userId} amount=${payment.amount} code=${product.code}`,
+    );
 
-    const creemPriceId = this.resolvedCreemProductId(product.code, product.creemPriceId);
-    this.logger.log(`Product code: ${product.code}, creemPriceId: ${creemPriceId}, creemApiKey set: ${!!this.creemApiKey}`);
+    const creemPriceId = this.resolvedCreemProductId(
+      product.code,
+      product.creemPriceId,
+    );
+    this.logger.log(
+      `Checkout product resolved paymentId=${payment.id} code=${product.code} creemProductId=${creemPriceId || 'none'} apiKey=${!!this.creemApiKey}`,
+    );
 
     const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
     const allowMockInProd = process.env.ALLOW_MOCK_PAYMENT === 'true';
@@ -178,7 +210,9 @@ export class PaymentService implements OnModuleInit {
     // 未配置 API Key：仅本地/测试允许模拟支付；生产默认拒绝
     if (!this.creemApiKey) {
       if (isProd && !allowMockInProd) {
-        this.logger.error('Creem API key missing in production, checkout blocked');
+        this.logger.error(
+          'Creem API key missing in production, checkout blocked',
+        );
         throw new InternalServerErrorException('支付服务配置异常，请稍后重试');
       }
       this.logger.warn('Creem not configured, returning mock payment');
@@ -198,7 +232,13 @@ export class PaymentService implements OnModuleInit {
       );
     }
 
-    return this.createCreemCheckout(userId, payment.id, creemPriceId, successUrl, cancelUrl);
+    return this.createCreemCheckout(
+      userId,
+      payment.id,
+      creemPriceId,
+      successUrl,
+      cancelUrl,
+    );
   }
 
   // 创建 Creem Checkout
@@ -210,7 +250,11 @@ export class PaymentService implements OnModuleInit {
     cancelUrl: string,
   ) {
     try {
-      const successCallbackUrl = this.appendQueryParam(successUrl, 'paymentId', paymentId);
+      const successCallbackUrl = this.appendQueryParam(
+        successUrl,
+        'paymentId',
+        paymentId,
+      );
 
       const response = await axios.post(
         `${this.creemApiUrl}/checkouts`,
@@ -259,12 +303,22 @@ export class PaymentService implements OnModuleInit {
         providerError?.error ||
         error?.message ||
         'unknown error';
-      this.logger.error(`Creem checkout error: ${providerMessage}`);
-      this.logger.error(`Creem checkout detail: ${JSON.stringify(providerError || {})}`);
-      if (typeof providerStatus === 'number' && providerStatus >= 400 && providerStatus < 500) {
+      this.logger.error(
+        `Creem checkout error paymentId=${paymentId} message=${providerMessage}`,
+      );
+      this.logger.error(
+        `Creem checkout detail: ${JSON.stringify(providerError || {})}`,
+      );
+      if (
+        typeof providerStatus === 'number' &&
+        providerStatus >= 400 &&
+        providerStatus < 500
+      ) {
         throw new BadRequestException(`创建支付会话失败：${providerMessage}`);
       }
-      throw new InternalServerErrorException(`创建支付会话失败：${providerMessage}`);
+      throw new InternalServerErrorException(
+        `创建支付会话失败：${providerMessage}`,
+      );
     }
   }
 
@@ -272,7 +326,10 @@ export class PaymentService implements OnModuleInit {
   private normalizeCreemSignatureHeader(signatureHeader: string): string {
     const s = String(signatureHeader).trim();
     if (!s) return '';
-    const parts = s.split(',').map((p) => p.trim()).filter(Boolean);
+    const parts = s
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
     const last = parts[parts.length - 1] ?? s;
     if (last.includes('=')) {
       return last.split('=').pop()!.trim().replace(/^0x/i, '').toLowerCase();
@@ -280,15 +337,25 @@ export class PaymentService implements OnModuleInit {
     return last.replace(/^0x/i, '').toLowerCase();
   }
 
-  private creemHmacHexValid(rawBody: string, signatureHeader: string, hmacSecret: string): boolean {
+  private creemHmacHexValid(
+    rawBody: string,
+    signatureHeader: string,
+    hmacSecret: string,
+  ): boolean {
     if (!rawBody || !hmacSecret) return false;
     const sigHex = this.normalizeCreemSignatureHeader(signatureHeader);
     if (!/^[0-9a-f]+$/i.test(sigHex) || sigHex.length % 2 !== 0) return false;
-    const computed = crypto.createHmac('sha256', hmacSecret).update(rawBody, 'utf8').digest('hex');
+    const computed = crypto
+      .createHmac('sha256', hmacSecret)
+      .update(rawBody, 'utf8')
+      .digest('hex');
     try {
       return (
         computed.length === sigHex.length &&
-        crypto.timingSafeEqual(Buffer.from(computed, 'hex'), Buffer.from(sigHex, 'hex'))
+        crypto.timingSafeEqual(
+          Buffer.from(computed, 'hex'),
+          Buffer.from(sigHex, 'hex'),
+        )
       );
     } catch {
       return false;
@@ -298,7 +365,9 @@ export class PaymentService implements OnModuleInit {
   /**
    * HMAC 与原文不一致时（例如经 Vercel 等对 JSON 重写），用 API 拉取 checkout 与 Creem 侧 metadata 对齐后视为可信
    */
-  private async verifyCheckoutCompletedAgainstCreemApi(body: any): Promise<boolean> {
+  private async verifyCheckoutCompletedAgainstCreemApi(
+    body: any,
+  ): Promise<boolean> {
     if (!this.creemApiKey) return false;
     const eventType = body?.eventType ?? body?.event;
     if (eventType !== 'checkout.completed') return false;
@@ -306,11 +375,14 @@ export class PaymentService implements OnModuleInit {
     const checkoutId = obj?.id;
     if (!checkoutId || typeof checkoutId !== 'string') return false;
     try {
-      const { data: checkout } = await axios.get(`${this.creemApiUrl}/checkouts`, {
-        params: { checkout_id: checkoutId },
-        headers: { 'x-api-key': this.creemApiKey },
-        timeout: this.creemRequestTimeoutMs,
-      });
+      const { data: checkout } = await axios.get(
+        `${this.creemApiUrl}/checkouts`,
+        {
+          params: { checkout_id: checkoutId },
+          headers: { 'x-api-key': this.creemApiKey },
+          timeout: this.creemRequestTimeoutMs,
+        },
+      );
       if (checkout?.status !== 'completed') return false;
       const trustedPid = checkout.metadata?.paymentId;
       if (!trustedPid || typeof trustedPid !== 'string') return false;
@@ -318,7 +390,9 @@ export class PaymentService implements OnModuleInit {
       if (claimedPid != null && claimedPid !== trustedPid) return false;
       return true;
     } catch (e: any) {
-      this.logger.warn(`Creem API 校验 webhook checkout 失败: ${e?.message || e}`);
+      this.logger.warn(
+        `Creem API 校验 webhook checkout 失败: ${e?.message || e}`,
+      );
       return false;
     }
   }
@@ -341,20 +415,27 @@ export class PaymentService implements OnModuleInit {
     let trustWebhook = false;
     if (!secret) {
       if (this.creemApiKey) {
-        this.logger.error('Creem Webhook 拒绝处理：CREEM_WEBHOOK_SECRET 未配置');
+        this.logger.error(
+          'Creem Webhook 拒绝处理：CREEM_WEBHOOK_SECRET 未配置',
+        );
         throw new BadRequestException('Webhook secret not configured');
       }
       // 本地未接 Creem API Key 的调试环境允许透传
       trustWebhook = true;
     } else {
       if (!opts?.signature) {
-        this.logger.warn('Creem Webhook 已配置 CREEM_WEBHOOK_SECRET 但缺少 creem-signature 请求头');
+        this.logger.warn(
+          'Creem Webhook 已配置 CREEM_WEBHOOK_SECRET 但缺少 creem-signature 请求头',
+        );
         throw new BadRequestException('Webhook signature required');
       }
       if (raw) {
         if (this.creemHmacHexValid(raw, opts.signature, secret)) {
           trustWebhook = true;
-        } else if (this.creemApiKey && this.creemHmacHexValid(raw, opts.signature, this.creemApiKey.trim())) {
+        } else if (
+          this.creemApiKey &&
+          this.creemHmacHexValid(raw, opts.signature, this.creemApiKey.trim())
+        ) {
           this.logger.warn(
             'Creem Webhook：HMAC 使用了 CREEM_API_KEY 才通过。请将 Railway 的 CREEM_WEBHOOK_SECRET 设为 Creem 后台该 Webhook 的 Signing secret（与 API Key 不同）。',
           );
@@ -393,8 +474,15 @@ export class PaymentService implements OnModuleInit {
       if (paymentId) {
         await this.processPaymentSuccess(paymentId, payload.id, 'completed');
       }
-    } else if (eventType === 'subscription.paid' && payload?.metadata?.paymentId) {
-      await this.processPaymentSuccess(payload.metadata.paymentId, payload.id, 'completed');
+    } else if (
+      eventType === 'subscription.paid' &&
+      payload?.metadata?.paymentId
+    ) {
+      await this.processPaymentSuccess(
+        payload.metadata.paymentId,
+        payload.id,
+        'completed',
+      );
     } else if (eventType) {
       this.logger.debug(`Creem Webhook 未处理的事件类型: ${eventType}`);
     }
@@ -405,7 +493,9 @@ export class PaymentService implements OnModuleInit {
   /** 支付仍为 pending 时向 Creem 查询 checkout，作为 webhook 未送达时的兜底 */
   private async trySyncPaymentFromCreem(paymentId: string): Promise<void> {
     if (!this.creemApiKey) return;
-    const row = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    const row = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+    });
     if (!row || row.status !== 'pending' || !row.creemCheckoutId) return;
     try {
       const response = await axios.get(`${this.creemApiUrl}/checkouts`, {
@@ -416,11 +506,17 @@ export class PaymentService implements OnModuleInit {
       const checkout = response.data;
       const status = checkout?.status;
       if (status === 'completed') {
-        await this.processPaymentSuccess(paymentId, checkout.id ?? row.creemCheckoutId, 'completed');
+        await this.processPaymentSuccess(
+          paymentId,
+          checkout.id ?? row.creemCheckoutId,
+          'completed',
+        );
       }
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || 'unknown';
-      this.logger.debug(`Creem checkout 同步失败 paymentId=${paymentId}: ${msg}`);
+      this.logger.debug(
+        `Creem checkout 同步失败 paymentId=${paymentId}: ${msg}`,
+      );
     }
   }
 
@@ -430,7 +526,14 @@ export class PaymentService implements OnModuleInit {
   }
 
   // 处理支付成功
-  async processPaymentSuccess(paymentId: string, providerPaymentId?: string, _status?: string) {
+  async processPaymentSuccess(
+    paymentId: string,
+    providerPaymentId?: string,
+    _status?: string,
+  ) {
+    this.logger.log(
+      `Process payment success start paymentId=${paymentId} providerPaymentId=${providerPaymentId || 'none'}`,
+    );
     const txResult = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findUnique({
         where: { id: paymentId },
@@ -443,6 +546,9 @@ export class PaymentService implements OnModuleInit {
 
       // 如果已经处理过，跳过
       if (payment.status === 'completed') {
+        this.logger.log(
+          `Payment already completed paymentId=${paymentId}, skip side effects`,
+        );
         return {
           payment,
           justCompleted: false,
@@ -468,10 +574,15 @@ export class PaymentService implements OnModuleInit {
       });
 
       if (updateResult.count === 0) {
-        const latest = await tx.payment.findUnique({ where: { id: paymentId } });
+        const latest = await tx.payment.findUnique({
+          where: { id: paymentId },
+        });
         if (!latest) {
           throw new NotFoundException('支付记录不存在');
         }
+        this.logger.log(
+          `Payment completion race detected paymentId=${paymentId}, skip duplicate apply`,
+        );
         return {
           payment: latest,
           justCompleted: false,
@@ -483,7 +594,9 @@ export class PaymentService implements OnModuleInit {
         };
       }
 
-      const updatedPayment = await tx.payment.findUnique({ where: { id: paymentId } });
+      const updatedPayment = await tx.payment.findUnique({
+        where: { id: paymentId },
+      });
       if (!updatedPayment) {
         throw new NotFoundException('支付记录不存在');
       }
@@ -538,7 +651,9 @@ export class PaymentService implements OnModuleInit {
         await tx.user.update({
           where: { id: payment.userId },
           data: {
-            membership: payment.product.code.includes('vip') ? 'vip' : 'premium',
+            membership: payment.product.code.includes('vip')
+              ? 'vip'
+              : 'premium',
             membershipExpiryAt: expiryDate,
           },
         });
@@ -555,27 +670,53 @@ export class PaymentService implements OnModuleInit {
       };
     });
     if (txResult.justCompleted) {
-      await this.prisma.analyticsEvent.create({
-        data: {
+      const existing = await this.prisma.analyticsEvent.findFirst({
+        where: {
           userId: txResult.userId,
           name: 'payment_success',
           props: {
-            paymentId,
-            productType: txResult.productType,
-            productCode: txResult.productCode,
-            amount: txResult.amount,
-            points: txResult.points,
-            providerPaymentId: providerPaymentId || null,
-          } as any,
+            path: ['paymentId'],
+            equals: paymentId,
+          },
         },
+        select: { id: true },
       });
+      if (!existing) {
+        const paymentSuccessProps: Prisma.InputJsonValue = {
+          paymentId,
+          productType: txResult.productType,
+          productCode: txResult.productCode,
+          amount: txResult.amount,
+          points: txResult.points,
+          providerPaymentId: providerPaymentId || null,
+          source: this.paymentSourceTag,
+        } as Prisma.InputJsonValue;
+        await this.prisma.analyticsEvent.create({
+          data: {
+            userId: txResult.userId,
+            name: 'payment_success',
+            props: paymentSuccessProps,
+          },
+        });
+      } else {
+        this.logger.warn(
+          `Skip duplicated payment_success analytics paymentId=${paymentId} eventId=${existing.id}`,
+        );
+      }
+      this.logger.log(
+        `Payment completion applied paymentId=${paymentId} userId=${txResult.userId} type=${txResult.productType} amount=${txResult.amount}`,
+      );
     }
     return txResult.payment;
   }
 
   // 模拟支付成功（用于测试）
   async mockPaymentSuccess(paymentId: string) {
-    return this.processPaymentSuccess(paymentId, `mock_${paymentId}`, 'completed');
+    return this.processPaymentSuccess(
+      paymentId,
+      `mock_${paymentId}`,
+      'completed',
+    );
   }
 
   // 获取用户支付历史
