@@ -431,7 +431,7 @@ export class PaymentService implements OnModuleInit {
 
   // 处理支付成功
   async processPaymentSuccess(paymentId: string, providerPaymentId?: string, _status?: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const txResult = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findUnique({
         where: { id: paymentId },
         include: { product: true },
@@ -443,7 +443,15 @@ export class PaymentService implements OnModuleInit {
 
       // 如果已经处理过，跳过
       if (payment.status === 'completed') {
-        return payment;
+        return {
+          payment,
+          justCompleted: false,
+          userId: payment.userId,
+          productType: payment.product.type,
+          amount: payment.amount,
+          points: payment.points,
+          productCode: payment.product.code,
+        };
       }
 
       // 原子幂等：仅允许 pending -> completed
@@ -464,7 +472,15 @@ export class PaymentService implements OnModuleInit {
         if (!latest) {
           throw new NotFoundException('支付记录不存在');
         }
-        return latest;
+        return {
+          payment: latest,
+          justCompleted: false,
+          userId: payment.userId,
+          productType: payment.product.type,
+          amount: payment.amount,
+          points: payment.points,
+          productCode: payment.product.code,
+        };
       }
 
       const updatedPayment = await tx.payment.findUnique({ where: { id: paymentId } });
@@ -528,8 +544,33 @@ export class PaymentService implements OnModuleInit {
         });
       }
 
-      return updatedPayment;
+      return {
+        payment: updatedPayment,
+        justCompleted: true,
+        userId: payment.userId,
+        productType: payment.product.type,
+        amount: payment.amount,
+        points: payment.points,
+        productCode: payment.product.code,
+      };
     });
+    if (txResult.justCompleted) {
+      await this.prisma.analyticsEvent.create({
+        data: {
+          userId: txResult.userId,
+          name: 'payment_success',
+          props: {
+            paymentId,
+            productType: txResult.productType,
+            productCode: txResult.productCode,
+            amount: txResult.amount,
+            points: txResult.points,
+            providerPaymentId: providerPaymentId || null,
+          } as any,
+        },
+      });
+    }
+    return txResult.payment;
   }
 
   // 模拟支付成功（用于测试）
