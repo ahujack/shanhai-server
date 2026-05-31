@@ -20,7 +20,9 @@ LLM_MODEL=gemini-2.5-flash
 # 纯文本 (DeepSeek) - 测字解读、八字解读、抽签、对话等
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-v4-flash
+AGENT_REPLY_LLM_MODEL=deepseek-v4-pro
+AGENT_INTENT_LLM_MODEL=deepseek-v4-flash
 ```
 
 ## 部署步骤

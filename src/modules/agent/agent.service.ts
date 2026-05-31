@@ -1106,12 +1106,11 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     }
   }
 
-  private async resolveAgentLlmModel(userId?: string): Promise<string> {
+  private async resolveAgentLlmModel(_userId?: string): Promise<string> {
     const forcedModel = String(process.env.AGENT_REPLY_LLM_MODEL || process.env.AGENT_LLM_MODEL || '').trim();
     if (forcedModel) return forcedModel;
-    const membership = await this.getUserMembership(userId);
-    if (membership === 'premium' || membership === 'vip') return 'deepseek-v4-pro';
-    return process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
+    // 默认统一高质量主回复；成本控制通过环境变量覆盖
+    return 'deepseek-v4-pro';
   }
 
   private resolveAgentIntentModel(): string {
