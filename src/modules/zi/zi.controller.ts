@@ -70,7 +70,8 @@ export class ZiController {
     if (!/[\u4e00-\u9fa5]/.test(zi)) {
       throw new BadRequestException('请输入一个有效的汉字');
     }
-    const membership = await this.getMembership(userId);
+    const membershipState = await this.getMembershipState(userId);
+    const membership = membershipState.tier;
     if (membership === 'free') {
       const consumed = await this.pointsService.consumePoints(
         userId,
@@ -79,7 +80,12 @@ export class ZiController {
         '测字解读',
       );
       if (!consumed.success) {
-        throw new BadRequestException(consumed.message || '积分不足，请签到或前往积分商城获取');
+        const expiredHint = membershipState.expired
+          ? '会员权益已过期，本次测字需积分。请先续费会员或前往积分商城补充积分。'
+          : '';
+        throw new BadRequestException(
+          expiredHint || consumed.message || '积分不足，请签到或前往积分商城获取',
+        );
       }
       consumeRecordId = consumed.recordId;
     }
@@ -173,7 +179,8 @@ export class ZiController {
         };
       }
 
-      const membership = await this.getMembership(userId);
+      const membershipState = await this.getMembershipState(userId);
+      const membership = membershipState.tier;
       if (membership === 'free') {
         const consumed = await this.pointsService.consumePoints(
           userId,
@@ -182,9 +189,12 @@ export class ZiController {
           '测字解读（手写）',
         );
         if (!consumed.success) {
+          const expiredHint = membershipState.expired
+            ? '会员权益已过期，本次测字需积分。请先续费会员或前往积分商城补充积分。'
+            : '';
           return {
             recognizedZi: zi,
-            error: consumed.message || '积分不足，请签到或前往积分商城获取',
+            error: expiredHint || consumed.message || '积分不足，请签到或前往积分商城获取',
           };
         }
         consumeRecordId = consumed.recordId;
@@ -299,9 +309,11 @@ export class ZiController {
     }
   }
 
-  private async getMembership(userId?: string): Promise<'free' | 'premium' | 'vip'> {
+  private async getMembershipState(
+    userId?: string,
+  ): Promise<{ tier: 'free' | 'premium' | 'vip'; expired: boolean }> {
     if (!userId) {
-      return 'free';
+      return { tier: 'free', expired: false };
     }
     try {
       const user = await this.prisma.user.findUnique({
@@ -311,13 +323,13 @@ export class ZiController {
       const membership = user?.membership;
       if (membership === 'premium' || membership === 'vip') {
         if (user?.membershipExpiryAt && new Date() > user.membershipExpiryAt) {
-          return 'free';
+          return { tier: 'free', expired: true };
         }
-        return membership;
+        return { tier: membership, expired: false };
       }
     } catch (error) {
       Logger.warn(`读取用户会员失败: ${(error as Error).message}`, ZiController.name);
     }
-    return 'free';
+    return { tier: 'free', expired: false };
   }
 }
