@@ -15,4 +15,8 @@ export class CreateReadingDto {
   @IsArray()
   @IsOptional()
   keywords?: string[];
+
+  @IsOptional()
+  @IsString()
+  language?: 'zh-CN' | 'en-US' | 'zh-TW';
 }

@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import axios from 'axios';
 import { ORACLE_BONE_SNAPSHOT } from './oracle-bone.snapshot';
 import { PrismaService } from '../../prisma.service';
+import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
 
 // 汉典笔画部首数据（zdic），懒加载
 let zdicData: Record<string, [string, number]> | null = null;
@@ -64,6 +65,8 @@ export interface ZiAnalyzeOptions {
   userQuestion?: string;
   /** 用于 LLM 调用埋点（可选） */
   userId?: string;
+  /** 返回语言 */
+  language?: 'zh-CN' | 'en-US' | 'zh-TW';
 }
 
 // 笔迹特征库
@@ -353,6 +356,7 @@ export class ZiService {
           userQuestion: analyzeOpts?.userQuestion,
           membership,
           userId: analyzeOpts?.userId,
+          language: analyzeOpts?.language,
         });
         if (llmResult) {
           // 技法细化：离合法、填字格、象形投射
@@ -788,6 +792,7 @@ export class ZiService {
       userQuestion?: string;
       membership?: MembershipTier;
       userId?: string;
+      language?: 'zh-CN' | 'en-US' | 'zh-TW';
     },
   ): Promise<{
     overall?: string;
@@ -831,6 +836,7 @@ export class ZiService {
       const timeoutRaw = parseInt(process.env.ZI_DEEPSEEK_TIMEOUT_MS || '120000', 10);
       const timeoutMs = Math.min(180000, Math.max(45000, Number.isFinite(timeoutRaw) ? timeoutRaw : 120000));
 
+      const outputLanguageRule = buildOutputLanguageInstruction(normalizeAppLanguage(ctx?.language));
       const response = await axios.post(
         apiUrl,
         {
@@ -853,6 +859,7 @@ export class ZiService {
 7. 【笔迹承接】若提供了 visionHandwritingNote（多模态已读图），handwritingInterpretation 四条须在语义上承接该观察，并结合 focus 与八字（若有）延伸，不得改成与之矛盾的套话。
 8. 【通俗易懂】少用生僻词与论文腔；必要术语后加一句白话解释；多用「对你来说」「可以把它理解成」等自然表达，让用户觉得好懂又贴己。
 9. 【笔下所指唯一】用户 JSON 中的 zi 字段即为本次所测单字（唯一本字）。全文禁止把本字说成其它汉字；讨论部件时可单独写部件字形。handwritingInterpretation 四条每条开头须出现「你写的「X」」或「这个「X」字」（X 必须与 zi 完全一致）。
+10. 【语言一致】${outputLanguageRule}
 
 【技法细化】必须结合该字部件拆解，每条都要不同；每条不超过约 70 字，一句一个要点，便于扫读：
 - lihefa：离合法，3条。格式如「离：先看外层「X」…」「转：把X合起来看…」「证：从部件含义看…」。必须用该字真实部件

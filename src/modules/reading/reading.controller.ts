@@ -6,6 +6,7 @@ import { PointsService } from '../points/points.service';
 import { PrismaService } from '../../prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { BILLING_RULES } from '../../config/billing-rules';
+import { normalizeAppLanguage } from '../../common/app-language';
 
 const READING_POINTS_COST = BILLING_RULES.points.reading;
 
@@ -40,7 +41,8 @@ export class ReadingController {
     }
     let result;
     try {
-      result = await this.readingService.generate({ ...dto, userId });
+      const language = normalizeAppLanguage((dto as any)?.language || (req as any)?.headers?.['x-app-language']);
+      result = await this.readingService.generate({ ...dto, userId, language });
     } catch (error) {
       if (userId && consumeRecordId) {
         await this.pointsService.rollbackConsumption(

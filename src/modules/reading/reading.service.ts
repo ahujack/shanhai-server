@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../../prisma.service';
+import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
 
 export type DivinationCategory = 'career' | 'love' | 'wealth' | 'health' | 'growth' | 'general';
 
@@ -527,6 +528,7 @@ export class ReadingService {
     question: string;
     category?: DivinationCategory;
     userId?: string;
+    language?: 'zh-CN' | 'en-US' | 'zh-TW';
   }): Promise<DivinationResult> {
     const now = Date.now();
     const seed = this.buildSeed(dto.question, dto.category, dto.userId);
@@ -545,6 +547,7 @@ export class ReadingService {
         question: dto.question,
         category: dto.category ?? 'general',
         userId: dto.userId,
+        language: dto.language,
         originalName,
         changedName,
         original,
@@ -732,6 +735,7 @@ export class ReadingService {
     question: string;
     category: DivinationCategory;
     userId?: string;
+    language?: 'zh-CN' | 'en-US' | 'zh-TW';
     originalName: string;
     changedName: string;
     original: number;
@@ -748,6 +752,7 @@ export class ReadingService {
     const yaoLabels = ['初', '二', '三', '四', '五', '上'];
     const yaoDesc = ctx.lines.map((l, i) => `${yaoLabels[i]}：${this.getYaoDescription(l)}`).join('\n');
 
+    const outputLanguageRule = buildOutputLanguageInstruction(normalizeAppLanguage(ctx.language));
     const systemPrompt = `你是易经占卜解读师。解读必须紧扣用户的具体问题和占卜方向，禁止泛泛而谈。
 
 【核心要求】
@@ -755,7 +760,8 @@ export class ReadingService {
 2. 用户问题要逐句回应，不能一笔带过
 3. 结合本卦、变卦、动爻数做具体分析，引用卦名和爻象
 4. 讲解要详细、有层次，每条 200-400 字
-5. 避免套话，每条建议都要可执行、有针对性`;
+5. 避免套话，每条建议都要可执行、有针对性
+6. ${outputLanguageRule}`;
     const userPrompt = `用户问题：${ctx.question}
 占卜方向：${ctx.category}（必须围绕此方向深入解读）
 本卦：${ctx.originalName}

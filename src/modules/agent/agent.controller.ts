@@ -5,6 +5,7 @@ import type { Response } from 'express';
 import { AgentService } from './agent.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { normalizeAppLanguage } from '../../common/app-language';
 
 @Controller('agent')
 export class AgentController {
@@ -15,7 +16,8 @@ export class AgentController {
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async chat(@Body() dto: AgentChatDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
-    return this.agentService.handleChat({ ...dto, userId });
+    const language = normalizeAppLanguage((dto as any)?.language || (req as any)?.headers?.['x-app-language']);
+    return this.agentService.handleChat({ ...dto, userId, language });
   }
 
   @Post('chat-stream')
@@ -29,8 +31,9 @@ export class AgentController {
     res.flushHeaders();
 
     const userId = req.user?.sub ?? req.user?.id;
+    const language = normalizeAppLanguage((dto as any)?.language || (req as any)?.headers?.['x-app-language']);
     try {
-      for await (const event of this.agentService.handleChatStream({ ...dto, userId })) {
+      for await (const event of this.agentService.handleChatStream({ ...dto, userId, language })) {
         res.write(`data: ${JSON.stringify(event)}\n\n`);
         if (typeof (res as any).flush === 'function') {
           (res as any).flush();

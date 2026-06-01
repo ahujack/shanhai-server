@@ -26,5 +26,9 @@ export class AgentChatDto {
   @Min(0)
   @Max(23)
   clientLocalHour?: number;
+
+  @IsOptional()
+  @IsString()
+  language?: 'zh-CN' | 'en-US' | 'zh-TW';
 }
 

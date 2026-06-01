@@ -8,6 +8,7 @@ import { FortuneService } from '../fortune/fortune.service';
 import { ChartService } from '../chart/chart.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 import { PrismaService } from '../../prisma.service';
+import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
 
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
 type AgentAction = { type: string; label: string };
@@ -131,6 +132,7 @@ export class AgentService {
           question: dto.message,
           category: (divinationCategory as DivinationCategory) || this.inferCategory(dto.message),
           userId: dto.userId,
+          language: dto.language,
         });
         if (dto.userId) {
           try {
@@ -716,11 +718,16 @@ ${contextInfo}`,
 `;
     }
 
+    const outputLanguageRule = buildOutputLanguageInstruction(normalizeAppLanguage(dto.language));
     const systemPrompt = `${persona.description}
 
 你是${persona.name}，${persona.title}。
 ${contextInfo}
 ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
+
+语言要求：
+- ${outputLanguageRule}
+- 专有词可保留原文（如 Bazi / AI），其余内容统一使用目标语言。
 
 你的回复风格：
 - toneTags: ${persona.toneTags.join('、')}
@@ -872,12 +879,17 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 `;
       }
 
+      const outputLanguageRule = buildOutputLanguageInstruction(normalizeAppLanguage(dto.language));
       // 构建系统提示词
       const systemPrompt = `${persona.description}
 
 你是${persona.name}，${persona.title}。
 ${contextInfo}
 ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
+
+语言要求：
+- ${outputLanguageRule}
+- 专有词可保留原文（如 Bazi / AI），其余内容统一使用目标语言。
 
 你的回复风格：
 - toneTags: ${persona.toneTags.join('、')}
