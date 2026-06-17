@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../../prisma.service';
+import { resolveDeepSeekChatUrl } from '../../common/llm-endpoint';
 
 export interface FortuneSlip {
   id: string;
@@ -481,7 +482,7 @@ export class FortuneService {
       const model = this.resolveFortuneLlmModel(membership);
       const poemText = `${slip.poem.title}：${slip.poem.line1} ${slip.poem.line2} ${slip.poem.line3} ${slip.poem.line4}`;
       const res = await axios.post(
-        process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
+        resolveDeepSeekChatUrl(),
         {
           model,
           temperature: 0.8,

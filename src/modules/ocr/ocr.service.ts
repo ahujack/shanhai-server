@@ -6,15 +6,9 @@ import * as path from 'path';
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import type { HandwritingAnalysis } from '../zi/zi.service';
+import { resolveMultimodalChatUrl } from '../../common/llm-endpoint';
 
 const execFileAsync = promisify(execFileCb);
-
-/** 与 inferHandwritingTraits 等共用：补全 chat/completions 路径 */
-function resolveLlmChatUrl(): string {
-  const raw = process.env.LLM_API_URL || process.env.LLM_URL || 'https://api.apiyi.com/v1/chat/completions';
-  const t = raw.trim();
-  return t.includes('/chat/completions') ? t : `${t.replace(/\/$/, '')}/chat/completions`;
-}
 
 @Injectable()
 export class OcrService {
@@ -66,7 +60,7 @@ export class OcrService {
    */
   async inferHandwritingTraitsWithGemini(imageBase64: string): Promise<Partial<HandwritingAnalysis> | null> {
     const apiKey = process.env.LLM_API_KEY;
-    const apiUrl = resolveLlmChatUrl();
+    const apiUrl = resolveMultimodalChatUrl();
     const model = process.env.LLM_VISION_MODEL || process.env.LLM_MODEL || 'gemini-2.0-flash';
     if (!apiKey) {
       return null;
@@ -252,7 +246,7 @@ export class OcrService {
     const apiKey = process.env.LLM_API_KEY?.trim();
     if (!apiKey) return null;
 
-    const apiUrl = resolveLlmChatUrl();
+    const apiUrl = resolveMultimodalChatUrl();
     const model = process.env.LLM_OCR_MODEL?.trim() || process.env.LLM_MODEL?.trim() || 'gemini-2.0-flash';
     // 识字单次请求：默认 45s，上限 90s（Railway 冷启动 + 多模态较慢）
     const timeout = Math.min(90000, Math.max(15000, parseInt(process.env.LLM_OCR_TIMEOUT_MS || '45000', 10)));

@@ -2,6 +2,8 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import axios from 'axios';
 import solarlunar from 'solarlunar';
+import { AppLanguage, buildOutputLanguageInstruction } from '../../common/app-language';
+import { resolveChatCompletionsUrl } from '../../common/llm-endpoint';
 
 type MembershipTier = 'free' | 'premium' | 'vip';
 
@@ -125,6 +127,7 @@ export class ChartService {
       birthLocation?: string;
       timezone?: string;
       membership?: MembershipTier;
+      language?: AppLanguage;
       /** 为 false 时不写入数据库（游客试算等） */
       persist?: boolean;
     },
@@ -203,6 +206,7 @@ export class ChartService {
       wuxingStrength,
       baseDetailedReading,
       membership: options?.membership || 'free',
+      language: options?.language || 'zh-CN',
     });
     
     const chart: BaziChart = {
@@ -269,7 +273,11 @@ export class ChartService {
     return chart;
   }
   
-  async findOne(userId: string, membership: MembershipTier = 'free'): Promise<BaziChart | null> {
+  async findOne(
+    userId: string,
+    membership: MembershipTier = 'free',
+    language: AppLanguage = 'zh-CN',
+  ): Promise<BaziChart | null> {
     const chart = await this.prisma.baziChart.findUnique({
       where: { userId },
     });
@@ -278,11 +286,15 @@ export class ChartService {
       return null;
     }
 
-    return await this.formatChart(chart, membership);
+    return await this.formatChart(chart, membership, language);
   }
 
   // 格式化数据库中的图表数据
-  private async formatChart(chart: any, membership: MembershipTier = 'free'): Promise<BaziChart> {
+  private async formatChart(
+    chart: any,
+    membership: MembershipTier = 'free',
+    language: AppLanguage = 'zh-CN',
+  ): Promise<BaziChart> {
     const baseDetailedReading = this.generateDetailedReading(
       chart.dayMaster,
       Number(String(chart.birthDate).slice(0, 4)),
@@ -320,6 +332,7 @@ export class ChartService {
       wuxingStrength: JSON.parse(chart.wuxingStrength),
       baseDetailedReading,
       membership,
+      language,
     });
 
     return {
@@ -620,10 +633,17 @@ export class ChartService {
     };
     
     const wx = dayMasterWuxing[dayMaster];
+    const wuxingLabel: Record<string, string> = {
+      wood: '木',
+      fire: '火',
+      earth: '土',
+      metal: '金',
+      water: '水',
+    };
     
     // 性格关键词映射
     const personalityMap: Record<string, string[]> = {
-      wood: ['富有生', '仁慈', '乐观', '喜欢新事物'],
+      wood: ['富有生机', '仁慈', '乐观', '喜欢新事物'],
       fire: ['热情', '积极', '有活力', '执行力强'],
       earth: ['稳重', '务实', '诚信', '有耐心'],
       metal: ['果断', '正义', '有原则', '事业心强'],
@@ -636,10 +656,11 @@ export class ChartService {
     const maxWx = Object.entries(wuxing).reduce((a, b) => a[1] > b[1] ? a : b)[0];
     const minWx = Object.entries(wuxing).reduce((a, b) => a[1] < b[1] ? a : b)[0];
     
+    const wxText = wuxingLabel[wx] || wx;
     if (wuxing[wx] >= 30) {
-      traits.push(`${wx}性偏旺，有领导气质`);
+      traits.push(`${wxText}性偏旺，有领导气质`);
     } else if (wuxing[wx] <= 15) {
-      traits.push(`${wx}性偏弱，需要更多滋养`);
+      traits.push(`${wxText}性偏弱，需要更多滋养`);
     }
     
     return traits;
@@ -1226,6 +1247,7 @@ export class ChartService {
     wuxingStrength: Record<string, number>;
     baseDetailedReading: BaziChart['detailedReading'];
     membership: MembershipTier;
+    language: AppLanguage;
   }): Promise<BaziChart['detailedReading']> {
     // 排盘用规则，排好后用文本大模型解读（DeepSeek）
     const enableLLM = process.env.BAZI_LLM_ENHANCE !== 'false';
@@ -1244,6 +1266,7 @@ export class ChartService {
       input.monthGanZhi,
       input.dayGanZhi,
       input.hourGanZhi,
+      input.language,
     ].join('|');
     const now = Date.now();
     const cached = this.llmCache.get(cacheKey);
@@ -1277,13 +1300,17 @@ export class ChartService {
         },
       };
 
-      const apiUrl = process.env.BAZI_LLM_API_URL || process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
+      const apiUrl = resolveChatCompletionsUrl(
+        process.env.BAZI_LLM_API_URL || process.env.DEEPSEEK_API_URL,
+      );
       const model = this.resolveBaziLlmModel(input.membership);
+      const languageInstruction = buildOutputLanguageInstruction(input.language);
       const systemPrompt =
         '你是资深命理老师。必须严格基于输入排盘结果写大运流年，不可改动干支与起运信息。' +
         '输出JSON，字段可包含：corePattern,relationship,career,wealth,health,decadeRhythm(string[]),yearlyTips(string[])。' +
         '文风偏口语老师傅、温和、不制造焦虑；每条建议具体可执行。' +
-        '表达策略使用“硬锚点+弹性缓冲”：每段先给1个可验证锚点（如起运年龄/十神主线/某个干支），再给1个概率表达（如通常、多半、往往、这几年更容易）。';
+        '表达策略使用“硬锚点+弹性缓冲”：每段先给1个可验证锚点（如起运年龄/十神主线/某个干支），再给1个概率表达（如通常、多半、往往、这几年更容易）。' +
+        `语言要求：${languageInstruction}`;
       const response = await axios.post(
         apiUrl,
         {

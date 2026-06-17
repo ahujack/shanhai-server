@@ -5,6 +5,7 @@ import axios from 'axios';
 import { ORACLE_BONE_SNAPSHOT } from './oracle-bone.snapshot';
 import { PrismaService } from '../../prisma.service';
 import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
+import { resolveDeepSeekChatUrl } from '../../common/llm-endpoint';
 
 // 汉典笔画部首数据（zdic），懒加载
 let zdicData: Record<string, [string, number]> | null = null;
@@ -828,7 +829,7 @@ export class ZiService {
     
     const startedAt = Date.now();
     try {
-      const apiUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
+      const apiUrl = resolveDeepSeekChatUrl();
       const model = this.resolveZiLlmModel(ctx?.membership || 'free');
       // 原 5500 tokens + 30s 超时极易未完成即断开，前端表现为 net::ERR_CONNECTION_TIMED_OUT
       const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || '3800', 10);

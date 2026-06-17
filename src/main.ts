@@ -7,6 +7,7 @@ import * as path from 'path';
 import { GlobalExceptionFilter } from './modules/auth/global-exception.filter';
 import { LoggingInterceptor } from './modules/auth/logging.interceptor';
 import { assertProductionConfig, resolveCorsOrigin } from './config/production-env';
+import { resolveDeepSeekChatUrl, resolveMultimodalChatUrl } from './common/llm-endpoint';
 
 // 加载 .env 文件作为基础配置
 config({ path: path.resolve(__dirname, '../.env') });
@@ -71,6 +72,8 @@ async function bootstrap() {
   
   logger.log(`🚀 山海灵境 API 服务已启动: http://localhost:${port}`);
   logger.log(`📦 环境: ${process.env.NODE_ENV || 'development'}`);
+  logger.log(`🤖 文本 LLM: ${resolveDeepSeekChatUrl()}`);
+  logger.log(`🖼️ 多模态 LLM: ${resolveMultimodalChatUrl()}`);
   
   // 健康检查
   if (process.env.NODE_ENV !== 'production') {

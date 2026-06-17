@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../../prisma.service';
 import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
+import { resolveDeepSeekChatUrl } from '../../common/llm-endpoint';
 
 export type DivinationCategory = 'career' | 'love' | 'wealth' | 'health' | 'growth' | 'general';
 
@@ -780,7 +781,7 @@ recommendations 必须紧扣用户问题和占卜方向，每条不同、可执�
 
     try {
       const response = await axios.post(
-        process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
+        resolveDeepSeekChatUrl(),
         {
           model,
           temperature: 0.75,

@@ -9,23 +9,10 @@ import { ChartService } from '../chart/chart.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 import { PrismaService } from '../../prisma.service';
 import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
+import { resolveDeepSeekChatUrl, resolveSttTranscriptionsUrl } from '../../common/llm-endpoint';
 
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
 type AgentAction = { type: string; label: string };
-
-function resolveSttTranscriptionsUrl(): string {
-  const raw =
-    process.env.LLM_STT_API_URL ||
-    process.env.STT_API_URL ||
-    process.env.LLM_API_URL ||
-    process.env.LLM_URL ||
-    '';
-  const trimmed = String(raw || '').trim();
-  if (!trimmed) return '';
-  if (trimmed.includes('/audio/transcriptions')) return trimmed;
-  if (trimmed.includes('/chat/completions')) return trimmed.replace('/chat/completions', '/audio/transcriptions');
-  return `${trimmed.replace(/\/$/, '')}/audio/transcriptions`;
-}
 
 let cachedTencentAsrClientCtor: any | null | undefined = undefined;
 
@@ -454,7 +441,7 @@ export class AgentService {
 
       const contextLines = (dto.context || []).slice(-6).join('\n');
       const response = await axios.post(
-        process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
+        resolveDeepSeekChatUrl(),
         {
           model,
           temperature: 0,
@@ -761,7 +748,7 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
     ];
 
     try {
-      const apiUrl = process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions';
+      const apiUrl = resolveDeepSeekChatUrl();
       const timeoutMs = this.resolveAgentStreamTimeoutMs();
       const startedAt = Date.now();
       const abortController = new AbortController();
@@ -778,7 +765,8 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
           body: JSON.stringify({
             model,
             temperature: 0.8,
-            max_tokens: 300,
+            // 提高输出上限，减少长回复被截断成半句的概率
+            max_tokens: 700,
             stream: true,
             messages,
           }),
@@ -919,11 +907,12 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 - 保持神秘感和东方美学气质`;
 
       const response = await axios.post(
-        process.env.DEEPSEEK_API_URL ?? 'https://api.deepseek.com/chat/completions',
+        resolveDeepSeekChatUrl(),
         {
           model,
           temperature: 0.8, // 稍高一点温度，让回复更生动
-          max_tokens: 300,
+          // 与流式一致，避免回退到非流式时出现半句截断
+          max_tokens: 700,
           messages: [
             { role: 'system', content: systemPrompt },
             conversationContext
