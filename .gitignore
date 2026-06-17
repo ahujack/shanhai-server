@@ -1,9 +1,10 @@
 node_modules/
 dist/
 .env
+.env.*
+!.env.example
 *.log
 .DS_Store
 handwriting-samples/
-.env.local
 .env.local
 scripts/test-chart.mjs
