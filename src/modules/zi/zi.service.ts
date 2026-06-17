@@ -4,7 +4,14 @@ import * as fs from 'fs';
 import axios from 'axios';
 import { ORACLE_BONE_SNAPSHOT } from './oracle-bone.snapshot';
 import { PrismaService } from '../../prisma.service';
-import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
+import { buildOutputLanguageInstruction, normalizeAppLanguage, AppLanguage } from '../../common/app-language';
+import {
+  ziOracleNoteFree,
+  ziOracleNotePaid,
+  ziPremiumHintDefault,
+  ziPremiumHintLiteFocus,
+  ziPremiumHintNoFocus,
+} from '../../common/localized-strings';
 import { resolveDeepSeekChatUrl } from '../../common/llm-endpoint';
 
 // 汉典笔画部首数据（zdic），懒加载
@@ -328,6 +335,7 @@ export class ZiService {
     chartContext?: ZiBaziContext | null,
     analyzeOpts?: ZiAnalyzeOptions,
   ): Promise<ZiResult> {
+    const language = normalizeAppLanguage(analyzeOpts?.language);
     try {
       const char = zi.charAt(0);
       const focus = this.normalizeFocusAspect(focusAspect);
@@ -337,7 +345,7 @@ export class ZiService {
       let handwriting = this.analyzeHandwriting(handwritingData);
       
       // 2. 汉字拆解分析
-      let ziAnalysis = this.analyzeZi(char, membership);
+      let ziAnalysis = this.analyzeZi(char, membership, language);
       
       // 3. 优先用 LLM 生成全部解读（含技法细化 + 方向解读）
       let coldReadings = this.generateColdReadings(handwriting, ziAnalysis);
@@ -415,7 +423,7 @@ export class ZiService {
 
       handwriting = this.ensureHandwritingMentionsZi(handwriting, char);
 
-      const layeredInterpretation = this.applyMembershipInterpretation(interpretation, membership);
+      const layeredInterpretation = this.applyMembershipInterpretation(interpretation, membership, language);
       return {
         handwriting,
         zi: ziAnalysis,
@@ -430,14 +438,14 @@ export class ZiService {
     } catch (error) {
       this.logger.error('测字分析失败', error);
       // 返回一个默认结果而不是抛出异常
-      return this.getDefaultResult(zi);
+      return this.getDefaultResult(zi, language);
     }
   }
   
   /**
    * 获取默认结果（当分析失败时）
    */
-  private getDefaultResult(zi: string): ZiResult {
+  private getDefaultResult(zi: string, language: AppLanguage = 'zh-CN'): ZiResult {
     const char = zi.charAt(0);
     return {
       handwriting: {
@@ -486,7 +494,7 @@ export class ZiService {
         wealth: '财运平稳，需稳扎稳打。',
         health: '注意身体健康，保持良好作息。',
         advice: ['保持良好生活习惯', '注意休息', '适度运动'],
-        premiumHint: '升级会员可解锁完整方向锚点、风险信号和行动计划。',
+        premiumHint: ziPremiumHintDefault(language),
       },
       coldReadings: ['从你的字来看，是个有想法的人。', '你很重视身边的人和事。', '你是个值得信赖的人。'],
       followUpQuestions: ['最近是否有特别在意的事情？', '这个字是你随意写的，还是有特别的想法？'],
@@ -574,7 +582,7 @@ export class ZiService {
   /**
    * 分析汉字结构
    */
-  private analyzeZi(zi: string, membership: MembershipTier): ZiAnalysis {
+  private analyzeZi(zi: string, membership: MembershipTier, language: AppLanguage = 'zh-CN'): ZiAnalysis {
     const char = zi.charAt(0);
     const bihua = this.countBihua(char);
     const wuxing = this.inferWuxing(char);
@@ -601,7 +609,7 @@ export class ZiService {
         tianziGe: this.buildTianziGe(char, preset.parts),
         imageryInference: this.buildImageryInference(char, preset.parts),
         probingQuestion: this.buildProbingQuestion(char, preset.parts),
-        oracleBone: this.buildOracleBoneInsight(char, preset.parts, membership),
+        oracleBone: this.buildOracleBoneInsight(char, preset.parts, membership, language),
       };
     }
     
@@ -622,7 +630,7 @@ export class ZiService {
       tianziGe: this.buildTianziGe(char, this.breakDown(char)),
       imageryInference: this.buildImageryInference(char, this.breakDown(char)),
       probingQuestion: this.buildProbingQuestion(char, this.breakDown(char)),
-      oracleBone: this.buildOracleBoneInsight(char, this.breakDown(char), membership),
+      oracleBone: this.buildOracleBoneInsight(char, this.breakDown(char), membership, language),
     };
   }
   
@@ -1154,6 +1162,7 @@ export class ZiService {
   private applyMembershipInterpretation(
     interpretation: ZiResult['interpretation'],
     membership: MembershipTier,
+    language: AppLanguage = 'zh-CN',
   ): ZiResult['interpretation'] {
     if (this.unlockAllForTest) {
       return {
@@ -1170,7 +1179,7 @@ export class ZiService {
     if (!interpretation.focusReading) {
       return {
         ...interpretation,
-        premiumHint: '升级会员可解锁完整方向推演（关键锚点/风险信号/行动计划）。',
+        premiumHint: ziPremiumHintNoFocus(language),
       };
     }
     return {
@@ -1182,7 +1191,7 @@ export class ZiService {
         actionPlan: interpretation.focusReading.actionPlan.slice(0, 1),
         llmEnhanced: false,
       },
-      premiumHint: '当前为方向简版。升级会员可查看完整锚点、风险清单和3步行动计划。',
+      premiumHint: ziPremiumHintLiteFocus(language),
     };
   }
 
@@ -1442,7 +1451,12 @@ export class ZiService {
     return map;
   }
 
-  private buildOracleBoneInsight(zi: string, parts: string[], membership: MembershipTier): ZiAnalysis['oracleBone'] {
+  private buildOracleBoneInsight(
+    zi: string,
+    parts: string[],
+    membership: MembershipTier,
+    language: AppLanguage = 'zh-CN',
+  ): ZiAnalysis['oracleBone'] {
     const candidates = this.normalizeOracleLookupChars(zi, parts);
     const fullImages = this.findOracleImagesByCandidates(candidates).slice(0, 3);
     const isPaid = this.unlockAllForTest || membership === 'premium' || membership === 'vip';
@@ -1463,9 +1477,7 @@ export class ZiService {
         interpretation:
           `甲骨象形：围绕「${zi}」可见“${xiang}”意象。` +
           `结合部件「${parts.join('、') || zi}」，多指向“先定核心，再开路径”的结构逻辑。${variantText}`,
-        note: isPaid
-          ? '会员已解锁完整图像与异体视角，建议结合离合法交叉验证。'
-          : '当前为简版展示，升级会员可查看更多异体图像与差异解读。',
+        note: isPaid ? ziOracleNotePaid(language) : ziOracleNoteFree(language),
       };
     }
     return {

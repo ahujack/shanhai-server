@@ -3,6 +3,13 @@ import { PrismaService } from '../../prisma.service';
 import axios from 'axios';
 import solarlunar from 'solarlunar';
 import { AppLanguage, buildOutputLanguageInstruction } from '../../common/app-language';
+import {
+  chartFreeTeaserCommentary,
+  chartPaywallHint,
+  chartUnlockCaution,
+  chartUnlockFavorable,
+  chartUnlockWindowMonths,
+} from '../../common/localized-strings';
 import { resolveChatCompletionsUrl } from '../../common/llm-endpoint';
 
 type MembershipTier = 'free' | 'premium' | 'vip';
@@ -1253,7 +1260,7 @@ export class ChartService {
     const enableLLM = process.env.BAZI_LLM_ENHANCE !== 'false';
     const apiKey = process.env.BAZI_LLM_API_KEY || process.env.DEEPSEEK_API_KEY;
     if (!enableLLM || !apiKey) {
-      return this.applyMembershipLayer(input.baseDetailedReading, input.membership);
+      return this.applyMembershipLayer(input.baseDetailedReading, input.membership, input.language);
     }
 
     const cacheKey = [
@@ -1271,7 +1278,11 @@ export class ChartService {
     const now = Date.now();
     const cached = this.llmCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {
-      return this.applyMembershipLayer(this.mergeLuckPatch(input.baseDetailedReading, cached.patch), input.membership);
+      return this.applyMembershipLayer(
+        this.mergeLuckPatch(input.baseDetailedReading, cached.patch),
+        input.membership,
+        input.language,
+      );
     }
 
     const startedAt = Date.now();
@@ -1365,7 +1376,7 @@ export class ChartService {
         usage,
         success: true,
       });
-      return this.applyMembershipLayer(merged, input.membership);
+      return this.applyMembershipLayer(merged, input.membership, input.language);
     } catch (error) {
       await this.trackChartLlmTelemetry({
         userId: input.userId,
@@ -1377,13 +1388,14 @@ export class ChartService {
         errorMessage: (error as Error).message,
       });
       this.logger.warn(`八字LLM增强失败，使用规则结果回退: ${(error as Error).message}`);
-      return this.applyMembershipLayer(input.baseDetailedReading, input.membership);
+      return this.applyMembershipLayer(input.baseDetailedReading, input.membership, input.language);
     }
   }
 
   private applyMembershipLayer(
     reading: BaziChart['detailedReading'],
     membership: MembershipTier,
+    language: AppLanguage = 'zh-CN',
   ): BaziChart['detailedReading'] {
     if (membership === 'vip') {
       return {
@@ -1410,14 +1422,14 @@ export class ChartService {
 
     return {
       ...reading,
-      paywallHint: '当前为简版：可先看年度提点。升级会员可解锁每年「老师傅点评」与完整五年细化建议。',
+      paywallHint: chartPaywallHint(language),
       yearlyTips: reading.yearlyTips.slice(0, 3),
       annualForecast: reading.annualForecast.map((item, idx) => ({
         ...item,
-        favorable: idx <= 1 ? item.favorable : '升级会员解锁该年详细「宜」策略',
-        caution: idx <= 1 ? item.caution : '升级会员解锁该年详细「忌」提醒',
-        windowMonths: idx <= 1 ? item.windowMonths : ['升级会员解锁关键窗口月'],
-        masterCommentary: idx === 0 ? this.getFreeTeaserCommentary(item) : undefined,
+        favorable: idx <= 1 ? item.favorable : chartUnlockFavorable(language),
+        caution: idx <= 1 ? item.caution : chartUnlockCaution(language),
+        windowMonths: idx <= 1 ? item.windowMonths : [chartUnlockWindowMonths(language)],
+        masterCommentary: idx === 0 ? this.getFreeTeaserCommentary(item, language) : undefined,
       })),
     };
   }
@@ -1445,8 +1457,9 @@ export class ChartService {
 
   private getFreeTeaserCommentary(
     item: BaziChart['detailedReading']['annualForecast'][number],
+    language: AppLanguage = 'zh-CN',
   ): string {
-    return `老师傅年度提点：${item.hint}（年度简版）`;
+    return chartFreeTeaserCommentary(language, item.hint);
   }
 
   private getVipMasterCommentary(
