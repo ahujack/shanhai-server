@@ -1,2 +1,10 @@
 [phases.setup]
 nixPkgs = ["nodejs_20", "npm-10_x", "openssl"]
+
+# install 阶段一次性装齐 devDependencies，build 阶段不再 npm ci，
+# 避免 Railway cache mount 挂载 node_modules/.cache 时触发 EBUSY。
+[phases.install]
+cmds = ["npm ci --include=dev"]
+
+[phases.build]
+cmds = ["npm run build:prod"]
