@@ -726,7 +726,12 @@ export class AnalyticsService {
           where: partnerId ? { id: partnerId } : undefined,
           orderBy: { createdAt: 'desc' },
         }),
-        this.prisma.user.count({ where: userWhere }),
+        this.prisma.user.findMany({
+          where: userWhere,
+          select: { id: true, email: true, name: true, createdAt: true, affiliatePartnerId: true },
+          orderBy: { createdAt: 'desc' },
+          take: 500,
+        }),
         this.prisma.affiliateCommission.findMany({
           where: {
             ...partnerWhere,
@@ -764,7 +769,14 @@ export class AnalyticsService {
     return {
       periodDays: safeDays,
       since: since.toISOString(),
-      newAffiliateUsers: newUsers,
+      newAffiliateUsers: newUsers.length,
+      registeredUsers: newUsers.map((user) => ({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        partnerId: user.affiliatePartnerId,
+        createdAt: user.createdAt,
+      })),
       partners: partners.map((partner) => ({
         id: partner.id,
         code: partner.code,
@@ -827,10 +839,12 @@ export class AnalyticsService {
       throw new BadRequestException('访问密钥无效');
     }
 
-    const [users, clickCount, commissions, summary] = await Promise.all([
+    const [users, clickCount, commissions, summary, paidUsers] = await Promise.all([
       this.prisma.user.findMany({
         where: { affiliatePartnerId: partner.id },
-        select: { id: true, createdAt: true },
+        select: { id: true, email: true, name: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
       }),
       this.prisma.analyticsEvent.count({
         where: {
@@ -847,6 +861,7 @@ export class AnalyticsService {
               completedAt: true,
             },
           },
+          user: { select: { id: true, email: true, name: true } },
         },
         orderBy: { createdAt: 'desc' },
         take: 80,
@@ -861,9 +876,14 @@ export class AnalyticsService {
         },
         _count: { id: true },
       }),
+      this.prisma.affiliateCommission.findMany({
+        where: { partnerId: partner.id },
+        distinct: ['userId'],
+        select: { userId: true },
+      }),
     ]);
 
-    const paidUserIds = new Set(commissions.map((row) => row.userId));
+    const paidUserIds = new Set(paidUsers.map((row) => row.userId));
     const byStatus = summary.reduce<Record<string, {
       orderCount: number;
       grossAmount: number;
@@ -919,6 +939,7 @@ export class AnalyticsService {
       },
       commissions: commissions.map((row) => ({
         id: row.id,
+        user: row.user,
         productName: row.payment.product.name,
         productCode: row.payment.product.code,
         grossAmount: row.grossAmount,
@@ -928,6 +949,13 @@ export class AnalyticsService {
         status: row.status,
         completedAt: row.payment.completedAt,
         createdAt: row.createdAt,
+      })),
+      registeredUsers: users.map((user) => ({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        createdAt: user.createdAt,
+        paid: paidUserIds.has(user.id),
       })),
     };
   }

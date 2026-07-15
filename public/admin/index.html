@@ -501,6 +501,7 @@
             <tbody></tbody>
           </table>
         </div>
+        <div id="affiliate-detail-result" class="link-box hidden"></div>
       </div>
       </div>
     </div>
@@ -814,6 +815,7 @@
             '<td>' +
               '<div class="row" style="margin-top:0">' +
                 '<button type="button" class="secondary btn-copy-register-link" data-code="' + escapeHtml(p.code || '') + '">复制注册链接</button>' +
+                '<button type="button" class="secondary btn-affiliate-detail" data-id="' + escapeHtml(p.id || '') + '" data-name="' + escapeHtml(p.name || p.code || '') + '">查看注册/付费用户</button>' +
                 '<button type="button" class="secondary btn-reset-dashboard-link" data-id="' + escapeHtml(p.id || '') + '" data-code="' + escapeHtml(p.code || '') + '">生成/重置看板链接</button>' +
               '</div>' +
               '<small style="display:block;margin-top:6px;color:var(--muted)">看板链接含 token，只在生成时显示。</small>' +
@@ -859,6 +861,52 @@
           { label: '推广员看板链接', url: partner.dashboardUrl || '' },
         ]);
         await loadAffiliatePartners();
+      }
+      function shortId(id) {
+        var text = String(id || '');
+        if (text.length <= 14) return text || '—';
+        return text.slice(0, 8) + '…' + text.slice(-4);
+      }
+      async function loadAffiliateDetail(id, name) {
+        if (!id) return;
+        var report = await api('/admin/analytics/affiliate-report?days=365&partnerId=' + encodeURIComponent(id));
+        var users = report.registeredUsers || [];
+        var commissions = report.commissions || [];
+        var paidUserMap = {};
+        commissions.forEach(function (row) {
+          if (row.user && row.user.id) paidUserMap[row.user.id] = true;
+        });
+        var userHtml = users.length
+          ? users.slice(0, 80).map(function (u) {
+              return '<div style="padding:8px 0;border-bottom:1px solid rgba(148,163,184,.16)">' +
+                '<strong>' + escapeHtml(shortId(u.id)) + '</strong> ' +
+                (paidUserMap[u.id] ? '<span class="pill">已付费</span>' : '<span class="muted-tip">未付费</span>') +
+                '<br/><small>' + escapeHtml(formatDateTime(u.createdAt)) + ' · ' + escapeHtml(u.email || '无邮箱') + '</small>' +
+              '</div>';
+            }).join('')
+          : '<span class="muted-tip">暂无注册用户。</span>';
+        var commissionHtml = commissions.length
+          ? commissions.slice(0, 80).map(function (c) {
+              var user = c.user || {};
+              return '<div style="padding:8px 0;border-bottom:1px solid rgba(148,163,184,.16)">' +
+                '<strong>' + escapeHtml(shortId(user.id)) + '</strong> ' +
+                '<span class="pill">' + escapeHtml(c.status || 'pending') + '</span>' +
+                '<br/><small>' +
+                  '成交 ' + escapeHtml(formatMoney(c.grossAmount)) +
+                  ' · 佣金 ' + escapeHtml(formatMoney(c.commissionAmount)) +
+                  ' · ' + escapeHtml((c.product && c.product.name) || '未知产品') +
+                '</small>' +
+              '</div>';
+            }).join('')
+          : '<span class="muted-tip">暂无付费订单。</span>';
+        var box = document.getElementById('affiliate-detail-result');
+        box.innerHTML =
+          '<h3 style="margin-top:0">' + escapeHtml(name || '推广员') + ' · 注册/付费明细</h3>' +
+          '<div class="split-grid">' +
+            '<div><strong>注册用户（最近 ' + escapeHtml(users.length) + ' 个）</strong>' + userHtml + '</div>' +
+            '<div><strong>付费订单（最近 ' + escapeHtml(commissions.length) + ' 笔）</strong>' + commissionHtml + '</div>' +
+          '</div>';
+        box.classList.remove('hidden');
       }
       async function resetAffiliateDashboardLink(id, code) {
         if (!id) return;
@@ -1146,6 +1194,13 @@
         if (!target || !(target instanceof HTMLElement)) return;
         if (target.classList.contains('btn-copy-register-link')) {
           copyText(buildAffiliateRegisterUrl(target.getAttribute('data-code') || ''));
+          return;
+        }
+        if (target.classList.contains('btn-affiliate-detail')) {
+          target.setAttribute('disabled', 'disabled');
+          loadAffiliateDetail(target.getAttribute('data-id') || '', target.getAttribute('data-name') || '')
+            .catch(function (e) { alert(e.message || String(e)); })
+            .finally(function () { target.removeAttribute('disabled'); });
           return;
         }
         if (target.classList.contains('btn-reset-dashboard-link')) {
