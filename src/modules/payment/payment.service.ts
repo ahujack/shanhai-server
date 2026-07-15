@@ -540,7 +540,17 @@ export class PaymentService implements OnModuleInit {
     const txResult = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findUnique({
         where: { id: paymentId },
-        include: { product: true },
+        include: {
+          product: true,
+          user: {
+            select: {
+              id: true,
+              createdAt: true,
+              affiliatePartnerId: true,
+              affiliateReferralCode: true,
+            },
+          },
+        },
       });
 
       if (!payment) {
@@ -660,6 +670,53 @@ export class PaymentService implements OnModuleInit {
             membershipExpiryAt: expiryDate,
           },
         });
+      }
+
+      // 3. 推广分佣：用户通过推广员码注册，支付成功后生成 pending 台账
+      if (payment.user.affiliatePartnerId) {
+        const partner = await tx.affiliatePartner.findUnique({
+          where: { id: payment.user.affiliatePartnerId },
+          select: {
+            id: true,
+            isActive: true,
+            commissionRate: true,
+            recurringDays: true,
+          },
+        });
+        const recurringDays = partner?.recurringDays ?? 180;
+        const recurringUntil = new Date(payment.user.createdAt);
+        recurringUntil.setDate(recurringUntil.getDate() + recurringDays);
+
+        if (partner?.isActive && recurringUntil >= new Date()) {
+          const feeRate = Number(process.env.AFFILIATE_FEE_RATE || '0');
+          const grossAmount = Number(payment.amount.toFixed(2));
+          const feeAmount = Number((grossAmount * feeRate).toFixed(2));
+          const refundAmount = 0;
+          const netAmount = Number(
+            Math.max(grossAmount - feeAmount - refundAmount, 0).toFixed(2),
+          );
+          const commissionRate = partner.commissionRate;
+          const commissionAmount = Number(
+            (netAmount * commissionRate).toFixed(2),
+          );
+
+          await tx.affiliateCommission.create({
+            data: {
+              partnerId: partner.id,
+              userId: payment.userId,
+              paymentId: payment.id,
+              grossAmount,
+              feeAmount,
+              refundAmount,
+              netAmount,
+              commissionRate,
+              commissionAmount,
+              currency: payment.currency,
+              status: 'pending',
+              sourceReferralCode: payment.user.affiliateReferralCode,
+            },
+          });
+        }
       }
 
       return {

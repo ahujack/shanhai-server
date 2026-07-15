@@ -203,7 +203,7 @@ export class UserService {
     }
 
     const userReferralCode = await this.generateUniqueReferralCode();
-    const referredBy = await this.resolveReferredBy(referralCode);
+    const attribution = await this.resolveReferralAttribution(referralCode);
 
     const user = await this.prisma.user.create({
       data: {
@@ -215,11 +215,13 @@ export class UserService {
         role: 'user',
         membership: 'free',
         referralCode: userReferralCode,
-        referredBy,
+        referredBy: attribution.referredBy,
+        affiliatePartnerId: attribution.affiliatePartnerId,
+        affiliateReferralCode: attribution.affiliateReferralCode,
       },
     });
 
-    await this.grantRegistrationRewards(user.id, referredBy);
+    await this.grantRegistrationRewards(user.id, attribution.referredBy);
 
     return this.formatUser(user);
   }
@@ -713,7 +715,7 @@ export class UserService {
     }
 
     const userReferralCode = await this.generateUniqueReferralCode();
-    const referredBy = await this.resolveReferredBy(referralCode);
+    const attribution = await this.resolveReferralAttribution(referralCode);
 
     const data: Prisma.UserCreateInput = {
       email: emailForCreate,
@@ -723,7 +725,15 @@ export class UserService {
       role: 'user',
       membership: 'free',
       referralCode: userReferralCode,
-      referredBy,
+      referredBy: attribution.referredBy,
+      affiliateReferralCode: attribution.affiliateReferralCode,
+      ...(attribution.affiliatePartnerId
+        ? {
+            affiliatePartner: {
+              connect: { id: attribution.affiliatePartnerId },
+            },
+          }
+        : {}),
     };
 
     if (provider === 'google') {
@@ -733,7 +743,7 @@ export class UserService {
     }
 
     user = await this.prisma.user.create({ data });
-    await this.grantRegistrationRewards(user.id, referredBy);
+    await this.grantRegistrationRewards(user.id, attribution.referredBy);
     return this.formatUser(user);
   }
 
@@ -757,6 +767,40 @@ export class UserService {
       select: { id: true },
     });
     return referrer?.id || null;
+  }
+
+  private async resolveReferralAttribution(referralCode?: string): Promise<{
+    referredBy: string | null;
+    affiliatePartnerId: string | null;
+    affiliateReferralCode: string | null;
+  }> {
+    const normalized = (referralCode || '').trim().toUpperCase();
+    if (!normalized) {
+      return {
+        referredBy: null,
+        affiliatePartnerId: null,
+        affiliateReferralCode: null,
+      };
+    }
+
+    const referredBy = await this.resolveReferredBy(normalized);
+    if (referredBy) {
+      return {
+        referredBy,
+        affiliatePartnerId: null,
+        affiliateReferralCode: null,
+      };
+    }
+
+    const partner = await this.prisma.affiliatePartner.findFirst({
+      where: { code: normalized, isActive: true },
+      select: { id: true, code: true },
+    });
+    return {
+      referredBy: null,
+      affiliatePartnerId: partner?.id || null,
+      affiliateReferralCode: partner?.code || null,
+    };
   }
 
   private async grantRegistrationRewards(userId: string, referredBy: string | null): Promise<void> {

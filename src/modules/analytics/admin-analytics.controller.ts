@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminGuard } from '../auth/admin.guard';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 import { AnalyticsService } from './analytics.service';
@@ -51,5 +51,38 @@ export class AdminAnalyticsController {
   launchMetrics(@Query('days') daysRaw?: string) {
     const days = Number.parseInt(String(daysRaw || '7'), 10);
     return this.analytics.adminLaunchMetrics(Number.isFinite(days) ? days : 7);
+  }
+
+  @Get('affiliate-partners')
+  affiliatePartners() {
+    return this.analytics.adminAffiliatePartners();
+  }
+
+  @Post('affiliate-partners')
+  createAffiliatePartner(
+    @Body()
+    body: {
+      code?: string;
+      name?: string;
+      email?: string;
+      commissionRate?: number;
+      attributionDays?: number;
+      recurringDays?: number;
+      note?: string;
+    },
+  ) {
+    return this.analytics.adminCreateAffiliatePartner(body);
+  }
+
+  @Get('affiliate-report')
+  affiliateReport(
+    @Query('partnerId') partnerId?: string,
+    @Query('days') daysRaw?: string,
+  ) {
+    const days = Number.parseInt(String(daysRaw || '30'), 10);
+    return this.analytics.adminAffiliateReport(
+      partnerId,
+      Number.isFinite(days) ? days : 30,
+    );
   }
 }

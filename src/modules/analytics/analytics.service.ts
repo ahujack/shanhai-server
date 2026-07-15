@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Request } from 'express';
 import { PrismaService } from '../../prisma.service';
@@ -550,6 +550,166 @@ export class AnalyticsService {
           checkoutStartCount >= 10 &&
           paymentCompletedCount / Math.max(checkoutStartCount, 1) < 0.3,
       },
+    };
+  }
+
+  async adminAffiliatePartners() {
+    const partners = await this.prisma.affiliatePartner.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: {
+          select: {
+            users: true,
+            commissions: true,
+          },
+        },
+      },
+    });
+    return partners.map((partner) => ({
+      id: partner.id,
+      code: partner.code,
+      name: partner.name,
+      email: partner.email,
+      isActive: partner.isActive,
+      commissionRate: partner.commissionRate,
+      attributionDays: partner.attributionDays,
+      recurringDays: partner.recurringDays,
+      createdAt: partner.createdAt,
+      userCount: partner._count.users,
+      commissionCount: partner._count.commissions,
+    }));
+  }
+
+  async adminCreateAffiliatePartner(input: {
+    code?: string;
+    name?: string;
+    email?: string;
+    commissionRate?: number;
+    attributionDays?: number;
+    recurringDays?: number;
+    note?: string;
+  }) {
+    const code = String(input.code || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, '');
+    const name = String(input.name || '').trim();
+    if (!code || code.length < 3) {
+      throw new BadRequestException('推广码至少需要 3 位字母/数字');
+    }
+    if (!name) {
+      throw new BadRequestException('请填写推广员名称');
+    }
+    const commissionRate = Math.min(
+      Math.max(Number(input.commissionRate ?? 0.3), 0),
+      0.8,
+    );
+    const attributionDays = Math.min(
+      Math.max(Number(input.attributionDays ?? 30), 1),
+      365,
+    );
+    const recurringDays = Math.min(
+      Math.max(Number(input.recurringDays ?? 180), 1),
+      730,
+    );
+    return this.prisma.affiliatePartner.create({
+      data: {
+        code,
+        name,
+        email: input.email?.trim() || null,
+        note: input.note?.trim() || null,
+        commissionRate,
+        attributionDays,
+        recurringDays,
+      },
+    });
+  }
+
+  async adminAffiliateReport(partnerId?: string, days = 30) {
+    const safeDays = Math.min(Math.max(days, 1), 365);
+    const since = new Date(Date.now() - safeDays * 86400000);
+    const partnerWhere = partnerId ? { partnerId } : {};
+    const userWhere = partnerId
+      ? { affiliatePartnerId: partnerId, createdAt: { gte: since } }
+      : { affiliatePartnerId: { not: null }, createdAt: { gte: since } };
+    const [partners, newUsers, commissions, commissionAgg] =
+      await Promise.all([
+        this.prisma.affiliatePartner.findMany({
+          where: partnerId ? { id: partnerId } : undefined,
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.user.count({ where: userWhere }),
+        this.prisma.affiliateCommission.findMany({
+          where: {
+            ...partnerWhere,
+            createdAt: { gte: since },
+          },
+          include: {
+            partner: { select: { id: true, code: true, name: true } },
+            payment: {
+              select: {
+                id: true,
+                product: { select: { code: true, name: true } },
+                completedAt: true,
+              },
+            },
+            user: { select: { id: true, email: true, name: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 200,
+        }),
+        this.prisma.affiliateCommission.groupBy({
+          by: ['partnerId', 'status'],
+          where: {
+            ...partnerWhere,
+            createdAt: { gte: since },
+          },
+          _sum: {
+            grossAmount: true,
+            netAmount: true,
+            commissionAmount: true,
+          },
+          _count: { id: true },
+        }),
+      ]);
+
+    return {
+      periodDays: safeDays,
+      since: since.toISOString(),
+      newAffiliateUsers: newUsers,
+      partners: partners.map((partner) => ({
+        id: partner.id,
+        code: partner.code,
+        name: partner.name,
+        commissionRate: partner.commissionRate,
+        isActive: partner.isActive,
+      })),
+      summary: commissionAgg.map((row) => ({
+        partnerId: row.partnerId,
+        status: row.status,
+        orderCount: row._count.id,
+        grossAmount: Number((row._sum.grossAmount || 0).toFixed(2)),
+        netAmount: Number((row._sum.netAmount || 0).toFixed(2)),
+        commissionAmount: Number(
+          (row._sum.commissionAmount || 0).toFixed(2),
+        ),
+      })),
+      commissions: commissions.map((row) => ({
+        id: row.id,
+        partner: row.partner,
+        user: row.user,
+        paymentId: row.paymentId,
+        product: row.payment.product,
+        grossAmount: row.grossAmount,
+        netAmount: row.netAmount,
+        commissionRate: row.commissionRate,
+        commissionAmount: row.commissionAmount,
+        currency: row.currency,
+        status: row.status,
+        sourceReferralCode: row.sourceReferralCode,
+        completedAt: row.payment.completedAt,
+        createdAt: row.createdAt,
+      })),
     };
   }
 }

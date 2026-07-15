@@ -38,8 +38,11 @@ model User {
   facebookId String? @unique
 
   // 推荐系统
-  referredBy   String? // 推荐人用户ID
-  referralCode String? @unique // 自己的推荐码
+  referredBy             String? // 推荐人用户ID
+  referralCode           String? @unique // 自己的推荐码
+  affiliatePartnerId     String?
+  affiliatePartner       AffiliatePartner? @relation(fields: [affiliatePartnerId], references: [id], onDelete: SetNull)
+  affiliateReferralCode  String?
 
   // 时间戳
   createdAt DateTime @default(now())
@@ -56,9 +59,12 @@ model User {
   userPoints   UserPoints?
   pointRecords PointRecord[]
   payments     Payment[]
+  affiliateCommissions AffiliateCommission[] @relation("AffiliateCustomer")
 
   analyticsEvents AnalyticsEvent[]
   feedbacks       UserFeedback[]
+
+  @@index([affiliatePartnerId])
 }
 
 /// 客户端或服务端埋点（登录、页面曝光、功能使用等）
@@ -373,6 +379,62 @@ model PaymentProduct {
   payments Payment[]
 }
 
+// 推广伙伴/渠道模型
+model AffiliatePartner {
+  id        String  @id @default(uuid())
+  code      String  @unique
+  name      String
+  email     String?
+  note      String?
+  isActive  Boolean @default(true)
+
+  // 佣金配置：默认首单/复购都按该比例；recurringDays 控制持续分佣窗口
+  commissionRate Float @default(0.3)
+  attributionDays Int  @default(30)
+  recurringDays   Int  @default(180)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users       User[]
+  commissions AffiliateCommission[]
+
+  @@index([isActive])
+  @@index([createdAt])
+}
+
+// 推广佣金台账：支付成功后自动生成，后续月结时人工/后台标记 paid
+model AffiliateCommission {
+  id        String @id @default(uuid())
+  partnerId String
+  partner   AffiliatePartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User @relation("AffiliateCustomer", fields: [userId], references: [id], onDelete: Cascade)
+
+  paymentId String @unique
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  grossAmount        Float
+  feeAmount          Float @default(0)
+  refundAmount       Float @default(0)
+  netAmount          Float
+  commissionRate     Float
+  commissionAmount   Float
+  currency           String @default("usd")
+  status             String @default("pending") // pending, approved, paid, void
+  sourceReferralCode String?
+  note               String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  paidAt             DateTime?
+
+  @@index([partnerId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
 // 支付记录模型
 model Payment {
   id String @id @default(uuid())
@@ -407,6 +469,8 @@ model Payment {
   // 时间
   createdAt   DateTime  @default(now())
   completedAt DateTime? // 支付完成时间
+
+  affiliateCommission AffiliateCommission?
 
   @@index([userId])
   @@index([status])
