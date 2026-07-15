@@ -318,8 +318,8 @@ export class ZiService {
     process.env.ORACLE_BONE_IMAGE_BASE_URL ||
     'https://raw.githubusercontent.com/Chinese-Traditional-Culture/JiaGuWen/master/i/';
   private readonly oracleBoneCacheMs = 24 * 60 * 60 * 1000;
-  // 测试阶段默认全放开；如需恢复分层，将环境变量设为 false
-  private readonly unlockAllForTest = process.env.ZI_UNLOCK_ALL_FOR_TEST !== 'false';
+  // 仅在显式配置 true 时全放开；正式推广默认走免费/付费分层
+  private readonly unlockAllForTest = process.env.ZI_UNLOCK_ALL_FOR_TEST === 'true';
 
   constructor(private readonly prisma: PrismaService) {}
   
@@ -842,8 +842,8 @@ export class ZiService {
       const model = this.resolveZiLlmModel(ctx?.membership || 'free');
       // 原 5500 tokens + 30s 超时极易未完成即断开，前端表现为 net::ERR_CONNECTION_TIMED_OUT
       const fastMode = String(process.env.ZI_LLM_FAST_MODE || 'true') !== 'false';
-      const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || (fastMode ? '1800' : '3800'), 10);
-      const maxTokens = Math.min(8192, Math.max(900, Number.isFinite(maxTokensRaw) ? maxTokensRaw : fastMode ? 1800 : 3800));
+      const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || (fastMode ? '2600' : '3800'), 10);
+      const maxTokens = Math.min(8192, Math.max(1200, Number.isFinite(maxTokensRaw) ? maxTokensRaw : fastMode ? 2600 : 3800));
       const timeoutRaw = parseInt(process.env.ZI_DEEPSEEK_TIMEOUT_MS || (fastMode ? '35000' : '120000'), 10);
       const timeoutMs = Math.min(180000, Math.max(12000, Number.isFinite(timeoutRaw) ? timeoutRaw : fastMode ? 35000 : 120000));
 
@@ -869,14 +869,14 @@ export class ZiService {
 ${SAFETY_PROMPT_SUFFIX}
 
 【长度控制】
-- overall: 90-140字
-- career/love/wealth/health: 各 50-90字
+- overall: 180-260字，先给明确主线，再拆字形依据
+- career/love/wealth/health: 各 80-130字
 - coldReadings: 3条，每条不超过45字
-- lihefa/tianziGe: 各3条，每条不超过36字
-- imageryInference: 50-80字
-- oracleBoneInterpretation: 60-100字
-- handwritingInterpretation 四项：每项 45-70字，开头点明「你写的「${zi}」」
-- focusReading.summary: 80-120字
+- lihefa/tianziGe: 各3条，每条不超过48字
+- imageryInference: 80-120字
+- oracleBoneInterpretation: 90-140字
+- handwritingInterpretation 四项：每项 60-90字，开头点明「你写的「${zi}」」
+- focusReading.summary: 140-200字
 - anchors/riskSignals/actionPlan: 分别最多3条，每条不超过32字
 
 【输出格式】只返回 JSON：
@@ -1222,13 +1222,22 @@ ${SAFETY_PROMPT_SUFFIX}
         premiumHint: ziPremiumHintNoFocus(language),
       };
     }
+    const lockedAction =
+      language === 'en-US'
+        ? 'Final action locked: unlock Deep Master to see the exact move, timing, and risk boundary.'
+        : language === 'zh-TW'
+          ? '最終行動暫不展開：解鎖老師傅深度版，可看具體做法、時機與避坑線。'
+          : '最终行动先不展开：解锁老师傅深度版，可看具体做法、时机与避坑线。';
     return {
       ...interpretation,
       focusReading: {
         ...interpretation.focusReading,
-        anchors: interpretation.focusReading.anchors.slice(0, 1),
-        riskSignals: interpretation.focusReading.riskSignals.slice(0, 1),
-        actionPlan: interpretation.focusReading.actionPlan.slice(0, 1),
+        anchors: interpretation.focusReading.anchors.slice(0, 3),
+        riskSignals: interpretation.focusReading.riskSignals.slice(0, 2),
+        actionPlan: [
+          ...(interpretation.focusReading.actionPlan || []).slice(0, 1),
+          lockedAction,
+        ],
         llmEnhanced: false,
       },
       premiumHint: ziPremiumHintLiteFocus(language),
