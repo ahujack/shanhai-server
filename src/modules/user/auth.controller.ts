@@ -44,7 +44,7 @@ export class AuthController {
   // 发送验证码
   @Post('send-code')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   async sendCode(@Body() dto: SendCodeDto) {
     const { email, purpose } = dto;
     const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
@@ -116,6 +116,7 @@ export class AuthController {
   // 注册
   @Post('register')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 6, ttl: 60000 } })
   async register(@Body() dto: RegisterDto, @Req() req: Request) {
     const { email, password, code, name, referralCode } = dto;
     
@@ -173,6 +174,7 @@ export class AuthController {
   // 密码登录
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async login(@Body() dto: LoginDto, @Req() req: Request) {
     const { email, password, code } = dto;
     
@@ -262,6 +264,7 @@ export class AuthController {
   // 第三方登录（谷歌/Facebook）
   @Post('social-login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async socialLogin(@Body() dto: SocialLoginDto, @Req() req: Request) {
     let userInfo: { email?: string; name?: string; sub?: string } | null = null;
 

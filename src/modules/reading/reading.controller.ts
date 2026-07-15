@@ -1,4 +1,4 @@
-import { Body, Controller, Post, BadRequestException, Req, UseGuards, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Post, BadRequestException, Req, UseGuards } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
 import { ReadingService } from './reading.service';
 import { CreateReadingDto } from './dto/create-reading.dto';
@@ -22,12 +22,9 @@ export class ReadingController {
   @UseGuards(JwtAuthGuard)
   async create(@Body() dto: CreateReadingDto, @Req() req: { user?: { sub?: string; id?: string } }) {
     const userId = req.user?.sub ?? req.user?.id;
-    if (!userId) {
-      throw new UnauthorizedException('请先登录后再进行占卜解读');
-    }
     let consumeRecordId: string | undefined;
-    const membership = await this.getMembership(userId);
-    if (membership === 'free') {
+    const membership = userId ? await this.getMembership(userId) : 'free';
+    if (userId && membership === 'free') {
       const consumed = await this.pointsService.consumePoints(
         userId,
         READING_POINTS_COST,
@@ -92,4 +89,3 @@ export class ReadingController {
     return 'free';
   }
 }
-

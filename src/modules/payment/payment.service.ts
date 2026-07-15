@@ -227,8 +227,11 @@ export class PaymentService implements OnModuleInit {
 
     // 已接 Creem 但该商品未绑定产品 ID：勿再返回假 URL，避免前端「点了没进收银台」
     if (!creemPriceId) {
+      this.logger.error(
+        `Payment product missing Creem binding code=${product.code} productId=${product.id} env=CREEM_PRODUCT_${product.code.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`,
+      );
       throw new BadRequestException(
-        `商品「${product.name}」尚未绑定 Creem 产品。请在 Creem 后台创建对应商品（订阅或一次性付款），将产品 ID（prod_…）配置到环境变量 CREEM_PRODUCT_${product.code.toUpperCase().replace(/[^A-Z0-9]+/g, '_')} 或数据库 PaymentProduct.creemPriceId。`,
+        '该方案暂时不可购买，请稍后再试或联系客服 support@shanhai.app',
       );
     }
 
