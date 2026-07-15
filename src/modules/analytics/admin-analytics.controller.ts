@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminGuard } from '../auth/admin.guard';
 import { RequireAuthGuard } from '../auth/jwt-auth.guard';
 import { AnalyticsService } from './analytics.service';
@@ -68,10 +68,17 @@ export class AdminAnalyticsController {
       commissionRate?: number;
       attributionDays?: number;
       recurringDays?: number;
+      settlementCycle?: 'weekly' | 'monthly';
+      minimumPayout?: number;
       note?: string;
     },
   ) {
     return this.analytics.adminCreateAffiliatePartner(body);
+  }
+
+  @Post('affiliate-partners/:id/dashboard-token')
+  resetAffiliateDashboardToken(@Param('id') id: string) {
+    return this.analytics.adminResetAffiliateDashboardToken(id);
   }
 
   @Get('affiliate-report')

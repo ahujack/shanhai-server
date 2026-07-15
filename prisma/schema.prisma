@@ -387,6 +387,9 @@ model AffiliatePartner {
   email     String?
   note      String?
   isActive  Boolean @default(true)
+  dashboardTokenHash String?
+  settlementCycle    String  @default("monthly") // weekly | monthly
+  minimumPayout      Float   @default(50)
 
   // 佣金配置：默认首单/复购都按该比例；recurringDays 控制持续分佣窗口
   commissionRate Float @default(0.3)

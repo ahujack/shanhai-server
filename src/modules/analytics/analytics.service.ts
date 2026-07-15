@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Request } from 'express';
+import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma.service';
 import type { SubmitFeedbackDto, TrackEventsDto } from './dto/analytics.dto';
 
@@ -30,6 +31,37 @@ function pickCountry(req: Request): string | null {
 @Injectable()
 export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private hashAffiliateToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  private generateAffiliateToken(): string {
+    return crypto.randomBytes(24).toString('base64url');
+  }
+
+  private buildAffiliateDashboardUrl(code: string, token: string): string {
+    const appUrl = (
+      process.env.APP_PUBLIC_URL ||
+      process.env.FRONTEND_URL ||
+      'https://www.shanhai.app'
+    ).replace(/\/$/, '');
+    const params = new URLSearchParams({ code, token });
+    return `${appUrl}/partner?${params.toString()}`;
+  }
+
+  private nextSettlementDate(cycle: string, from = new Date()): string {
+    const d = new Date(from);
+    if (cycle === 'weekly') {
+      const day = d.getUTCDay();
+      const daysUntilMonday = (8 - day) % 7 || 7;
+      d.setUTCDate(d.getUTCDate() + daysUntilMonday);
+    } else {
+      d.setUTCMonth(d.getUTCMonth() + 1, 1);
+    }
+    d.setUTCHours(0, 0, 0, 0);
+    return d.toISOString();
+  }
 
   private dayKey(date: Date): string {
     return date.toISOString().slice(0, 10);
@@ -574,6 +606,9 @@ export class AnalyticsService {
       commissionRate: partner.commissionRate,
       attributionDays: partner.attributionDays,
       recurringDays: partner.recurringDays,
+      settlementCycle: partner.settlementCycle,
+      minimumPayout: partner.minimumPayout,
+      hasDashboardAccess: !!partner.dashboardTokenHash,
       createdAt: partner.createdAt,
       userCount: partner._count.users,
       commissionCount: partner._count.commissions,
@@ -587,6 +622,8 @@ export class AnalyticsService {
     commissionRate?: number;
     attributionDays?: number;
     recurringDays?: number;
+    settlementCycle?: string;
+    minimumPayout?: number;
     note?: string;
   }) {
     const code = String(input.code || '')
@@ -612,7 +649,14 @@ export class AnalyticsService {
       Math.max(Number(input.recurringDays ?? 180), 1),
       730,
     );
-    return this.prisma.affiliatePartner.create({
+    const settlementCycle =
+      input.settlementCycle === 'weekly' ? 'weekly' : 'monthly';
+    const minimumPayout = Math.min(
+      Math.max(Number(input.minimumPayout ?? 50), 0),
+      10000,
+    );
+    const token = this.generateAffiliateToken();
+    const partner = await this.prisma.affiliatePartner.create({
       data: {
         code,
         name,
@@ -621,8 +665,28 @@ export class AnalyticsService {
         commissionRate,
         attributionDays,
         recurringDays,
+        settlementCycle,
+        minimumPayout,
+        dashboardTokenHash: this.hashAffiliateToken(token),
       },
     });
+    return {
+      ...partner,
+      dashboardUrl: this.buildAffiliateDashboardUrl(partner.code, token),
+    };
+  }
+
+  async adminResetAffiliateDashboardToken(id: string) {
+    const token = this.generateAffiliateToken();
+    const partner = await this.prisma.affiliatePartner.update({
+      where: { id },
+      data: { dashboardTokenHash: this.hashAffiliateToken(token) },
+    });
+    return {
+      id: partner.id,
+      code: partner.code,
+      dashboardUrl: this.buildAffiliateDashboardUrl(partner.code, token),
+    };
   }
 
   async adminAffiliateReport(partnerId?: string, days = 30) {
@@ -682,6 +746,8 @@ export class AnalyticsService {
         code: partner.code,
         name: partner.name,
         commissionRate: partner.commissionRate,
+        settlementCycle: partner.settlementCycle,
+        minimumPayout: partner.minimumPayout,
         isActive: partner.isActive,
       })),
       summary: commissionAgg.map((row) => ({
@@ -707,6 +773,135 @@ export class AnalyticsService {
         currency: row.currency,
         status: row.status,
         sourceReferralCode: row.sourceReferralCode,
+        completedAt: row.payment.completedAt,
+        createdAt: row.createdAt,
+      })),
+    };
+  }
+
+  async affiliatePortal(codeRaw?: string, token?: string) {
+    const code = String(codeRaw || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, '');
+    if (!code || !token) {
+      throw new BadRequestException('缺少推广码或访问密钥');
+    }
+
+    const partner = await this.prisma.affiliatePartner.findUnique({
+      where: { code },
+    });
+    if (!partner?.isActive || !partner.dashboardTokenHash) {
+      throw new BadRequestException('推广链接不可用，请联系山海灵境');
+    }
+    const actual = this.hashAffiliateToken(token);
+    const expected = partner.dashboardTokenHash;
+    if (
+      actual.length !== expected.length ||
+      !crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(expected))
+    ) {
+      throw new BadRequestException('访问密钥无效');
+    }
+
+    const [users, clickCount, commissions, summary] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { affiliatePartnerId: partner.id },
+        select: { id: true, createdAt: true },
+      }),
+      this.prisma.analyticsEvent.count({
+        where: {
+          name: 'affiliate_landing',
+          props: { path: ['ref'], equals: partner.code },
+        },
+      }),
+      this.prisma.affiliateCommission.findMany({
+        where: { partnerId: partner.id },
+        include: {
+          payment: {
+            select: {
+              product: { select: { name: true, code: true } },
+              completedAt: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 80,
+      }),
+      this.prisma.affiliateCommission.groupBy({
+        by: ['status'],
+        where: { partnerId: partner.id },
+        _sum: {
+          grossAmount: true,
+          netAmount: true,
+          commissionAmount: true,
+        },
+        _count: { id: true },
+      }),
+    ]);
+
+    const paidUserIds = new Set(commissions.map((row) => row.userId));
+    const byStatus = summary.reduce<Record<string, {
+      orderCount: number;
+      grossAmount: number;
+      netAmount: number;
+      commissionAmount: number;
+    }>>((acc, row) => {
+      acc[row.status] = {
+        orderCount: row._count.id,
+        grossAmount: Number((row._sum.grossAmount || 0).toFixed(2)),
+        netAmount: Number((row._sum.netAmount || 0).toFixed(2)),
+        commissionAmount: Number((row._sum.commissionAmount || 0).toFixed(2)),
+      };
+      return acc;
+    }, {});
+
+    return {
+      partner: {
+        code: partner.code,
+        name: partner.name,
+        commissionRate: partner.commissionRate,
+        settlementCycle: partner.settlementCycle,
+        minimumPayout: partner.minimumPayout,
+        nextSettlementAt: this.nextSettlementDate(partner.settlementCycle),
+      },
+      funnel: {
+        clicks: clickCount,
+        registeredUsers: users.length,
+        paidUsers: paidUserIds.size,
+        conversionRate:
+          users.length === 0
+            ? 0
+            : Number((paidUserIds.size / users.length).toFixed(4)),
+      },
+      summary: {
+        pending: byStatus.pending || {
+          orderCount: 0,
+          grossAmount: 0,
+          netAmount: 0,
+          commissionAmount: 0,
+        },
+        approved: byStatus.approved || {
+          orderCount: 0,
+          grossAmount: 0,
+          netAmount: 0,
+          commissionAmount: 0,
+        },
+        paid: byStatus.paid || {
+          orderCount: 0,
+          grossAmount: 0,
+          netAmount: 0,
+          commissionAmount: 0,
+        },
+      },
+      commissions: commissions.map((row) => ({
+        id: row.id,
+        productName: row.payment.product.name,
+        productCode: row.payment.product.code,
+        grossAmount: row.grossAmount,
+        netAmount: row.netAmount,
+        commissionAmount: row.commissionAmount,
+        currency: row.currency,
+        status: row.status,
         completedAt: row.payment.completedAt,
         createdAt: row.createdAt,
       })),
