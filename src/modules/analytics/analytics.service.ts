@@ -40,6 +40,29 @@ export class AnalyticsService {
     return crypto.randomBytes(24).toString('base64url');
   }
 
+  private generateAffiliateCodeCandidate(name?: string): string {
+    const normalizedName = String(name || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .slice(0, 6);
+    const prefix = normalizedName && normalizedName.length >= 3 ? normalizedName : 'AFF';
+    const suffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+    return `${prefix}${suffix}`.slice(0, 12);
+  }
+
+  private async generateUniqueAffiliateCode(name?: string): Promise<string> {
+    for (let i = 0; i < 10; i += 1) {
+      const code = this.generateAffiliateCodeCandidate(name);
+      const existed = await this.prisma.affiliatePartner.findUnique({
+        where: { code },
+        select: { id: true },
+      });
+      if (!existed) return code;
+    }
+    throw new BadRequestException('推广码生成失败，请稍后重试');
+  }
+
   private buildAffiliateDashboardUrl(code: string, token: string): string {
     const appUrl = (
       process.env.APP_PUBLIC_URL ||
@@ -626,17 +649,18 @@ export class AnalyticsService {
     minimumPayout?: number;
     note?: string;
   }) {
-    const code = String(input.code || '')
+    const requestedCode = String(input.code || '')
       .trim()
       .toUpperCase()
       .replace(/[^A-Z0-9_-]/g, '');
     const name = String(input.name || '').trim();
-    if (!code || code.length < 3) {
+    if (requestedCode && requestedCode.length < 3) {
       throw new BadRequestException('推广码至少需要 3 位字母/数字');
     }
     if (!name) {
       throw new BadRequestException('请填写推广员名称');
     }
+    const code = requestedCode || (await this.generateUniqueAffiliateCode(name));
     const commissionRate = Math.min(
       Math.max(Number(input.commissionRate ?? 0.3), 0),
       0.8,

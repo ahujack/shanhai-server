@@ -438,8 +438,11 @@
         <h2>推广员管理</h2>
         <div class="form-grid cols-3">
           <div>
-            <label>推广码（例：KELLY）</label>
-            <input id="affiliate-code" type="text" placeholder="KELLY" />
+            <label>推广码（可选）</label>
+            <div class="row" style="gap:8px;margin-top:0">
+              <input id="affiliate-code" type="text" placeholder="不填则自动生成" style="flex:1;min-width:160px;margin-bottom:0" />
+              <button type="button" class="secondary" id="btn-generate-affiliate-code" style="width:auto">自动生成</button>
+            </div>
           </div>
           <div>
             <label>推广员名称</label>
@@ -736,6 +739,17 @@
       function buildAffiliateRegisterUrl(code) {
         return APP_PUBLIC_URL + '/register?ref=' + encodeURIComponent(code || '');
       }
+      function generateAffiliateCodePreview() {
+        var name = (document.getElementById('affiliate-name').value || '').trim().toUpperCase();
+        var prefix = name.replace(/[^A-Z0-9]/g, '').slice(0, 6);
+        if (prefix.length < 3) prefix = 'AFF';
+        var alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        var suffix = '';
+        for (var i = 0; i < 5; i += 1) {
+          suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+        }
+        return (prefix + suffix).slice(0, 12);
+      }
       async function copyText(value) {
         var text = String(value || '');
         if (!text) return;
@@ -821,14 +835,14 @@
         var attributionDays = parseInt(document.getElementById('affiliate-attribution-days').value || '30', 10);
         var recurringDays = parseInt(document.getElementById('affiliate-recurring-days').value || '180', 10);
         var note = (document.getElementById('affiliate-note').value || '').trim();
-        if (!code || !name) {
-          alert('请填写推广码和推广员名称');
+        if (!name) {
+          alert('请填写推广员名称；推广码可以留空自动生成。');
           return;
         }
         var partner = await api('/admin/analytics/affiliate-partners', {
           method: 'POST',
           body: JSON.stringify({
-            code: code,
+            code: code || undefined,
             name: name,
             email: email || undefined,
             commissionRate: commissionRate,
@@ -1117,6 +1131,9 @@
         createAffiliatePartner()
           .catch(function (e) { alert(e.message || String(e)); })
           .finally(function () { btn.disabled = false; });
+      };
+      document.getElementById('btn-generate-affiliate-code').onclick = function () {
+        document.getElementById('affiliate-code').value = generateAffiliateCodePreview();
       };
       document.getElementById('affiliate-link-result').addEventListener('click', function (event) {
         var target = event.target;
