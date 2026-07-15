@@ -60,6 +60,7 @@ model User {
   pointRecords PointRecord[]
   payments     Payment[]
   affiliateCommissions AffiliateCommission[] @relation("AffiliateCustomer")
+  affiliateOverrideCommissions AffiliateOverrideCommission[] @relation("AffiliateOverrideCustomer")
 
   analyticsEvents AnalyticsEvent[]
   feedbacks       UserFeedback[]
@@ -395,15 +396,22 @@ model AffiliatePartner {
   commissionRate Float @default(0.3)
   attributionDays Int  @default(30)
   recurringDays   Int  @default(180)
+  parentPartnerId String?
+  parentPartner   AffiliatePartner? @relation("AffiliatePartnerHierarchy", fields: [parentPartnerId], references: [id], onDelete: SetNull)
+  subPartners     AffiliatePartner[] @relation("AffiliatePartnerHierarchy")
+  overrideCommissionRate Float @default(0.05)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   users       User[]
   commissions AffiliateCommission[]
+  overrideCommissions AffiliateOverrideCommission[] @relation("AffiliateOverrideParent")
+  generatedOverrideCommissions AffiliateOverrideCommission[] @relation("AffiliateOverrideChild")
 
   @@index([isActive])
   @@index([createdAt])
+  @@index([parentPartnerId])
 }
 
 // 推广佣金台账：支付成功后自动生成，后续月结时人工/后台标记 paid
@@ -431,8 +439,48 @@ model AffiliateCommission {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   paidAt             DateTime?
+  overrideCommission AffiliateOverrideCommission?
 
   @@index([partnerId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// 二级代理分润台账：下级推广员产生佣金时，给上级代理生成 override 分润
+model AffiliateOverrideCommission {
+  id String @id @default(uuid())
+
+  parentPartnerId String
+  parentPartner   AffiliatePartner @relation("AffiliateOverrideParent", fields: [parentPartnerId], references: [id], onDelete: Cascade)
+
+  childPartnerId String
+  childPartner   AffiliatePartner @relation("AffiliateOverrideChild", fields: [childPartnerId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User @relation("AffiliateOverrideCustomer", fields: [userId], references: [id], onDelete: Cascade)
+
+  paymentId String @unique
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  baseCommissionId String @unique
+  baseCommission   AffiliateCommission @relation(fields: [baseCommissionId], references: [id], onDelete: Cascade)
+
+  grossAmount      Float
+  netAmount        Float
+  baseCommissionAmount Float
+  overrideRate     Float
+  overrideAmount   Float
+  currency         String @default("usd")
+  status           String @default("pending") // pending, approved, paid, void
+  sourceReferralCode String?
+  note             String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  paidAt           DateTime?
+
+  @@index([parentPartnerId])
+  @@index([childPartnerId])
   @@index([userId])
   @@index([status])
   @@index([createdAt])
@@ -474,6 +522,7 @@ model Payment {
   completedAt DateTime? // 支付完成时间
 
   affiliateCommission AffiliateCommission?
+  affiliateOverrideCommission AffiliateOverrideCommission?
 
   @@index([userId])
   @@index([status])

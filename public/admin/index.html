@@ -480,6 +480,18 @@
             <input id="affiliate-recurring-days" type="number" min="1" max="730" value="180" />
           </div>
         </div>
+        <div class="form-grid cols-2">
+          <div>
+            <label>上级代理（可选）</label>
+            <select id="affiliate-parent">
+              <option value="">无上级代理</option>
+            </select>
+          </div>
+          <div>
+            <label>二级分润比例（下级佣金的比例）</label>
+            <input id="affiliate-override-rate" type="number" min="0" max="0.5" step="0.01" value="0.05" />
+          </div>
+        </div>
         <label>备注（可选）</label>
         <textarea id="affiliate-note" placeholder="例如：首单 30%，复购 10% 先人工核算；或朋友圈推广合作"></textarea>
         <div class="row">
@@ -786,6 +798,18 @@
       }
       function renderAffiliatePartners(rows) {
         var tb = document.querySelector('#tbl-affiliates tbody');
+        var parentSelect = document.getElementById('affiliate-parent');
+        var selectedParent = parentSelect ? parentSelect.value : '';
+        if (parentSelect) {
+          parentSelect.innerHTML = '<option value="">无上级代理</option>';
+          (rows || []).forEach(function (p) {
+            var opt = document.createElement('option');
+            opt.value = p.id || '';
+            opt.textContent = (p.name || p.code || '未命名') + ' / ' + (p.code || '—');
+            parentSelect.appendChild(opt);
+          });
+          parentSelect.value = selectedParent;
+        }
         tb.innerHTML = '';
         if (!rows || !rows.length) {
           var empty = document.createElement('tr');
@@ -804,12 +828,15 @@
             '</td>' +
             '<td>' +
               '佣金 ' + escapeHtml(String(Math.round(Number(p.commissionRate || 0) * 100))) + '%<br/>' +
+              '<small>上级：' + escapeHtml(p.parentPartner ? ((p.parentPartner.name || p.parentPartner.code) + ' / ' + p.parentPartner.code) : '无') + '</small><br/>' +
+              '<small>二级分润 ' + escapeHtml(String(Math.round(Number(p.overrideCommissionRate || 0.05) * 100))) + '%（下级佣金）</small><br/>' +
               '<small>' + (p.settlementCycle === 'weekly' ? '周结' : '月结') + ' · 最低 ' + escapeHtml(formatMoney(p.minimumPayout)) + '</small><br/>' +
               '<small>归因 ' + escapeHtml(p.attributionDays || 30) + ' 天 · 复购 ' + escapeHtml(p.recurringDays || 180) + ' 天</small>' +
             '</td>' +
             '<td>' +
               '注册 ' + escapeHtml(p.userCount || 0) + '<br/>' +
               '<small>佣金记录 ' + escapeHtml(p.commissionCount || 0) + '</small><br/>' +
+              '<small>下级 ' + escapeHtml(p.subPartnerCount || 0) + ' · 二级分润 ' + escapeHtml(p.overrideCommissionCount || 0) + '</small><br/>' +
               '<small>' + (p.hasDashboardAccess ? '已开通看板' : '未生成看板密钥') + '</small>' +
             '</td>' +
             '<td>' +
@@ -836,6 +863,8 @@
         var minimumPayout = Number(document.getElementById('affiliate-min-payout').value || 50);
         var attributionDays = parseInt(document.getElementById('affiliate-attribution-days').value || '30', 10);
         var recurringDays = parseInt(document.getElementById('affiliate-recurring-days').value || '180', 10);
+        var parentPartnerId = (document.getElementById('affiliate-parent').value || '').trim();
+        var overrideCommissionRate = Number(document.getElementById('affiliate-override-rate').value || 0.05);
         var note = (document.getElementById('affiliate-note').value || '').trim();
         if (!name) {
           alert('请填写推广员名称；推广码可以留空自动生成。');
@@ -852,6 +881,8 @@
             minimumPayout: minimumPayout,
             attributionDays: attributionDays,
             recurringDays: recurringDays,
+            parentPartnerId: parentPartnerId || undefined,
+            overrideCommissionRate: overrideCommissionRate,
             note: note || undefined,
           }),
         });
@@ -872,6 +903,7 @@
         var report = await api('/admin/analytics/affiliate-report?days=365&partnerId=' + encodeURIComponent(id));
         var users = report.registeredUsers || [];
         var commissions = report.commissions || [];
+        var overrides = report.overrideCommissions || [];
         var paidUserMap = {};
         commissions.forEach(function (row) {
           if (row.user && row.user.id) paidUserMap[row.user.id] = true;
@@ -899,13 +931,28 @@
               '</div>';
             }).join('')
           : '<span class="muted-tip">暂无付费订单。</span>';
+        var overrideHtml = overrides.length
+          ? overrides.slice(0, 80).map(function (o) {
+              var user = o.user || {};
+              var child = o.childPartner || {};
+              return '<div style="padding:8px 0;border-bottom:1px solid rgba(148,163,184,.16)">' +
+                '<strong>' + escapeHtml(shortId(user.id)) + '</strong> ' +
+                '<span class="pill">' + escapeHtml(o.status || 'pending') + '</span>' +
+                '<br/><small>下级：' + escapeHtml(child.name || child.code || '—') +
+                  ' · 基础佣金 ' + escapeHtml(formatMoney(o.baseCommissionAmount)) +
+                  ' · 二级分润 ' + escapeHtml(formatMoney(o.overrideAmount)) +
+                '</small>' +
+              '</div>';
+            }).join('')
+          : '<span class="muted-tip">暂无二级分润。</span>';
         var box = document.getElementById('affiliate-detail-result');
         box.innerHTML =
           '<h3 style="margin-top:0">' + escapeHtml(name || '推广员') + ' · 注册/付费明细</h3>' +
           '<div class="split-grid">' +
             '<div><strong>注册用户（最近 ' + escapeHtml(users.length) + ' 个）</strong>' + userHtml + '</div>' +
             '<div><strong>付费订单（最近 ' + escapeHtml(commissions.length) + ' 笔）</strong>' + commissionHtml + '</div>' +
-          '</div>';
+          '</div>' +
+          '<div style="margin-top:14px"><strong>二级分润（最近 ' + escapeHtml(overrides.length) + ' 笔）</strong>' + overrideHtml + '</div>';
         box.classList.remove('hidden');
       }
       async function resetAffiliateDashboardLink(id, code) {

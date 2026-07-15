@@ -68,6 +68,8 @@ export class AdminAnalyticsController {
       commissionRate?: number;
       attributionDays?: number;
       recurringDays?: number;
+      parentPartnerId?: string;
+      overrideCommissionRate?: number;
       settlementCycle?: 'weekly' | 'monthly';
       minimumPayout?: number;
       note?: string;

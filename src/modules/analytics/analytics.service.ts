@@ -616,8 +616,11 @@ export class AnalyticsService {
           select: {
             users: true,
             commissions: true,
+            subPartners: true,
+            overrideCommissions: true,
           },
         },
+        parentPartner: { select: { id: true, code: true, name: true } },
       },
     });
     return partners.map((partner) => ({
@@ -632,9 +635,13 @@ export class AnalyticsService {
       settlementCycle: partner.settlementCycle,
       minimumPayout: partner.minimumPayout,
       hasDashboardAccess: !!partner.dashboardTokenHash,
+      parentPartner: partner.parentPartner,
+      overrideCommissionRate: partner.overrideCommissionRate,
       createdAt: partner.createdAt,
       userCount: partner._count.users,
       commissionCount: partner._count.commissions,
+      subPartnerCount: partner._count.subPartners,
+      overrideCommissionCount: partner._count.overrideCommissions,
     }));
   }
 
@@ -645,6 +652,8 @@ export class AnalyticsService {
     commissionRate?: number;
     attributionDays?: number;
     recurringDays?: number;
+    parentPartnerId?: string;
+    overrideCommissionRate?: number;
     settlementCycle?: string;
     minimumPayout?: number;
     note?: string;
@@ -673,6 +682,20 @@ export class AnalyticsService {
       Math.max(Number(input.recurringDays ?? 180), 1),
       730,
     );
+    const parentPartnerId = String(input.parentPartnerId || '').trim() || null;
+    const overrideCommissionRate = Math.min(
+      Math.max(Number(input.overrideCommissionRate ?? 0.05), 0),
+      0.5,
+    );
+    if (parentPartnerId) {
+      const parent = await this.prisma.affiliatePartner.findUnique({
+        where: { id: parentPartnerId },
+        select: { id: true, isActive: true },
+      });
+      if (!parent?.isActive) {
+        throw new BadRequestException('上级代理不存在或已停用');
+      }
+    }
     const settlementCycle =
       input.settlementCycle === 'weekly' ? 'weekly' : 'monthly';
     const minimumPayout = Math.min(
@@ -689,6 +712,8 @@ export class AnalyticsService {
         commissionRate,
         attributionDays,
         recurringDays,
+        parentPartnerId,
+        overrideCommissionRate,
         settlementCycle,
         minimumPayout,
         dashboardTokenHash: this.hashAffiliateToken(token),
@@ -717,10 +742,11 @@ export class AnalyticsService {
     const safeDays = Math.min(Math.max(days, 1), 365);
     const since = new Date(Date.now() - safeDays * 86400000);
     const partnerWhere = partnerId ? { partnerId } : {};
+    const overrideWhere = partnerId ? { parentPartnerId: partnerId } : {};
     const userWhere = partnerId
       ? { affiliatePartnerId: partnerId, createdAt: { gte: since } }
       : { affiliatePartnerId: { not: null }, createdAt: { gte: since } };
-    const [partners, newUsers, commissions, commissionAgg] =
+    const [partners, newUsers, commissions, commissionAgg, overrideCommissions, overrideAgg] =
       await Promise.all([
         this.prisma.affiliatePartner.findMany({
           where: partnerId ? { id: partnerId } : undefined,
@@ -764,6 +790,40 @@ export class AnalyticsService {
           },
           _count: { id: true },
         }),
+        this.prisma.affiliateOverrideCommission.findMany({
+          where: {
+            ...overrideWhere,
+            createdAt: { gte: since },
+          },
+          include: {
+            parentPartner: { select: { id: true, code: true, name: true } },
+            childPartner: { select: { id: true, code: true, name: true } },
+            payment: {
+              select: {
+                id: true,
+                product: { select: { code: true, name: true } },
+                completedAt: true,
+              },
+            },
+            user: { select: { id: true, email: true, name: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 200,
+        }),
+        this.prisma.affiliateOverrideCommission.groupBy({
+          by: ['parentPartnerId', 'status'],
+          where: {
+            ...overrideWhere,
+            createdAt: { gte: since },
+          },
+          _sum: {
+            grossAmount: true,
+            netAmount: true,
+            baseCommissionAmount: true,
+            overrideAmount: true,
+          },
+          _count: { id: true },
+        }),
       ]);
 
     return {
@@ -796,6 +856,15 @@ export class AnalyticsService {
           (row._sum.commissionAmount || 0).toFixed(2),
         ),
       })),
+      overrideSummary: overrideAgg.map((row) => ({
+        parentPartnerId: row.parentPartnerId,
+        status: row.status,
+        orderCount: row._count.id,
+        grossAmount: Number((row._sum.grossAmount || 0).toFixed(2)),
+        netAmount: Number((row._sum.netAmount || 0).toFixed(2)),
+        baseCommissionAmount: Number((row._sum.baseCommissionAmount || 0).toFixed(2)),
+        overrideAmount: Number((row._sum.overrideAmount || 0).toFixed(2)),
+      })),
       commissions: commissions.map((row) => ({
         id: row.id,
         partner: row.partner,
@@ -806,6 +875,24 @@ export class AnalyticsService {
         netAmount: row.netAmount,
         commissionRate: row.commissionRate,
         commissionAmount: row.commissionAmount,
+        currency: row.currency,
+        status: row.status,
+        sourceReferralCode: row.sourceReferralCode,
+        completedAt: row.payment.completedAt,
+        createdAt: row.createdAt,
+      })),
+      overrideCommissions: overrideCommissions.map((row) => ({
+        id: row.id,
+        parentPartner: row.parentPartner,
+        childPartner: row.childPartner,
+        user: row.user,
+        paymentId: row.paymentId,
+        product: row.payment.product,
+        grossAmount: row.grossAmount,
+        netAmount: row.netAmount,
+        baseCommissionAmount: row.baseCommissionAmount,
+        overrideRate: row.overrideRate,
+        overrideAmount: row.overrideAmount,
         currency: row.currency,
         status: row.status,
         sourceReferralCode: row.sourceReferralCode,
@@ -826,6 +913,13 @@ export class AnalyticsService {
 
     const partner = await this.prisma.affiliatePartner.findUnique({
       where: { code },
+      include: {
+        parentPartner: { select: { id: true, code: true, name: true } },
+        subPartners: {
+          select: { id: true, code: true, name: true, commissionRate: true, overrideCommissionRate: true, isActive: true },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
     });
     if (!partner?.isActive || !partner.dashboardTokenHash) {
       throw new BadRequestException('推广链接不可用，请联系山海灵境');
@@ -839,7 +933,7 @@ export class AnalyticsService {
       throw new BadRequestException('访问密钥无效');
     }
 
-    const [users, clickCount, commissions, summary, paidUsers] = await Promise.all([
+    const [users, clickCount, commissions, summary, paidUsers, overrideCommissions, overrideSummary] = await Promise.all([
       this.prisma.user.findMany({
         where: { affiliatePartnerId: partner.id },
         select: { id: true, email: true, name: true, createdAt: true },
@@ -881,6 +975,32 @@ export class AnalyticsService {
         distinct: ['userId'],
         select: { userId: true },
       }),
+      this.prisma.affiliateOverrideCommission.findMany({
+        where: { parentPartnerId: partner.id },
+        include: {
+          childPartner: { select: { id: true, code: true, name: true } },
+          payment: {
+            select: {
+              product: { select: { name: true, code: true } },
+              completedAt: true,
+            },
+          },
+          user: { select: { id: true, email: true, name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 80,
+      }),
+      this.prisma.affiliateOverrideCommission.groupBy({
+        by: ['status'],
+        where: { parentPartnerId: partner.id },
+        _sum: {
+          grossAmount: true,
+          netAmount: true,
+          baseCommissionAmount: true,
+          overrideAmount: true,
+        },
+        _count: { id: true },
+      }),
     ]);
 
     const paidUserIds = new Set(paidUsers.map((row) => row.userId));
@@ -898,12 +1018,30 @@ export class AnalyticsService {
       };
       return acc;
     }, {});
+    const overrideByStatus = overrideSummary.reduce<Record<string, {
+      orderCount: number;
+      grossAmount: number;
+      netAmount: number;
+      baseCommissionAmount: number;
+      overrideAmount: number;
+    }>>((acc, row) => {
+      acc[row.status] = {
+        orderCount: row._count.id,
+        grossAmount: Number((row._sum.grossAmount || 0).toFixed(2)),
+        netAmount: Number((row._sum.netAmount || 0).toFixed(2)),
+        baseCommissionAmount: Number((row._sum.baseCommissionAmount || 0).toFixed(2)),
+        overrideAmount: Number((row._sum.overrideAmount || 0).toFixed(2)),
+      };
+      return acc;
+    }, {});
 
     return {
       partner: {
         code: partner.code,
         name: partner.name,
         commissionRate: partner.commissionRate,
+        parentPartner: partner.parentPartner,
+        overrideCommissionRate: partner.overrideCommissionRate,
         settlementCycle: partner.settlementCycle,
         minimumPayout: partner.minimumPayout,
         nextSettlementAt: this.nextSettlementDate(partner.settlementCycle),
@@ -937,6 +1075,30 @@ export class AnalyticsService {
           commissionAmount: 0,
         },
       },
+      overrideSummary: {
+        pending: overrideByStatus.pending || {
+          orderCount: 0,
+          grossAmount: 0,
+          netAmount: 0,
+          baseCommissionAmount: 0,
+          overrideAmount: 0,
+        },
+        approved: overrideByStatus.approved || {
+          orderCount: 0,
+          grossAmount: 0,
+          netAmount: 0,
+          baseCommissionAmount: 0,
+          overrideAmount: 0,
+        },
+        paid: overrideByStatus.paid || {
+          orderCount: 0,
+          grossAmount: 0,
+          netAmount: 0,
+          baseCommissionAmount: 0,
+          overrideAmount: 0,
+        },
+      },
+      subPartners: partner.subPartners,
       commissions: commissions.map((row) => ({
         id: row.id,
         user: row.user,
@@ -956,6 +1118,22 @@ export class AnalyticsService {
         name: user.name,
         createdAt: user.createdAt,
         paid: paidUserIds.has(user.id),
+      })),
+      overrideCommissions: overrideCommissions.map((row) => ({
+        id: row.id,
+        childPartner: row.childPartner,
+        user: row.user,
+        productName: row.payment.product.name,
+        productCode: row.payment.product.code,
+        grossAmount: row.grossAmount,
+        netAmount: row.netAmount,
+        baseCommissionAmount: row.baseCommissionAmount,
+        overrideRate: row.overrideRate,
+        overrideAmount: row.overrideAmount,
+        currency: row.currency,
+        status: row.status,
+        completedAt: row.payment.completedAt,
+        createdAt: row.createdAt,
       })),
     };
   }

@@ -681,6 +681,11 @@ export class PaymentService implements OnModuleInit {
             isActive: true,
             commissionRate: true,
             recurringDays: true,
+            parentPartnerId: true,
+            overrideCommissionRate: true,
+            parentPartner: {
+              select: { id: true, isActive: true },
+            },
           },
         });
         const recurringDays = partner?.recurringDays ?? 180;
@@ -700,7 +705,7 @@ export class PaymentService implements OnModuleInit {
             (netAmount * commissionRate).toFixed(2),
           );
 
-          await tx.affiliateCommission.create({
+          const baseCommission = await tx.affiliateCommission.create({
             data: {
               partnerId: partner.id,
               userId: payment.userId,
@@ -716,6 +721,34 @@ export class PaymentService implements OnModuleInit {
               sourceReferralCode: payment.user.affiliateReferralCode,
             },
           });
+          if (partner.parentPartner?.isActive && partner.parentPartnerId) {
+            const overrideRate = Math.min(
+              Math.max(Number(partner.overrideCommissionRate ?? 0.05), 0),
+              0.5,
+            );
+            const overrideAmount = Number(
+              (commissionAmount * overrideRate).toFixed(2),
+            );
+            if (overrideAmount > 0) {
+              await tx.affiliateOverrideCommission.create({
+                data: {
+                  parentPartnerId: partner.parentPartnerId,
+                  childPartnerId: partner.id,
+                  userId: payment.userId,
+                  paymentId: payment.id,
+                  baseCommissionId: baseCommission.id,
+                  grossAmount,
+                  netAmount,
+                  baseCommissionAmount: commissionAmount,
+                  overrideRate,
+                  overrideAmount,
+                  currency: payment.currency,
+                  status: 'pending',
+                  sourceReferralCode: payment.user.affiliateReferralCode,
+                },
+              });
+            }
+          }
         }
       }
 
