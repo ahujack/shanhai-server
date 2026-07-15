@@ -31,6 +31,9 @@ export class AnalyzeZiDto {
   @IsOptional()
   @IsString()
   language?: 'zh-CN' | 'en-US' | 'zh-TW';
+
+  @IsOptional()
+  invitePreview?: boolean;
 }
 
 export class RecognizeDto {
@@ -78,7 +81,8 @@ export class ZiController {
     }
     const membershipState = await this.getMembershipState(userId);
     const membership = membershipState.tier;
-    if (userId && membership === 'free') {
+    const invitePreview = dto.invitePreview === true || String((dto as any).invitePreview) === 'true';
+    if (userId && membership === 'free' && !invitePreview) {
       const consumed = await this.pointsService.consumePoints(
         userId,
         ZI_POINTS_COST,
@@ -119,7 +123,7 @@ export class ZiController {
       throw new BadRequestException('测字生成失败，本次未扣积分，请稍后重试');
     }
 
-    if (userId) {
+    if (userId && !invitePreview) {
       try {
         await this.prisma.ziAnalysis.create({
           data: {
