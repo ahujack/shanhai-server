@@ -737,7 +737,7 @@
         return 'USD $' + n.toFixed(2);
       }
       function buildAffiliateRegisterUrl(code) {
-        return APP_PUBLIC_URL + '/register?ref=' + encodeURIComponent(code || '');
+        return APP_PUBLIC_URL + '/invite?ref=' + encodeURIComponent(code || '');
       }
       function generateAffiliateCodePreview() {
         var name = (document.getElementById('affiliate-name').value || '').trim().toUpperCase();
