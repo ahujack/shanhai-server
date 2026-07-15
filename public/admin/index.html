@@ -37,7 +37,7 @@
     }
     .card h2 { margin: 0 0 12px; font-size: 1rem; color: var(--accent); }
     label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
-    input {
+    input, select, textarea {
       width: 100%;
       padding: 10px 12px;
       border-radius: 8px;
@@ -45,6 +45,10 @@
       background: #120c1c;
       color: var(--text);
       margin-bottom: 10px;
+    }
+    textarea {
+      min-height: 78px;
+      resize: vertical;
     }
     button {
       cursor: pointer;
@@ -214,6 +218,36 @@
       padding: 8px 10px;
       font-size: 0.8rem;
     }
+    .link-box {
+      margin-top: 10px;
+      border: 1px solid rgba(201, 162, 39, 0.28);
+      background: rgba(201, 162, 39, 0.08);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .link-box .label {
+      color: var(--muted);
+      font-size: 0.75rem;
+      margin-bottom: 4px;
+    }
+    .link-box code {
+      display: block;
+      color: #ffe7a3;
+      word-break: break-all;
+      font-size: 0.78rem;
+    }
+    .form-grid {
+      display: grid;
+      gap: 10px;
+    }
+    @media (min-width: 760px) {
+      .form-grid.cols-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .form-grid.cols-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
     .split-grid {
       display: grid;
       gap: 12px;
@@ -284,6 +318,71 @@
         <button type="button" id="btn-feedback">加载反馈</button>
         <div style="overflow:auto;max-height:360px;margin-top:10px">
           <table id="tbl-feedback"><thead><tr><th>时间</th><th>分类</th><th>评分</th><th>用户</th><th>留言</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>推广员管理</h2>
+        <div class="form-grid cols-3">
+          <div>
+            <label>推广码（例：KELLY）</label>
+            <input id="affiliate-code" type="text" placeholder="KELLY" />
+          </div>
+          <div>
+            <label>推广员名称</label>
+            <input id="affiliate-name" type="text" placeholder="朋友昵称 / 渠道名" />
+          </div>
+          <div>
+            <label>邮箱（可选）</label>
+            <input id="affiliate-email" type="email" placeholder="partner@example.com" />
+          </div>
+        </div>
+        <div class="form-grid cols-3">
+          <div>
+            <label>佣金比例</label>
+            <input id="affiliate-rate" type="number" min="0" max="0.8" step="0.01" value="0.3" />
+          </div>
+          <div>
+            <label>结算周期</label>
+            <select id="affiliate-cycle">
+              <option value="monthly">月结</option>
+              <option value="weekly">周结</option>
+            </select>
+          </div>
+          <div>
+            <label>最低打款金额（USD）</label>
+            <input id="affiliate-min-payout" type="number" min="0" step="1" value="50" />
+          </div>
+        </div>
+        <div class="form-grid cols-2">
+          <div>
+            <label>归因窗口（天）</label>
+            <input id="affiliate-attribution-days" type="number" min="1" max="365" value="30" />
+          </div>
+          <div>
+            <label>复购分佣窗口（天）</label>
+            <input id="affiliate-recurring-days" type="number" min="1" max="730" value="180" />
+          </div>
+        </div>
+        <label>备注（可选）</label>
+        <textarea id="affiliate-note" placeholder="例如：首单 30%，复购 10% 先人工核算；或朋友圈推广合作"></textarea>
+        <div class="row">
+          <button type="button" id="btn-create-affiliate">创建推广员并生成看板链接</button>
+          <button type="button" class="secondary" id="btn-affiliates">刷新推广员列表</button>
+        </div>
+        <p class="muted-tip">普通推广注册链接可随时复制；推广员看板链接含访问密钥，只在创建或重置时显示。</p>
+        <div id="affiliate-link-result" class="link-box hidden"></div>
+        <div style="overflow:auto;max-height:420px;margin-top:12px">
+          <table id="tbl-affiliates">
+            <thead>
+              <tr>
+                <th>推广员</th>
+                <th>规则</th>
+                <th>数据</th>
+                <th>链接</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -388,6 +487,7 @@
       var usersCache = [];
       var activeUserId = '';
       var currentActivityUserId = '';
+      var APP_PUBLIC_URL = 'https://www.shanhai.app';
       function escapeHtml(value) {
         return String(value == null ? '' : value)
           .replace(/&/g, '&amp;')
@@ -512,6 +612,137 @@
         }
         if (typeof value === 'boolean') return value ? '是' : '否';
         return String(value);
+      }
+      function formatMoney(value) {
+        var n = Number(value || 0);
+        if (!Number.isFinite(n)) n = 0;
+        return 'USD $' + n.toFixed(2);
+      }
+      function buildAffiliateRegisterUrl(code) {
+        return APP_PUBLIC_URL + '/register?ref=' + encodeURIComponent(code || '');
+      }
+      async function copyText(value) {
+        var text = String(value || '');
+        if (!text) return;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+          }
+          alert('已复制');
+        } catch (e) {
+          prompt('复制失败，请手动复制：', text);
+        }
+      }
+      function showAffiliateLinkResult(title, links) {
+        var box = document.getElementById('affiliate-link-result');
+        var html = '<div class="label">' + escapeHtml(title) + '</div>';
+        links.forEach(function (item) {
+          html +=
+            '<div style="margin-top:8px">' +
+              '<div class="label">' + escapeHtml(item.label) + '</div>' +
+              '<code>' + escapeHtml(item.url) + '</code>' +
+              '<button type="button" class="secondary btn-copy-inline" data-copy="' + escapeHtml(item.url) + '" style="margin-top:6px">复制</button>' +
+            '</div>';
+        });
+        box.innerHTML = html;
+        box.classList.remove('hidden');
+      }
+      function renderAffiliatePartners(rows) {
+        var tb = document.querySelector('#tbl-affiliates tbody');
+        tb.innerHTML = '';
+        if (!rows || !rows.length) {
+          var empty = document.createElement('tr');
+          empty.innerHTML = '<td colspan="4"><span class="muted-tip">暂无推广员。先创建一个推广码。</span></td>';
+          tb.appendChild(empty);
+          return;
+        }
+        rows.forEach(function (p) {
+          var registerUrl = buildAffiliateRegisterUrl(p.code);
+          var tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' +
+              '<strong>' + escapeHtml(p.name || '未命名') + '</strong><br/>' +
+              '<span class="pill">' + escapeHtml(p.code || '—') + '</span><br/>' +
+              '<small>' + escapeHtml(p.email || '无邮箱') + '</small>' +
+            '</td>' +
+            '<td>' +
+              '佣金 ' + escapeHtml(String(Math.round(Number(p.commissionRate || 0) * 100))) + '%<br/>' +
+              '<small>' + (p.settlementCycle === 'weekly' ? '周结' : '月结') + ' · 最低 ' + escapeHtml(formatMoney(p.minimumPayout)) + '</small><br/>' +
+              '<small>归因 ' + escapeHtml(p.attributionDays || 30) + ' 天 · 复购 ' + escapeHtml(p.recurringDays || 180) + ' 天</small>' +
+            '</td>' +
+            '<td>' +
+              '注册 ' + escapeHtml(p.userCount || 0) + '<br/>' +
+              '<small>佣金记录 ' + escapeHtml(p.commissionCount || 0) + '</small><br/>' +
+              '<small>' + (p.hasDashboardAccess ? '已开通看板' : '未生成看板密钥') + '</small>' +
+            '</td>' +
+            '<td>' +
+              '<div class="row" style="margin-top:0">' +
+                '<button type="button" class="secondary btn-copy-register-link" data-code="' + escapeHtml(p.code || '') + '">复制注册链接</button>' +
+                '<button type="button" class="secondary btn-reset-dashboard-link" data-id="' + escapeHtml(p.id || '') + '" data-code="' + escapeHtml(p.code || '') + '">生成/重置看板链接</button>' +
+              '</div>' +
+              '<small style="display:block;margin-top:6px;color:var(--muted)">看板链接含 token，只在生成时显示。</small>' +
+            '</td>';
+          tb.appendChild(tr);
+        });
+      }
+      async function loadAffiliatePartners() {
+        var rows = await api('/admin/analytics/affiliate-partners');
+        renderAffiliatePartners(rows);
+      }
+      async function createAffiliatePartner() {
+        var code = (document.getElementById('affiliate-code').value || '').trim();
+        var name = (document.getElementById('affiliate-name').value || '').trim();
+        var email = (document.getElementById('affiliate-email').value || '').trim();
+        var commissionRate = Number(document.getElementById('affiliate-rate').value || 0.3);
+        var settlementCycle = document.getElementById('affiliate-cycle').value || 'monthly';
+        var minimumPayout = Number(document.getElementById('affiliate-min-payout').value || 50);
+        var attributionDays = parseInt(document.getElementById('affiliate-attribution-days').value || '30', 10);
+        var recurringDays = parseInt(document.getElementById('affiliate-recurring-days').value || '180', 10);
+        var note = (document.getElementById('affiliate-note').value || '').trim();
+        if (!code || !name) {
+          alert('请填写推广码和推广员名称');
+          return;
+        }
+        var partner = await api('/admin/analytics/affiliate-partners', {
+          method: 'POST',
+          body: JSON.stringify({
+            code: code,
+            name: name,
+            email: email || undefined,
+            commissionRate: commissionRate,
+            settlementCycle: settlementCycle,
+            minimumPayout: minimumPayout,
+            attributionDays: attributionDays,
+            recurringDays: recurringDays,
+            note: note || undefined,
+          }),
+        });
+        var registerUrl = buildAffiliateRegisterUrl(partner.code);
+        showAffiliateLinkResult('推广员已创建，请复制并发给对方', [
+          { label: '推广注册链接', url: registerUrl },
+          { label: '推广员看板链接', url: partner.dashboardUrl || '' },
+        ]);
+        await loadAffiliatePartners();
+      }
+      async function resetAffiliateDashboardLink(id, code) {
+        if (!id) return;
+        if (!confirm('确定要重置该推广员的看板链接吗？旧看板链接会失效。')) return;
+        var result = await api('/admin/analytics/affiliate-partners/' + encodeURIComponent(id) + '/dashboard-token', {
+          method: 'POST',
+          body: JSON.stringify({}),
+        });
+        showAffiliateLinkResult('推广员看板链接已生成，请复制保存', [
+          { label: '推广注册链接', url: buildAffiliateRegisterUrl(result.code || code) },
+          { label: '推广员看板链接', url: result.dashboardUrl || '' },
+        ]);
+        await loadAffiliatePartners();
       }
       function appendEmptyRow(tbody, message) {
         var tr = document.createElement('tr');
@@ -745,6 +976,7 @@
           document.getElementById('dash').classList.remove('hidden');
           document.getElementById('who').textContent = body.user.email;
           await loadOverview();
+          await loadAffiliatePartners();
         } catch (e) {
           showErr('login-err', e.message || String(e));
         } finally {
@@ -757,6 +989,42 @@
         renderOverview(o);
       }
       document.getElementById('btn-refresh').onclick = function () { loadOverview().catch(function (e) { alert(e.message); }); };
+      document.getElementById('btn-affiliates').onclick = function () {
+        var btn = this;
+        btn.disabled = true;
+        loadAffiliatePartners()
+          .catch(function (e) { alert(e.message || String(e)); })
+          .finally(function () { btn.disabled = false; });
+      };
+      document.getElementById('btn-create-affiliate').onclick = function () {
+        var btn = this;
+        btn.disabled = true;
+        createAffiliatePartner()
+          .catch(function (e) { alert(e.message || String(e)); })
+          .finally(function () { btn.disabled = false; });
+      };
+      document.getElementById('affiliate-link-result').addEventListener('click', function (event) {
+        var target = event.target;
+        if (!target || !(target instanceof HTMLElement)) return;
+        if (!target.classList.contains('btn-copy-inline')) return;
+        copyText(target.getAttribute('data-copy') || '');
+      });
+      document.querySelector('#tbl-affiliates tbody').addEventListener('click', function (event) {
+        var target = event.target;
+        if (!target || !(target instanceof HTMLElement)) return;
+        if (target.classList.contains('btn-copy-register-link')) {
+          copyText(buildAffiliateRegisterUrl(target.getAttribute('data-code') || ''));
+          return;
+        }
+        if (target.classList.contains('btn-reset-dashboard-link')) {
+          var id = target.getAttribute('data-id') || '';
+          var code = target.getAttribute('data-code') || '';
+          target.setAttribute('disabled', 'disabled');
+          resetAffiliateDashboardLink(id, code)
+            .catch(function (e) { alert(e.message || String(e)); })
+            .finally(function () { target.removeAttribute('disabled'); });
+        }
+      });
       document.getElementById('btn-logout').onclick = function () {
         setToken('');
         document.getElementById('dash').classList.add('hidden');
@@ -949,7 +1217,7 @@
         document.getElementById('login-panel').classList.add('hidden');
         document.getElementById('dash').classList.remove('hidden');
         document.getElementById('who').textContent = '已保存 token';
-        loadOverview().catch(function () {
+        Promise.all([loadOverview(), loadAffiliatePartners()]).catch(function () {
           setToken('');
           document.getElementById('dash').classList.add('hidden');
           document.getElementById('login-panel').classList.remove('hidden');
