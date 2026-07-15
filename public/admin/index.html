@@ -7,24 +7,62 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0f0a18;
-      --card: #1a1228;
-      --border: #2c1d3c;
-      --text: #e8e0f0;
-      --muted: #9a8aa8;
-      --accent: #c9a227;
+      --bg: #090b10;
+      --page: #0d1117;
+      --card: #111827;
+      --card-2: #0f1623;
+      --field: #0b1220;
+      --border: #263244;
+      --border-soft: #1b2533;
+      --text: #eef2f7;
+      --muted: #9aa7b8;
+      --muted-2: #718096;
+      --accent: #d6b36a;
+      --accent-2: #9f7d3f;
+      --danger: #ef7777;
+      --success: #5cc79a;
+      --shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
-      background: var(--bg);
+      background:
+        radial-gradient(circle at 20% -10%, rgba(214, 179, 106, 0.08), transparent 30%),
+        linear-gradient(180deg, #0b0e14 0%, var(--bg) 58%);
       color: var(--text);
       line-height: 1.5;
-      padding: 24px 16px 48px;
+      padding: 0;
     }
-    h1 { font-size: 1.35rem; margin: 0 0 8px; }
-    p.sub { color: var(--muted); margin: 0 0 20px; font-size: 0.9rem; }
+    .page-shell {
+      width: min(1480px, 100%);
+      margin: 0 auto;
+      padding: 22px 18px 52px;
+    }
+    .top-shell {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(214, 179, 106, 0.12);
+      background: rgba(9, 11, 16, 0.9);
+      backdrop-filter: blur(12px);
+    }
+    .top-inner {
+      width: min(1480px, 100%);
+      margin: 0 auto;
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    h1 {
+      font-size: 1.28rem;
+      line-height: 1.2;
+      margin: 0;
+      letter-spacing: 0.02em;
+    }
+    p.sub { color: var(--muted); margin: 6px 0 0; font-size: 0.88rem; }
     .grid { display: grid; gap: 16px; }
     @media (min-width: 900px) {
       .grid.cols-2 { grid-template-columns: 1fr 1fr; }
@@ -32,19 +70,50 @@
     .card {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 16px 18px;
+      border-radius: 10px;
+      padding: 18px;
+      box-shadow: var(--shadow);
     }
-    .card h2 { margin: 0 0 12px; font-size: 1rem; color: var(--accent); }
-    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+    #login-panel {
+      margin-top: 28px;
+    }
+    #dash {
+      margin-top: 6px;
+    }
+    @media (min-width: 900px) {
+      .card.wide { grid-column: 1 / -1; }
+    }
+    .card h2 {
+      margin: 0 0 14px;
+      font-size: 1rem;
+      color: var(--text);
+      letter-spacing: 0.01em;
+    }
+    .card h2::before {
+      content: "";
+      display: inline-block;
+      width: 3px;
+      height: 14px;
+      border-radius: 999px;
+      background: var(--accent);
+      margin-right: 8px;
+      vertical-align: -2px;
+    }
+    label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 5px; font-weight: 650; }
     input, select, textarea {
       width: 100%;
-      padding: 10px 12px;
+      padding: 10px 11px;
       border-radius: 8px;
       border: 1px solid var(--border);
-      background: #120c1c;
+      background: var(--field);
       color: var(--text);
       margin-bottom: 10px;
+      outline: none;
+      font: inherit;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: rgba(214, 179, 106, 0.72);
+      box-shadow: 0 0 0 3px rgba(214, 179, 106, 0.11);
     }
     textarea {
       min-height: 78px;
@@ -52,22 +121,41 @@
     }
     button {
       cursor: pointer;
-      padding: 10px 18px;
+      padding: 9px 14px;
       border-radius: 8px;
-      border: none;
-      background: linear-gradient(135deg, #5b3a9e, #3d2a6b);
-      color: #fff;
-      font-weight: 600;
+      border: 1px solid rgba(214, 179, 106, 0.62);
+      background: var(--accent);
+      color: #17120d;
+      font-weight: 750;
+      font-size: 0.86rem;
+      min-height: 38px;
     }
-    button.secondary { background: #2a2038; color: var(--text); border: 1px solid var(--border); }
+    button:hover { filter: brightness(1.05); }
+    button.secondary { background: #152033; color: var(--text); border: 1px solid var(--border); }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    th { color: var(--muted); font-weight: 500; }
-    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #2a2038; font-size: 0.75rem; }
-    .err { color: #f87171; font-size: 0.85rem; margin-top: 8px; }
-    pre { white-space: pre-wrap; word-break: break-all; font-size: 0.75rem; color: var(--muted); max-height: 220px; overflow: auto; }
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      margin-top: 12px;
+      background: #0b111c;
+    }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.84rem; min-width: 680px; }
+    th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+    th {
+      color: #c3ccda;
+      font-weight: 750;
+      background: #111a2a;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.015); }
+    tbody tr:hover td { background: rgba(214, 179, 106, 0.055); }
+    .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #172235; border: 1px solid var(--border); font-size: 0.75rem; color: #cdd5e2; }
+    .err { color: var(--danger); font-size: 0.85rem; margin-top: 8px; }
+    pre { white-space: pre-wrap; word-break: break-all; font-size: 0.75rem; color: var(--muted); max-height: 220px; overflow: auto; background: #0b111c; border-radius: 8px; padding: 10px; }
     .hidden { display: none !important; }
     mark.hit {
       background: rgba(201, 162, 39, 0.28);
@@ -92,10 +180,10 @@
       width: min(920px, 100%);
       max-height: 86vh;
       overflow: auto;
-      background: #161126;
-      border: 1px solid #3a2b5a;
+      background: var(--card);
+      border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 14px;
+      padding: 16px;
     }
     .modal h3 {
       margin: 0;
@@ -122,7 +210,7 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 10px;
-      background: #120c1c;
+      background: var(--card-2);
     }
     .summary-card .k {
       color: var(--muted);
@@ -151,7 +239,7 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 10px;
-      background: #120c1c;
+      background: var(--card-2);
       min-height: 74px;
     }
     .metric-card .label {
@@ -173,7 +261,7 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 10px;
-      background: #120c1c;
+      background: var(--card-2);
     }
     .overview-section h4 {
       margin: 0 0 8px;
@@ -248,6 +336,24 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
+    @media (max-width: 640px) {
+      .top-inner {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .page-shell {
+        padding: 16px 12px 40px;
+      }
+      .card {
+        padding: 14px;
+      }
+      button {
+        width: 100%;
+      }
+      .row {
+        align-items: stretch;
+      }
+    }
     .split-grid {
       display: grid;
       gap: 12px;
@@ -261,27 +367,35 @@
   </style>
 </head>
 <body>
-  <h1>山海灵境 · 运营看板</h1>
-  <p class="sub">查看埋点汇总、登录记录、聊天意图分布与用户主观反馈。需数据库中 <span class="pill">role=admin</span> 的账号登录。</p>
-
-  <div id="login-panel" class="card" style="max-width:420px">
-    <h2>管理员登录</h2>
-    <label>邮箱</label>
-    <input id="email" type="email" autocomplete="username" placeholder="admin@example.com" />
-    <label>密码</label>
-    <input id="password" type="password" autocomplete="current-password" />
-    <div class="row">
-      <button type="button" id="btn-login">登录并加载数据</button>
+  <header class="top-shell">
+    <div class="top-inner">
+      <div>
+        <h1>山海灵境 · 运营看板</h1>
+        <p class="sub">埋点、用户、反馈与推广员管理。仅限 <span class="pill">role=admin</span> 账号访问。</p>
+      </div>
+      <span class="pill">Production Admin</span>
     </div>
-    <div id="login-err" class="err hidden"></div>
-  </div>
+  </header>
 
-  <div id="dash" class="hidden">
-    <div class="row" style="margin-bottom:16px">
-      <button type="button" class="secondary" id="btn-logout">退出登录</button>
-      <span class="pill" id="who"></span>
+  <main class="page-shell">
+    <div id="login-panel" class="card" style="max-width:460px">
+      <h2>管理员登录</h2>
+      <label>邮箱</label>
+      <input id="email" type="email" autocomplete="username" placeholder="admin@example.com" />
+      <label>密码</label>
+      <input id="password" type="password" autocomplete="current-password" />
+      <div class="row">
+        <button type="button" id="btn-login">登录并加载数据</button>
+      </div>
+      <div id="login-err" class="err hidden"></div>
     </div>
-    <div class="grid cols-2">
+
+    <div id="dash" class="hidden">
+      <div class="row" style="justify-content:space-between;margin-bottom:16px">
+        <span class="pill" id="who"></span>
+        <button type="button" class="secondary" id="btn-logout">退出登录</button>
+      </div>
+      <div class="grid cols-2">
       <div class="card">
         <h2>概览（可调天数）</h2>
         <label>统计最近天数</label>
@@ -300,7 +414,7 @@
         <h2>最近活跃</h2>
         <button type="button" id="btn-logins">加载活跃记录</button>
         <p class="muted-tip">若登录埋点为空，将自动展示最近注册用户，避免空看板。</p>
-        <div style="overflow:auto;max-height:360px;margin-top:10px">
+        <div class="table-wrap" style="max-height:360px">
           <table id="tbl-logins"><thead><tr><th>时间</th><th>用户</th><th>来源</th></tr></thead><tbody></tbody></table>
         </div>
       </div>
@@ -309,18 +423,18 @@
         <label>按用户名 / 邮箱搜索</label>
         <input id="users-search" type="text" placeholder="输入关键词实时筛选" />
         <button type="button" id="btn-users">加载用户</button>
-        <div style="overflow:auto;max-height:320px;margin-top:10px">
+        <div class="table-wrap" style="max-height:320px">
           <table id="tbl-users"><thead><tr><th>用户名</th><th>邮箱</th><th>地区</th><th>时区</th><th>最近模块</th><th>注册</th><th>管理操作</th></tr></thead><tbody></tbody></table>
         </div>
       </div>
       <div class="card">
         <h2>主观反馈</h2>
         <button type="button" id="btn-feedback">加载反馈</button>
-        <div style="overflow:auto;max-height:360px;margin-top:10px">
+        <div class="table-wrap" style="max-height:360px">
           <table id="tbl-feedback"><thead><tr><th>时间</th><th>分类</th><th>评分</th><th>用户</th><th>留言</th></tr></thead><tbody></tbody></table>
         </div>
       </div>
-      <div class="card">
+      <div class="card wide">
         <h2>推广员管理</h2>
         <div class="form-grid cols-3">
           <div>
@@ -371,7 +485,7 @@
         </div>
         <p class="muted-tip">普通推广注册链接可随时复制；推广员看板链接含访问密钥，只在创建或重置时显示。</p>
         <div id="affiliate-link-result" class="link-box hidden"></div>
-        <div style="overflow:auto;max-height:420px;margin-top:12px">
+        <div class="table-wrap" style="max-height:420px">
           <table id="tbl-affiliates">
             <thead>
               <tr>
@@ -385,8 +499,9 @@
           </table>
         </div>
       </div>
+      </div>
     </div>
-  </div>
+  </main>
 
   <div id="activity-detail-mask" class="modal-mask hidden">
     <div class="modal">
