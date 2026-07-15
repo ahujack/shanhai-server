@@ -3,6 +3,7 @@ import axios from 'axios';
 import { PrismaService } from '../../prisma.service';
 import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
 import { resolveDeepSeekChatUrl } from '../../common/llm-endpoint';
+import { SAFETY_PROMPT_SUFFIX } from '../../common/safety';
 
 export type DivinationCategory = 'career' | 'love' | 'wealth' | 'health' | 'growth' | 'general';
 
@@ -762,7 +763,8 @@ export class ReadingService {
 3. 结合本卦、变卦、动爻数做具体分析，引用卦名和爻象
 4. 讲解要详细、有层次，每条 200-400 字
 5. 避免套话，每条建议都要可执行、有针对性
-6. ${outputLanguageRule}`;
+6. ${outputLanguageRule}
+${SAFETY_PROMPT_SUFFIX}`;
     const userPrompt = `用户问题：${ctx.question}
 占卜方向：${ctx.category}（必须围绕此方向深入解读）
 本卦：${ctx.originalName}

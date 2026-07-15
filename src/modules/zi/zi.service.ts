@@ -13,6 +13,7 @@ import {
   ziPremiumHintNoFocus,
 } from '../../common/localized-strings';
 import { resolveDeepSeekChatUrl } from '../../common/llm-endpoint';
+import { SAFETY_PROMPT_SUFFIX } from '../../common/safety';
 
 // 汉典笔画部首数据（zdic），懒加载
 let zdicData: Record<string, [string, number]> | null = null;
@@ -869,6 +870,7 @@ export class ZiService {
 8. 【通俗易懂】少用生僻词与论文腔；必要术语后加一句白话解释；多用「对你来说」「可以把它理解成」等自然表达，让用户觉得好懂又贴己。
 9. 【笔下所指唯一】用户 JSON 中的 zi 字段即为本次所测单字（唯一本字）。全文禁止把本字说成其它汉字；讨论部件时可单独写部件字形。handwritingInterpretation 四条每条开头须出现「你写的「X」」或「这个「X」字」（X 必须与 zi 完全一致）。
 10. 【语言一致】${outputLanguageRule}
+${SAFETY_PROMPT_SUFFIX}
 
 【技法细化】必须结合该字部件拆解，每条都要不同；每条不超过约 70 字，一句一个要点，便于扫读：
 - lihefa：离合法，3条。格式如「离：先看外层「X」…」「转：把X合起来看…」「证：从部件含义看…」。必须用该字真实部件

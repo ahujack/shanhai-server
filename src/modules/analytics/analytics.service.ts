@@ -474,4 +474,82 @@ export class AnalyticsService {
       },
     };
   }
+
+  async adminLaunchMetrics(days: number) {
+    const safeDays = Math.min(Math.max(days, 1), 30);
+    const since = new Date(Date.now() - safeDays * 86400000);
+    const [
+      newUsers,
+      activeUsers,
+      chatMessages,
+      ziResults,
+      readingResults,
+      baziCharts,
+      feedbackAgg,
+      checkoutStartCount,
+      paymentCompletedCount,
+      paymentPendingLongCount,
+    ] = await Promise.all([
+      this.prisma.user.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.analyticsEvent.findMany({
+        where: { createdAt: { gte: since }, userId: { not: null } },
+        distinct: ['userId'],
+        select: { userId: true },
+      }),
+      this.prisma.chatMessage.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.ziAnalysis.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.reading.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.baziChart.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.userFeedback.aggregate({
+        where: { createdAt: { gte: since }, rating: { not: null } },
+        _avg: { rating: true },
+        _count: { rating: true },
+      }),
+      this.prisma.analyticsEvent.count({
+        where: { createdAt: { gte: since }, name: 'checkout_start' },
+      }),
+      this.prisma.payment.count({
+        where: { createdAt: { gte: since }, status: 'completed' },
+      }),
+      this.prisma.payment.count({
+        where: {
+          status: 'pending',
+          createdAt: { lt: new Date(Date.now() - 5 * 60 * 1000) },
+        },
+      }),
+    ]);
+    return {
+      periodDays: safeDays,
+      since: since.toISOString(),
+      users: {
+        newUsers,
+        activeUsers: activeUsers.length,
+      },
+      modules: {
+        chatMessages,
+        ziResults,
+        readingResults,
+        baziCharts,
+      },
+      quality: {
+        feedbackCount: feedbackAgg._count.rating,
+        averageRating:
+          feedbackAgg._avg.rating == null
+            ? null
+            : Number(feedbackAgg._avg.rating.toFixed(2)),
+      },
+      payment: {
+        checkoutStartCount,
+        completedCount: paymentCompletedCount,
+        pendingOver5mCount: paymentPendingLongCount,
+      },
+      alerts: {
+        noRecentFeedback: feedbackAgg._count.rating === 0,
+        hasStuckPendingPayments: paymentPendingLongCount > 0,
+        lowPaymentCompletion:
+          checkoutStartCount >= 10 &&
+          paymentCompletedCount / Math.max(checkoutStartCount, 1) < 0.3,
+      },
+    };
+  }
 }

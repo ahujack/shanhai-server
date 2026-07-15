@@ -46,4 +46,10 @@ export class AdminAnalyticsController {
     const days = Number.parseInt(String(daysRaw || '7'), 10);
     return this.analytics.adminOpsHealth(Number.isFinite(days) ? days : 7);
   }
+
+  @Get('launch-metrics')
+  launchMetrics(@Query('days') daysRaw?: string) {
+    const days = Number.parseInt(String(daysRaw || '7'), 10);
+    return this.analytics.adminLaunchMetrics(Number.isFinite(days) ? days : 7);
+  }
 }

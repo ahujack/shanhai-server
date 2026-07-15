@@ -10,6 +10,7 @@ import { AgentChatDto } from './dto/agent-chat.dto';
 import { PrismaService } from '../../prisma.service';
 import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
 import { resolveDeepSeekChatUrl, resolveSttTranscriptionsUrl } from '../../common/llm-endpoint';
+import { SAFETY_PROMPT_SUFFIX, buildCrisisResponse, detectCrisisIntent } from '../../common/safety';
 
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
 type AgentAction = { type: string; label: string };
@@ -190,6 +191,20 @@ export class AgentService {
     }
     if (dto.message.length > 500) {
       yield { type: 'error', message: '消息长度不能超过500字符' };
+      return;
+    }
+    if (detectCrisisIntent(dto.message)) {
+      const reply = buildCrisisResponse(dto.language);
+      yield { type: 'chunk', content: reply };
+      yield {
+        type: 'done',
+        persona: dto.personaId || 'default',
+        intent: 'chat',
+        reply,
+        actions: [],
+        artifacts: { safety: 'crisis' },
+        hasChart: false,
+      };
       return;
     }
 
@@ -737,7 +752,8 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
   3) 二选一追问（降低用户思考负担）
   4) 轻转化钩子（自然、不过度推销）
 
-注意：用户可能只是在倾诉，不要急着给出建议，先表达理解和共情。`;
+注意：用户可能只是在倾诉，不要急着给出建议，先表达理解和共情。
+${SAFETY_PROMPT_SUFFIX}`;
 
     const messages: Array<{ role: string; content: string }> = [
       { role: 'system', content: systemPrompt },
@@ -904,7 +920,8 @@ ${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
 注意：
 - 用户可能只是在倾诉，不要急着给出建议，先表达理解和共情
 - 如果用户问的是专业命理问题，引导他们使用相应的功能（占卜/测字/命盘）
-- 保持神秘感和东方美学气质`;
+- 保持神秘感和东方美学气质
+${SAFETY_PROMPT_SUFFIX}`;
 
       const response = await axios.post(
         resolveDeepSeekChatUrl(),
