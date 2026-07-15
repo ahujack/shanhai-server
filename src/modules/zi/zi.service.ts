@@ -340,7 +340,7 @@ export class ZiService {
     try {
       const char = zi.charAt(0);
       const focus = this.normalizeFocusAspect(focusAspect);
-      await this.ensureOracleBoneLexicon();
+      this.primeOracleBoneLexicon();
       
       // 1. 笔迹分析（可含 Gemini 多模态笔迹；无则模板/随机）
       let handwriting = this.analyzeHandwriting(handwritingData);
@@ -841,10 +841,11 @@ export class ZiService {
       const apiUrl = resolveDeepSeekChatUrl();
       const model = this.resolveZiLlmModel(ctx?.membership || 'free');
       // 原 5500 tokens + 30s 超时极易未完成即断开，前端表现为 net::ERR_CONNECTION_TIMED_OUT
-      const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || '3800', 10);
-      const maxTokens = Math.min(8192, Math.max(1500, Number.isFinite(maxTokensRaw) ? maxTokensRaw : 3800));
-      const timeoutRaw = parseInt(process.env.ZI_DEEPSEEK_TIMEOUT_MS || '120000', 10);
-      const timeoutMs = Math.min(180000, Math.max(45000, Number.isFinite(timeoutRaw) ? timeoutRaw : 120000));
+      const fastMode = String(process.env.ZI_LLM_FAST_MODE || 'true') !== 'false';
+      const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || (fastMode ? '1800' : '3800'), 10);
+      const maxTokens = Math.min(8192, Math.max(900, Number.isFinite(maxTokensRaw) ? maxTokensRaw : fastMode ? 1800 : 3800));
+      const timeoutRaw = parseInt(process.env.ZI_DEEPSEEK_TIMEOUT_MS || (fastMode ? '35000' : '120000'), 10);
+      const timeoutMs = Math.min(180000, Math.max(12000, Number.isFinite(timeoutRaw) ? timeoutRaw : fastMode ? 35000 : 120000));
 
       const outputLanguageRule = buildOutputLanguageInstruction(normalizeAppLanguage(ctx?.language));
       const response = await axios.post(
@@ -857,7 +858,44 @@ export class ZiService {
           messages: [
             {
               role: 'system',
-              content: `你是一位精通《测字有术》的高阶分析师，深谙中国传统文化、笔迹心理学和甲骨文。
+              content: fastMode ? `你是山海灵境的“云游子”，精通测字、字形拆解与东方心理陪伴。
+
+【核心要求】
+1. 必须围绕用户所测单字「${zi}」输出，禁止换字、禁止泛泛而谈。
+2. focusAspect 是本次重点，至少 70% 内容围绕该方向。
+3. 输出要短、准、可扫读，用户正在等待结果，优先给结论和下一步。
+4. 每个字段都结合该字的部首/部件/笔画/五行/阴阳/吉凶之一。
+5. ${outputLanguageRule}
+${SAFETY_PROMPT_SUFFIX}
+
+【长度控制】
+- overall: 90-140字
+- career/love/wealth/health: 各 50-90字
+- coldReadings: 3条，每条不超过45字
+- lihefa/tianziGe: 各3条，每条不超过36字
+- imageryInference: 50-80字
+- oracleBoneInterpretation: 60-100字
+- handwritingInterpretation 四项：每项 45-70字，开头点明「你写的「${zi}」」
+- focusReading.summary: 80-120字
+- anchors/riskSignals/actionPlan: 分别最多3条，每条不超过32字
+
+【输出格式】只返回 JSON：
+{
+  overall: string,
+  career: string,
+  love: string,
+  wealth: string,
+  health: string,
+  advice: string[],
+  coldReadings: string[],
+  lihefa: string[],
+  tianziGe: string[],
+  imageryInference: string,
+  probingQuestion: string,
+  handwritingInterpretation: { pressureInterpretation: string, stabilityInterpretation: string, structureInterpretation: string, continuityInterpretation: string },
+  oracleBoneInterpretation: string,
+  focusReading?: { focus: string, summary: string, anchors: string[], riskSignals: string[], actionPlan: string[] }
+}` : `你是一位精通《测字有术》的高阶分析师，深谙中国传统文化、笔迹心理学和甲骨文。
 
 【核心要求】
 1. 必须结合具体字进行解读，禁止泛泛而谈。每个输出都要显式用到该字的：部首、笔画、部件拆解、字义联想、五行阴阳吉凶
@@ -1392,9 +1430,26 @@ ${SAFETY_PROMPT_SUFFIX}
     return this.breakDown(zi).map(c => `部件"${c}"`);
   }
 
-  private async ensureOracleBoneLexicon(): Promise<void> {
+  private primeOracleBoneLexicon(): void {
     const now = Date.now();
     if (this.oracleBoneLexicon && now - this.oracleBoneLexiconLoadedAt < this.oracleBoneCacheMs) {
+      return;
+    }
+    if (!this.oracleBoneLexicon) {
+      this.oracleBoneLexicon = this.getOracleFallbackMap();
+      this.oracleBoneLexiconLoadedAt = now;
+    }
+    if (this.oracleBoneLexiconLoading) {
+      return;
+    }
+    void this.ensureOracleBoneLexicon(true).catch((error) => {
+      this.logger.warn(`甲骨文字表后台预热失败: ${(error as Error).message}`);
+    });
+  }
+
+  private async ensureOracleBoneLexicon(forceRefresh = false): Promise<void> {
+    const now = Date.now();
+    if (!forceRefresh && this.oracleBoneLexicon && now - this.oracleBoneLexiconLoadedAt < this.oracleBoneCacheMs) {
       return;
     }
     if (this.oracleBoneLexiconLoading) {
