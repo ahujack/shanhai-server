@@ -1144,8 +1144,30 @@ ${SAFETY_PROMPT_SUFFIX}`;
     return Math.max(8000, Math.min(60000, raw));
   }
 
-  private buildConversionHint(intent: AgentIntent, membership: 'free' | 'premium' | 'vip'): string {
+  private buildConversionHint(intent: AgentIntent, membership: 'free' | 'premium' | 'vip', language: 'zh-CN' | 'en-US' | 'zh-TW' = 'zh-CN'): string {
     if (membership !== 'free') return '';
+    if (language === 'en-US') {
+      if (intent === 'divination') {
+        return 'If you want to go deeper, I can turn this into a timing window, risk map, and three-step action plan.';
+      }
+      if (intent === 'fortune') {
+        return 'If this theme feels relevant, I can expand it into a more detailed schedule-style guidance for your week.';
+      }
+      if (intent === 'zi') {
+        return 'You can open the Symbol Reading page for a fuller ritual-style interpretation with deeper focus.';
+      }
+      if (intent === 'chart') {
+        return 'Next, I can connect your birth-chart pattern with your current question for more personal guidance.';
+      }
+      return '';
+    }
+    if (language === 'zh-TW') {
+      if (intent === 'divination') return '如果你想把這件事看得更透，我可以繼續給你做「時間窗口 + 風險位 + 三步行動計畫」的深度拆盤。';
+      if (intent === 'fortune') return '要是你願意，我可以基於你這週的重點議題，給你做一版更細的日程化建議。';
+      if (intent === 'zi') return '你可以去測字頁做完整儀式化解讀（含方向深挖），結論會更具體。';
+      if (intent === 'chart') return '後續我還能把你的命盤和你當下問題做聯動解讀，讓建議更貼身。';
+      return '';
+    }
     if (intent === 'divination') {
       return '如果你想把这件事看得更透，我可以继续给你做「时间窗口 + 风险位 + 三步行动计划」的深度拆盘。';
     }
@@ -1260,12 +1282,17 @@ ${SAFETY_PROMPT_SUFFIX}`;
     dto: AgentChatDto,
   ): Promise<string> {
     const membership = await this.getUserMembership(dto.userId);
-    const conversionHint = this.buildConversionHint(intent, membership);
+    const language = normalizeAppLanguage(dto.language);
+    const conversionHint = this.buildConversionHint(intent, membership, language);
 
     // 测字回复：只引导去测字页，不在对话内直接出结果
     if (intent === 'zi') {
       const suggestedZi = (artifacts as any)?.ziSuggestion?.zi;
       const ziHint = suggestedZi ? `（可先用「${suggestedZi}」起测）` : '';
+      if (language === 'en-US') {
+        const symbolHint = suggestedZi ? ` You can start with "${suggestedZi}" as the symbol.` : '';
+        return `This question is a good fit for a symbol reading.${symbolHint}\n\nHold one real question in mind, then choose or write one Chinese character. I will translate the symbol into plain English: current pattern, emotional signal, and next step.\n\nTap "Symbol Reading" below to begin.${conversionHint ? `\n\n${conversionHint}` : ''}`;
+      }
       return `你这个问题很适合用“字”来入局。${ziHint}\n\n建议你先静心10秒，心里只想着这件事，再写下一个字，这样解读会更聚焦。\n\n点击下方「进入测字页面」开始。${conversionHint ? `\n\n${conversionHint}` : ''}`;
     }
 
@@ -1273,27 +1300,44 @@ ${SAFETY_PROMPT_SUFFIX}`;
     if (intent === 'divination' && artifacts.reading) {
       const reading = artifacts.reading as any;
       if (!reading) {
-        return `抱歉，占卜服务暂时不可用，请稍后再试。`;
+        return language === 'en-US'
+          ? `Sorry, the oracle reading is temporarily unavailable. Please try again later.`
+          : `抱歉，占卜服务暂时不可用，请稍后再试。`;
+      }
+      if (language === 'en-US') {
+        return `You brought a real question, so I will keep the answer practical.\n\n[Direct answer]\n${reading.interpretation.overall}\n\n[Symbol basis]\nThe reading pattern is ${reading.hexagram.originalName || 'the current pattern'}.\n\n[Next step]\n${reading.recommendations[0]}\n\nIf you want, we can break the next move into something smaller and easier to act on.${conversionHint ? `\n\n${conversionHint}` : ''}`;
       }
       return `先抱抱你，带着这个问题来问卦，本身就很有勇气。\n\n【结论】${reading.interpretation.overall}\n【依据】卦象「${reading.hexagram.originalName}」\n【行动建议】${reading.recommendations[0]}\n\n若你愿意，我可以继续和你把下一步拆成更小、更可执行的动作。${conversionHint ? `\n\n${conversionHint}` : ''}`;
     }
 
     // 冥想回复
     if (intent === 'meditation') {
+      if (language === 'en-US') {
+        return `I can feel that your mind is not settled right now.\n\nLet us slow down with a few breaths and give your body a moment to feel safe.\n\nI prepared a short guided pause for you. Tap "Start meditation" below.`;
+      }
       return `我感受到你内心的不静。\n\n让我们一起做几次深呼吸，放下那些困扰你的事情。\n\n我为你准备了一段冥想引导，点击下方「开始冥想」即可。`;
     }
 
     // 运势回复
     if (intent === 'fortune' && artifacts.fortune) {
       const fortune = artifacts.fortune as any;
+      if (language === 'en-US') {
+        return `Today's oracle is here as a reflection prompt, not a fixed prediction.\n\n[Theme]\n${fortune.poem.title}\n\n[Overall signal]\n${fortune.day}\n\n[Action]\n${fortune.advice[0]}\n\nLucky number: ${fortune.lucky.number}. Lucky color: ${fortune.lucky.color}.${conversionHint ? `\n\n${conversionHint}` : ''}`;
+      }
       return `今日与你有缘，也愿你心安。\n\n【今日签诗】${fortune.poem.title}\n【总体提示】${fortune.day}\n【行动建议】${fortune.advice[0]}\n\n幸运数字：${fortune.lucky.number}，幸运颜色：${fortune.lucky.color}${conversionHint ? `\n\n${conversionHint}` : ''}`;
     }
 
     // 命盘回复
     if (intent === 'chart') {
       if (userChart) {
+        if (language === 'en-US') {
+          return `Your Eastern birth-chart pattern is ready.\n\nCore marker: ${userChart.dayGanZhi || 'available in chart'}\nElement balance: Wood ${userChart.wuxingStrength.wood}% / Fire ${userChart.wuxingStrength.fire}% / Earth ${userChart.wuxingStrength.earth}% / Metal ${userChart.wuxingStrength.metal}% / Water ${userChart.wuxingStrength.water}%\n\nPersonality notes: ${userChart.personalityTraits.slice(0, 2).join(', ')}\n\nCareer: ${userChart.fortuneSummary.career}\nLove: ${userChart.fortuneSummary.love}${conversionHint ? `\n\n${conversionHint}` : ''}`;
+        }
         return `你的命盘已在此。\n\n🔮 八字：${userChart.dayGanZhi}（日主）\n🌟 五行：木${userChart.wuxingStrength.wood}% 火${userChart.wuxingStrength.fire}% 土${userChart.wuxingStrength.earth}% 金${userChart.wuxingStrength.metal}% 水${userChart.wuxingStrength.water}%\n\n📝 性格特点：${userChart.personalityTraits.slice(0, 2).join('、')}\n\n💼 事业：${userChart.fortuneSummary.career}\n💕 感情：${userChart.fortuneSummary.love}${conversionHint ? `\n\n${conversionHint}` : ''}`;
       } else {
+        if (language === 'en-US') {
+          return `You have not created your birth chart yet.\n\nIf you want to explore your long-term patterns, go to Profile and enter your birth details. I will generate an Eastern birth-chart reading for you.`;
+        }
         return `你还没有建立命盘呢。\n\n若想了解自己的八字命盘，可以先去「我的」页面输入出生信息，我会为你生成专属命盘分析。`;
       }
     }
@@ -1317,6 +1361,9 @@ ${SAFETY_PROMPT_SUFFIX}`;
     }
 
     // 默认回复
+    if (language === 'en-US') {
+      return `I hear what you are carrying. If you want to go further, tell me whether you want an oracle reading, a short grounding pause, a symbol reading, or your birth-chart pattern.`;
+    }
     return `我听到了你的心绪。若想更进一步，可告诉我需要抽签、静坐还是查看命盘，我都在。`;
   }
 

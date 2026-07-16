@@ -12,11 +12,10 @@ export function normalizeAppLanguage(raw?: string | null): AppLanguage {
 
 export function buildOutputLanguageInstruction(language: AppLanguage): string {
   if (language === 'en-US') {
-    return 'Output language must be English only. Do not include any Chinese characters. Self-check before final output.';
+    return 'Output language must be English only. Do not include any Chinese characters. Write for global users who may not understand Chinese metaphysics: explain terms in plain English, translate symbolic ideas into practical modern language, and avoid unexplained jargon such as BaZi, CeZi, hexagram, wuxing, ten gods, gan zhi, or moving lines. Self-check before final output.';
   }
   if (language === 'zh-TW') {
     return '輸出語言必須為繁體中文（zh-TW，臺灣用語）。禁止出現任何簡體字。請先自行校對，確認全文皆為繁體再輸出。';
   }
   return '输出语言必须为简体中文（zh-CN）。';
 }
-
