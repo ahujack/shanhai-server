@@ -429,9 +429,20 @@ export class AgentService {
    * 从消息中提取要测的字
    */
   private extractZiFromMessage(message: string): string | null {
-    // 匹配消息中的第一个汉字
-    const match = message.match(/[\u4e00-\u9fa5]/);
-    return match ? match[0] : null;
+    const text = String(message || '');
+    const quoted = text.match(/[「“"']([\u4e00-\u9fa5])[」”"']/);
+    if (quoted?.[1]) return quoted[1];
+    const chars = text.match(/[\u4e00-\u9fa5]/g) || [];
+    if (!chars.length) return null;
+    const stopChars = new Set(
+      '的一是在和了我你他她它们这那有就都很还又但如果因为所以然后就是不是可以需要想要觉得感觉怎么办该不该能不能为什么'.split(''),
+    );
+    const meaningful = chars.filter((char) => !stopChars.has(char));
+    const pool = meaningful.length ? meaningful : chars;
+    const emotionalPriority = ['爱', '缘', '心', '困', '累', '怕', '乱', '烦', '急', '钱', '财', '工', '业', '职', '家', '病', '睡', '走', '留', '等', '变', '断', '合', '离', '稳', '进'];
+    const priority = emotionalPriority.find((char) => pool.includes(char));
+    if (priority) return priority;
+    return pool[Math.floor(pool.length / 2)] || null;
   }
 
   private async classifyWithDeepSeek(
