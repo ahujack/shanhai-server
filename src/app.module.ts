@@ -28,7 +28,7 @@ import { getJwtSecret } from './config/production-env';
     JwtModule.register({
       global: true,
       secret: getJwtSecret(),
-      signOptions: { expiresIn: '7d' },
+      signOptions: { expiresIn: (process.env.JWT_EXPIRES_IN || '90d') as '90d' },
     }),
     HealthModule, 
     PersonaModule, 
