@@ -158,7 +158,7 @@ export class AgentService {
 
     if (intent === 'chart') {
       artifacts = { chart: userChart, hasChart: !!userChart };
-      if (userChart) actions.push({ type: 'view_chart', label: '查看命盘详情' });
+      actions.push({ type: 'view_chart', label: userChart ? '查看命盘详情' : '填写出生信息' });
       return { artifacts, actions };
     }
 
@@ -328,16 +328,6 @@ export class AgentService {
     }
 
     const persona = this.resolvePersona(dto.personaId);
-    
-    // 获取用户命盘（如有）
-    let userChart: any = null;
-    if (dto.userId) {
-      try {
-        userChart = await this.chartService.findOne(dto.userId);
-      } catch (error) {
-        this.logger.warn(`获取用户命盘失败: ${(error as Error).message}`);
-      }
-    }
 
     if (this.isSimpleGreeting(dto.message)) {
       const reply = this.buildGreetingReply(dto.clientLocalHour);
@@ -364,12 +354,20 @@ export class AgentService {
         reply,
         actions: [],
         artifacts: {},
-        hasChart: !!userChart,
+        hasChart: false,
       };
     }
     
-    const classified = this.classifyByRuleFirst(dto, userChart);
+    const classified = this.classifyByRuleFirst(dto, null);
     const intent = this.refineIntentByReadiness(classified.intent, dto);
+    let userChart: any = null;
+    if (dto.userId && intent === 'chart') {
+      try {
+        userChart = await this.chartService.findOne(dto.userId);
+      } catch (error) {
+        this.logger.warn(`获取用户命盘失败: ${(error as Error).message}`);
+      }
+    }
     const intentResult = await this.buildIntentArtifacts(
       intent,
       dto,
@@ -982,29 +980,13 @@ ${SAFETY_PROMPT_SUFFIX}`;
   /**
    * 默认聊天回复（当AI不可用时）
    */
-  private getDefaultChatReply(persona: PersonaSchema, userChart: any): string {
+  private getDefaultChatReply(_persona: PersonaSchema, _userChart: any): string {
     const defaultReplies = [
       `我听到了你的心声。山海之间，万物有灵，愿你在这纷扰里也能有一处安稳。`,
       `你这句话很真。命运有起伏，但你并不孤单，我们可以一点点理清。`,
       `你的困惑我记下了。若你愿意，我们可以先从最让你在意的一点开始聊。`,
       `人生如逆旅，你愿意说出来，已经是很重要的一步。我们慢慢来。`,
     ];
-
-    // 如果用户有命盘，添加个性化引用
-    if (userChart) {
-      const wxNames: Record<string, string> = {
-        wood: '木', fire: '火', earth: '土', metal: '金', water: '水'
-      };
-      const dominantWx = Object.entries(userChart.wuxingStrength as Record<string, number>)
-        .sort((a, b) => b[1] - a[1])[0];
-      
-      const personalizedReplies = [
-        `从你的八字看，你的${wxNames[dominantWx[0]]}性较强。最近可以做些对应属性的事情，先把状态稳住。`,
-        `我注意到你的日主是${userChart.dayGanZhi}。你有自己独特的节奏，有心事可以慢慢讲。`,
-      ];
-      return personalizedReplies[Math.floor(Math.random() * personalizedReplies.length)];
-    }
-
     return defaultReplies[Math.floor(Math.random() * defaultReplies.length)];
   }
 
@@ -1341,15 +1323,23 @@ ${SAFETY_PROMPT_SUFFIX}`;
     // 命盘回复
     if (intent === 'chart') {
       if (userChart) {
+        const sourceLine =
+          userChart.birthDate && userChart.birthTime
+            ? `我这里看到你个人资料里已保存出生信息：${userChart.birthDate} ${userChart.birthTime}。下面只基于这份已保存资料做娱乐参考；如果这不是你本人填写的，请先到「我的/八字」里修改后再看。`
+            : '我这里看到账号下已有一份命盘记录。下面只基于这份已保存资料做娱乐参考；如果不是你本人填写的，请先到「我的/八字」里修改后再看。';
         if (language === 'en-US') {
-          return `Your Eastern birth-chart pattern is ready.\n\nCore marker: ${userChart.dayGanZhi || 'available in chart'}\nElement balance: Wood ${userChart.wuxingStrength.wood}% / Fire ${userChart.wuxingStrength.fire}% / Earth ${userChart.wuxingStrength.earth}% / Metal ${userChart.wuxingStrength.metal}% / Water ${userChart.wuxingStrength.water}%\n\nPersonality notes: ${userChart.personalityTraits.slice(0, 2).join(', ')}\n\nCareer: ${userChart.fortuneSummary.career}\nLove: ${userChart.fortuneSummary.love}${conversionHint ? `\n\n${conversionHint}` : ''}`;
+          const englishSource =
+            userChart.birthDate && userChart.birthTime
+              ? `I can see birth details already saved in your profile: ${userChart.birthDate} ${userChart.birthTime}. The following is based only on that saved profile for entertainment and self-reflection. If you did not enter it yourself, please edit it in Profile / Birth Chart first.`
+              : 'I can see a saved birth-chart record under this account. The following is based only on that saved profile for entertainment and self-reflection. If it is not yours, please edit it in Profile / Birth Chart first.';
+          return `${englishSource}\n\nElement balance: Wood ${userChart.wuxingStrength.wood}% / Fire ${userChart.wuxingStrength.fire}% / Earth ${userChart.wuxingStrength.earth}% / Metal ${userChart.wuxingStrength.metal}% / Water ${userChart.wuxingStrength.water}%\n\nTap "View chart details" for the full breakdown.${conversionHint ? `\n\n${conversionHint}` : ''}`;
         }
-        return `你的命盘已在此。\n\n🔮 八字：${userChart.dayGanZhi}（日主）\n🌟 五行：木${userChart.wuxingStrength.wood}% 火${userChart.wuxingStrength.fire}% 土${userChart.wuxingStrength.earth}% 金${userChart.wuxingStrength.metal}% 水${userChart.wuxingStrength.water}%\n\n📝 性格特点：${userChart.personalityTraits.slice(0, 2).join('、')}\n\n💼 事业：${userChart.fortuneSummary.career}\n💕 感情：${userChart.fortuneSummary.love}${conversionHint ? `\n\n${conversionHint}` : ''}`;
+        return `${sourceLine}\n\n🌟 五行：木${userChart.wuxingStrength.wood}% 火${userChart.wuxingStrength.fire}% 土${userChart.wuxingStrength.earth}% 金${userChart.wuxingStrength.metal}% 水${userChart.wuxingStrength.water}%\n\n完整命盘和补五行建议请点下方「查看命盘详情」。${conversionHint ? `\n\n${conversionHint}` : ''}`;
       } else {
         if (language === 'en-US') {
-          return `You have not created your birth chart yet.\n\nIf you want to explore your long-term patterns, go to Profile and enter your birth details. I will generate an Eastern birth-chart reading for you.`;
+          return `I cannot calculate what your five elements lack without birth details.\n\nPlease enter birth date, birth time, and gender in Profile / Birth Chart first. I will generate the element balance after you confirm those details.`;
         }
-        return `你还没有建立命盘呢。\n\n若想了解自己的八字命盘，可以先去「我的」页面输入出生信息，我会为你生成专属命盘分析。`;
+        return `我现在不能凭空判断你五行缺什么。\n\n需要你先填写出生日期、出生时间和性别，再生成命盘；生成后我才能基于这份资料看五行强弱和补五行建议。`;
       }
     }
 
