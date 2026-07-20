@@ -14,6 +14,13 @@ import { SAFETY_PROMPT_SUFFIX, buildCrisisResponse, detectCrisisIntent } from '.
 
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
 type AgentAction = { type: string; label: string };
+type MemoryType = 'profile' | 'preference' | 'concern' | 'goal' | 'relationship' | 'ritual_history';
+type AgentSkillRequirement = 'birth_profile' | 'single_chinese_character' | 'clear_question' | 'safe_self_reflection';
+type AgentSkill = {
+  name: AgentIntent;
+  description: string;
+  requiredContext: AgentSkillRequirement[];
+};
 
 let cachedTencentAsrClientCtor: any | null | undefined = undefined;
 
@@ -63,6 +70,47 @@ export class AgentService {
     private readonly chartService: ChartService,
     private readonly prisma: PrismaService,
   ) {}
+
+  private getSkillRegistry(): Record<AgentIntent, AgentSkill> {
+    return {
+      chat: {
+        name: 'chat',
+        description: '日常陪伴、情绪承接、问题澄清与下一步引导',
+        requiredContext: ['safe_self_reflection'],
+      },
+      zi: {
+        name: 'zi',
+        description: '测字：围绕用户亲自选择或书写的一个中文单字做象意解读',
+        requiredContext: ['single_chinese_character'],
+      },
+      chart: {
+        name: 'chart',
+        description: '八字/五行：仅基于用户已填写的出生日期、出生时间、性别等资料生成',
+        requiredContext: ['birth_profile'],
+      },
+      divination: {
+        name: 'divination',
+        description: '占卜/起卦：围绕一个明确、具体、当下的问题给出结构化建议',
+        requiredContext: ['clear_question'],
+      },
+      fortune: {
+        name: 'fortune',
+        description: '今日运势：轻量提示今日主题、行动建议和提醒',
+        requiredContext: ['safe_self_reflection'],
+      },
+      meditation: {
+        name: 'meditation',
+        description: '冥想/安顿：在焦虑、压力、睡眠等场景给短暂停顿和呼吸引导',
+        requiredContext: ['safe_self_reflection'],
+      },
+    };
+  }
+
+  private describeSkillRegistryForPrompt(): string {
+    return Object.values(this.getSkillRegistry())
+      .map((skill) => `- ${skill.name}: ${skill.description}；需要：${skill.requiredContext.join('、')}`)
+      .join('\n');
+  }
 
   private refineIntentByReadiness(intent: AgentIntent, dto: AgentChatDto): AgentIntent {
     if (intent === 'divination' && !this.isDivinationQuestionReady(dto.message)) {
@@ -214,21 +262,16 @@ export class AgentService {
       const reply = this.buildGreetingReply(dto.clientLocalHour);
       yield { type: 'chunk', content: reply };
       if (dto.userId) {
-        try {
-          await this.prisma.chatMessage.create({
-            data: {
-              userId: dto.userId,
-              message: dto.message,
-              reply,
-              intent: 'chat',
-              personaId: dto.personaId,
-              mood: dto.mood || undefined,
-              artifacts: JSON.stringify({}),
-            },
-          });
-        } catch {
-          // ignore
-        }
+        await this.saveChatMessageAndMemories({
+          userId: dto.userId,
+          message: dto.message,
+          reply,
+          intent: 'chat',
+          personaId: dto.personaId,
+          mood: dto.mood,
+          artifacts: {},
+          language: dto.language,
+        });
       }
       yield {
         type: 'done',
@@ -288,21 +331,16 @@ export class AgentService {
       yield { type: 'chunk', content: reply };
     }
     if (dto.userId) {
-      try {
-        await this.prisma.chatMessage.create({
-          data: {
-            userId: dto.userId,
-            message: dto.message,
-            reply,
-            intent,
-            personaId: dto.personaId,
-            mood: dto.mood || undefined,
-            artifacts: JSON.stringify(artifacts),
-          },
-        });
-      } catch {
-        // ignore
-      }
+      await this.saveChatMessageAndMemories({
+        userId: dto.userId,
+        message: dto.message,
+        reply,
+        intent,
+        personaId: dto.personaId,
+        mood: dto.mood,
+        artifacts,
+        language: dto.language,
+      });
     }
 
     yield {
@@ -332,21 +370,16 @@ export class AgentService {
     if (this.isSimpleGreeting(dto.message)) {
       const reply = this.buildGreetingReply(dto.clientLocalHour);
       if (dto.userId) {
-        try {
-          await this.prisma.chatMessage.create({
-            data: {
-              userId: dto.userId,
-              message: dto.message,
-              reply,
-              intent: 'chat',
-              personaId: dto.personaId,
-              mood: dto.mood || undefined,
-              artifacts: JSON.stringify({}),
-            },
-          });
-        } catch (error) {
-          this.logger.error('保存聊天记录失败', (error as Error).message);
-        }
+        await this.saveChatMessageAndMemories({
+          userId: dto.userId,
+          message: dto.message,
+          reply,
+          intent: 'chat',
+          personaId: dto.personaId,
+          mood: dto.mood,
+          artifacts: {},
+          language: dto.language,
+        });
       }
       return {
         persona: persona.id,
@@ -396,21 +429,16 @@ export class AgentService {
 
     // 保存聊天记录到数据库
     if (dto.userId) {
-      try {
-        await this.prisma.chatMessage.create({
-          data: {
-            userId: dto.userId,
-            message: dto.message,
-            reply,
-            intent,
-            personaId: dto.personaId,
-            mood: dto.mood || undefined,
-            artifacts: JSON.stringify(artifacts),
-          },
-        });
-      } catch (error) {
-        this.logger.error('保存聊天记录失败', error.message);
-      }
+      await this.saveChatMessageAndMemories({
+        userId: dto.userId,
+        message: dto.message,
+        reply,
+        intent,
+        personaId: dto.personaId,
+        mood: dto.mood,
+        artifacts,
+        language: dto.language,
+      });
     }
 
     return {
@@ -704,12 +732,13 @@ ${contextInfo}`,
       return;
     }
 
-    const [recentMemory, longTermMemory] = dto.userId
+    const [recentMemory, longTermMemory, structuredMemory] = dto.userId
       ? await Promise.all([
           this.fetchRecentChatMemory(dto.userId),
           this.buildLongTermMemory(dto.userId),
+          this.fetchStructuredMemories(dto.userId),
         ])
-      : [[], ''];
+      : [[], '', ''];
     const contextLines = (dto.context || []).slice(-8);
     const conversationContext = [...recentMemory, ...contextLines].slice(-12).join('\n');
 
@@ -730,11 +759,22 @@ ${contextInfo}`,
     }
 
     const outputLanguageRule = buildOutputLanguageInstruction(normalizeAppLanguage(dto.language));
+    const skillRegistryPrompt = this.describeSkillRegistryForPrompt();
     const systemPrompt = `${persona.description}
 
 你是${persona.name}，${persona.title}。
 ${contextInfo}
-${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
+${structuredMemory ? `\n已记录的长期记忆（只用于承接偏好和关注点，不得编造成事实）：\n${structuredMemory}\n` : ''}
+${longTermMemory ? `\n近期行为摘要：\n${longTermMemory}\n` : ''}
+
+可用技能：
+${skillRegistryPrompt}
+
+技能边界：
+- chart/八字/五行必须基于用户已填写的出生资料；没有出生日期、时间、性别等资料时，只能引导填写，不得猜测五行缺失。
+- zi/测字必须使用用户明确给出的中文单字；如果用户给英文，可以先解释需要转换/选择一个中文意象字，不要直接用英文测字。
+- divination/占卜必须围绕明确问题；问题过泛时先追问一个更具体的问题。
+- 所有命理内容都只能作为娱乐和自我反思，不构成专业建议。
 
 语言要求：
 - ${outputLanguageRule}
@@ -863,12 +903,13 @@ ${SAFETY_PROMPT_SUFFIX}`;
       return this.getDefaultChatReply(persona, userChart);
     }
 
-    const [recentMemory, longTermMemory] = dto.userId
+    const [recentMemory, longTermMemory, structuredMemory] = dto.userId
       ? await Promise.all([
           this.fetchRecentChatMemory(dto.userId),
           this.buildLongTermMemory(dto.userId),
+          this.fetchStructuredMemories(dto.userId),
         ])
-      : [[], ''];
+      : [[], '', ''];
     const contextLines = (dto.context || []).slice(-8);
     const conversationContext = [...recentMemory, ...contextLines].slice(-12).join('\n');
 
@@ -893,12 +934,23 @@ ${SAFETY_PROMPT_SUFFIX}`;
       }
 
       const outputLanguageRule = buildOutputLanguageInstruction(normalizeAppLanguage(dto.language));
+      const skillRegistryPrompt = this.describeSkillRegistryForPrompt();
       // 构建系统提示词
       const systemPrompt = `${persona.description}
 
 你是${persona.name}，${persona.title}。
 ${contextInfo}
-${longTermMemory ? `\n用户长期记忆：\n${longTermMemory}\n` : ''}
+${structuredMemory ? `\n已记录的长期记忆（只用于承接偏好和关注点，不得编造成事实）：\n${structuredMemory}\n` : ''}
+${longTermMemory ? `\n近期行为摘要：\n${longTermMemory}\n` : ''}
+
+可用技能：
+${skillRegistryPrompt}
+
+技能边界：
+- chart/八字/五行必须基于用户已填写的出生资料；没有出生日期、时间、性别等资料时，只能引导填写，不得猜测五行缺失。
+- zi/测字必须使用用户明确给出的中文单字；如果用户给英文，可以先解释需要转换/选择一个中文意象字，不要直接用英文测字。
+- divination/占卜必须围绕明确问题；问题过泛时先追问一个更具体的问题。
+- 所有命理内容都只能作为娱乐和自我反思，不构成专业建议。
 
 语言要求：
 - ${outputLanguageRule}
@@ -1008,6 +1060,177 @@ ${SAFETY_PROMPT_SUFFIX}`;
       this.logger.warn(`读取近期聊天记忆失败: ${(error as Error).message}`);
       return [];
     }
+  }
+
+  private async saveChatMessageAndMemories(input: {
+    userId?: string;
+    message: string;
+    reply: string;
+    intent: AgentIntent;
+    personaId?: string;
+    mood?: AgentChatDto['mood'];
+    artifacts: Record<string, unknown>;
+    language?: AgentChatDto['language'];
+  }): Promise<void> {
+    if (!input.userId) return;
+    try {
+      const saved = await this.prisma.chatMessage.create({
+        data: {
+          userId: input.userId,
+          message: input.message,
+          reply: input.reply,
+          intent: input.intent,
+          personaId: input.personaId,
+          mood: input.mood || undefined,
+          artifacts: JSON.stringify(input.artifacts),
+        },
+        select: { id: true },
+      });
+      await this.extractAndPersistMemories({
+        userId: input.userId,
+        userMessage: input.message,
+        assistantReply: input.reply,
+        intent: input.intent,
+        chatMessageId: saved.id,
+        artifacts: input.artifacts,
+        language: input.language,
+      });
+    } catch (error) {
+      this.logger.warn(`保存聊天与记忆失败: ${(error as Error).message}`);
+    }
+  }
+
+  private async fetchStructuredMemories(userId: string): Promise<string> {
+    try {
+      const memories = await this.prisma.userMemory.findMany({
+        where: { userId },
+        orderBy: [{ lastSeenAt: 'desc' }, { updatedAt: 'desc' }],
+        take: 12,
+        select: { type: true, key: true, value: true, confidence: true },
+      });
+      if (!memories.length) return '';
+
+      const labelMap: Record<string, string> = {
+        profile: '资料',
+        preference: '偏好',
+        concern: '关注',
+        goal: '目标',
+        relationship: '关系',
+        ritual_history: '仪式记录',
+      };
+      return memories
+        .map((m) => `- ${labelMap[m.type] || m.type}/${m.key}: ${m.value}（置信度 ${Math.round(m.confidence * 100)}%）`)
+        .join('\n');
+    } catch (error) {
+      this.logger.warn(`读取结构化记忆失败: ${(error as Error).message}`);
+      return '';
+    }
+  }
+
+  private async extractAndPersistMemories(input: {
+    userId?: string;
+    userMessage: string;
+    assistantReply?: string;
+    intent?: AgentIntent;
+    chatMessageId?: string;
+    artifacts?: Record<string, unknown>;
+    language?: AgentChatDto['language'];
+  }): Promise<void> {
+    if (!input.userId) return;
+    const text = `${input.userMessage || ''} ${input.assistantReply || ''}`.trim();
+    const memoryCandidates: Array<{ type: MemoryType; key: string; value: string; confidence?: number }> = [];
+
+    const language = normalizeAppLanguage(input.language);
+    memoryCandidates.push({
+      type: 'preference',
+      key: 'language',
+      value: language === 'en-US' ? '偏好英文回复' : language === 'zh-TW' ? '偏好繁体中文回复' : '偏好简体中文回复',
+      confidence: 0.9,
+    });
+
+    const concernRules: Array<{ key: string; value: string; pattern: RegExp }> = [
+      { key: 'career', value: '近期关注事业、工作或职业选择', pattern: /工作|事业|职业|跳槽|离职|升职|面试|offer|副业|创业|career|job|work/i },
+      { key: 'relationship', value: '近期关注感情、婚恋或亲密关系', pattern: /感情|恋爱|婚姻|对象|分手|复合|正缘|桃花|relationship|love|marriage/i },
+      { key: 'wealth', value: '近期关注财务、收入或投资风险', pattern: /财运|财富|赚钱|收入|投资|副业变现|现金流|负债|money|income|finance/i },
+      { key: 'wellbeing', value: '近期关注情绪、睡眠、压力或身心状态', pattern: /焦虑|压力|睡眠|失眠|内耗|情绪|健康|anxiety|stress|sleep|health/i },
+      { key: 'overseas_life', value: '可能在海外生活或关注跨文化处境', pattern: /海外|留学|移民|签证|国外|异国|overseas|abroad|visa|immigration/i },
+    ];
+    for (const rule of concernRules) {
+      if (rule.pattern.test(text)) {
+        memoryCandidates.push({ type: 'concern', key: rule.key, value: rule.value, confidence: 0.75 });
+      }
+    }
+
+    const goalRules: Array<{ key: string; value: string; pattern: RegExp }> = [
+      { key: 'clarity', value: '希望把当前选择看清楚，并得到可执行下一步', pattern: /怎么办|怎么选|要不要|该不该|适不适合|选择|纠结|what should|should i/i },
+      { key: 'stability', value: '希望获得稳定感、安全感或确定感', pattern: /稳定|安全感|确定|安心|迷茫|慌|不安|stable|secure|lost/i },
+    ];
+    for (const rule of goalRules) {
+      if (rule.pattern.test(text)) {
+        memoryCandidates.push({ type: 'goal', key: rule.key, value: rule.value, confidence: 0.68 });
+      }
+    }
+
+    if (input.intent && input.intent !== 'chat') {
+      const ritualValueMap: Partial<Record<AgentIntent, string>> = {
+        zi: '使用过测字入口',
+        chart: '咨询过八字/五行相关问题',
+        divination: '使用过占卜/起卦入口',
+        fortune: '查看过今日运势',
+        meditation: '使用过冥想/安顿入口',
+      };
+      memoryCandidates.push({
+        type: 'ritual_history',
+        key: input.intent,
+        value: ritualValueMap[input.intent] || `使用过 ${input.intent} 入口`,
+        confidence: 0.9,
+      });
+    }
+
+    const zi = (input.artifacts as any)?.ziSuggestion?.zi;
+    if (input.intent === 'zi' && zi) {
+      memoryCandidates.push({
+        type: 'ritual_history',
+        key: `zi:${zi}`,
+        value: `最近选择「${zi}」做测字入口`,
+        confidence: 0.72,
+      });
+    }
+
+    const uniqueCandidates = Array.from(
+      new Map(memoryCandidates.map((item) => [`${item.type}:${item.key}`, item])).values(),
+    );
+    if (!uniqueCandidates.length) return;
+
+    const now = new Date();
+    await Promise.all(
+      uniqueCandidates.map((item) =>
+        this.prisma.userMemory.upsert({
+          where: {
+            userId_type_key: {
+              userId: input.userId!,
+              type: item.type,
+              key: item.key,
+            },
+          },
+          create: {
+            userId: input.userId!,
+            type: item.type,
+            key: item.key,
+            value: item.value,
+            confidence: item.confidence ?? 0.7,
+            sourceMessageId: input.chatMessageId,
+            lastSeenAt: now,
+          },
+          update: {
+            value: item.value,
+            confidence: item.confidence ?? 0.7,
+            sourceMessageId: input.chatMessageId,
+            lastSeenAt: now,
+          },
+        }),
+      ),
+    );
   }
 
   private async buildLongTermMemory(userId: string): Promise<string> {
