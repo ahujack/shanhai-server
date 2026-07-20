@@ -491,7 +491,7 @@ export class FortuneService {
           messages: [
             {
               role: 'system',
-              content: `你是签诗解读师。根据签诗内容，为 overall/love/career/wealth/health 各生成 80-150 字的个性化解读，advice 生成 3-4 条可执行建议。每条必须不同、结合签诗意象，禁止雷同和套话。`,
+              content: `你是签诗解读师。必须输出合法 json object，不要输出 markdown。根据签诗内容，为 overall/love/career/wealth/health 各生成 80-150 字的个性化解读，advice 生成 3-4 条可执行建议。每条必须不同、结合签诗意象，禁止雷同和套话。`,
             },
             {
               role: 'user',
@@ -524,7 +524,9 @@ export class FortuneService {
           : slip.advice,
       };
     } catch (err) {
-      this.logger.warn(`抽签 LLM 增强失败: ${(err as Error).message}`);
+      const responseData = (err as any)?.response?.data;
+      const detail = responseData ? ` detail=${JSON.stringify(responseData).slice(0, 500)}` : '';
+      this.logger.warn(`抽签 LLM 增强失败: ${(err as Error).message}${detail}`);
       return slip;
     }
   }

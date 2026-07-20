@@ -1023,7 +1023,7 @@ ${SAFETY_PROMPT_SUFFIX}
       );
       if (content) {
         try {
-          const raw = String(content).replace(/```json\n?|\n?```/g, '').trim();
+          const raw = this.extractJsonObject(String(content));
           const parsed = JSON.parse(raw);
           await this.trackZiLlmTelemetry({
             userId: ctx?.userId,
@@ -1071,6 +1071,14 @@ ${SAFETY_PROMPT_SUFFIX}
     }
     
     return null;
+  }
+
+  private extractJsonObject(content: string): string {
+    const cleaned = String(content || '').replace(/```json\n?|\n?```/gi, '').trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start >= 0 && end > start) return cleaned.slice(start, end + 1);
+    return cleaned;
   }
 
   private estimateTokens(text: string): number {

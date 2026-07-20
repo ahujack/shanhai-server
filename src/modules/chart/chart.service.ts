@@ -1363,7 +1363,7 @@ export class ChartService {
         });
         return input.baseDetailedReading;
       }
-      const parsed = JSON.parse(content) as LuckReadingPatch;
+      const parsed = JSON.parse(this.extractJsonObject(content)) as LuckReadingPatch;
       const patch = this.normalizeLuckPatch(parsed);
       const styledPatch = this.applyPrecisionAmbiguityStyle(patch);
       const merged = this.mergeLuckPatch(input.baseDetailedReading, styledPatch);
@@ -1390,6 +1390,14 @@ export class ChartService {
       this.logger.warn(`八字LLM增强失败，使用规则结果回退: ${(error as Error).message}`);
       return this.applyMembershipLayer(input.baseDetailedReading, input.membership, input.language);
     }
+  }
+
+  private extractJsonObject(content: string): string {
+    const cleaned = String(content || '').replace(/```json\n?|\n?```/gi, '').trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start >= 0 && end > start) return cleaned.slice(start, end + 1);
+    return cleaned;
   }
 
   private applyMembershipLayer(
