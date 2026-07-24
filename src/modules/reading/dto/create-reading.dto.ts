@@ -19,4 +19,8 @@ export class CreateReadingDto {
   @IsOptional()
   @IsString()
   language?: 'zh-CN' | 'en-US' | 'zh-TW';
+
+  @IsOptional()
+  @IsString()
+  guestSessionId?: string;
 }

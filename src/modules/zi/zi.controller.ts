@@ -33,6 +33,10 @@ export class AnalyzeZiDto {
   language?: 'zh-CN' | 'en-US' | 'zh-TW';
 
   @IsOptional()
+  @IsString()
+  guestSessionId?: string;
+
+  @IsOptional()
   invitePreview?: boolean;
 }
 
@@ -58,6 +62,10 @@ export class AnalyzeHandwritingDto {
   @IsOptional()
   @IsString()
   language?: 'zh-CN' | 'en-US' | 'zh-TW';
+
+  @IsOptional()
+  @IsString()
+  guestSessionId?: string;
 }
 
 @Controller('zi')
