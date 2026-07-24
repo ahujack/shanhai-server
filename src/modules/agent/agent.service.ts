@@ -244,6 +244,7 @@ export class AgentService {
     if (detectCrisisIntent(dto.message)) {
       const reply = buildCrisisResponse(dto.language);
       yield { type: 'chunk', content: reply };
+      await this.trackGuestAgentEvent(dto, 'chat', dto.personaId || 'default');
       yield {
         type: 'done',
         persona: dto.personaId || 'default',
@@ -273,6 +274,7 @@ export class AgentService {
           language: dto.language,
         });
       }
+      await this.trackGuestAgentEvent(dto, 'chat', persona.id);
       yield {
         type: 'done',
         persona: persona.id,
@@ -342,6 +344,7 @@ export class AgentService {
         language: dto.language,
       });
     }
+    await this.trackGuestAgentEvent(dto, intent, persona.id);
 
     yield {
       type: 'done',
@@ -381,6 +384,7 @@ export class AgentService {
           language: dto.language,
         });
       }
+      await this.trackGuestAgentEvent(dto, 'chat', persona.id);
       return {
         persona: persona.id,
         intent: 'chat',
@@ -440,6 +444,7 @@ export class AgentService {
         language: dto.language,
       });
     }
+    await this.trackGuestAgentEvent(dto, intent, persona.id);
 
     return {
       persona: persona.id,
@@ -449,6 +454,29 @@ export class AgentService {
       artifacts,
       hasChart: !!userChart,
     };
+  }
+
+  private async trackGuestAgentEvent(dto: AgentChatDto, intent: AgentIntent, personaId: string): Promise<void> {
+    if (!dto.guestSessionId || dto.userId) return;
+    try {
+      await this.prisma.analyticsEvent.create({
+        data: {
+          userId: undefined,
+          name: 'agent.guest_chat',
+          props: {
+            guestSessionId: dto.guestSessionId,
+            intent,
+            personaId,
+            mood: dto.mood || null,
+            language: normalizeAppLanguage(dto.language),
+            messageLength: String(dto.message || '').length,
+            happenedAt: new Date().toISOString(),
+          },
+        },
+      });
+    } catch (error) {
+      this.logger.warn(`写入游客聊天埋点失败: ${(error as Error).message}`);
+    }
   }
 
   /**

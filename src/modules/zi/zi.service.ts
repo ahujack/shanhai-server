@@ -74,6 +74,8 @@ export interface ZiAnalyzeOptions {
   userQuestion?: string;
   /** 用于 LLM 调用埋点（可选） */
   userId?: string;
+  /** 游客链路标识，用于无登录试用的埋点串联 */
+  guestSessionId?: string;
   /** 返回语言 */
   language?: 'zh-CN' | 'en-US' | 'zh-TW';
 }
@@ -366,6 +368,7 @@ export class ZiService {
           userQuestion: analyzeOpts?.userQuestion,
           membership,
           userId: analyzeOpts?.userId,
+          guestSessionId: analyzeOpts?.guestSessionId,
           language: analyzeOpts?.language,
         });
         if (llmResult) {
@@ -802,6 +805,7 @@ export class ZiService {
       userQuestion?: string;
       membership?: MembershipTier;
       userId?: string;
+      guestSessionId?: string;
       language?: 'zh-CN' | 'en-US' | 'zh-TW';
     },
   ): Promise<{
@@ -1027,6 +1031,7 @@ ${SAFETY_PROMPT_SUFFIX}
           const parsed = JSON.parse(raw);
           await this.trackZiLlmTelemetry({
             userId: ctx?.userId,
+            guestSessionId: ctx?.guestSessionId,
             membership: ctx?.membership || 'free',
             model,
             durationMs: Date.now() - startedAt,
@@ -1038,6 +1043,7 @@ ${SAFETY_PROMPT_SUFFIX}
           this.logger.warn(`LLM 测字 JSON 解析失败: ${(parseErr as Error).message}`);
           await this.trackZiLlmTelemetry({
             userId: ctx?.userId,
+            guestSessionId: ctx?.guestSessionId,
             membership: ctx?.membership || 'free',
             model,
             durationMs: Date.now() - startedAt,
@@ -1049,6 +1055,7 @@ ${SAFETY_PROMPT_SUFFIX}
       } else {
         await this.trackZiLlmTelemetry({
           userId: ctx?.userId,
+          guestSessionId: ctx?.guestSessionId,
           membership: ctx?.membership || 'free',
           model,
           durationMs: Date.now() - startedAt,
@@ -1061,6 +1068,7 @@ ${SAFETY_PROMPT_SUFFIX}
       this.logger.warn('LLM增强调用失败', error);
       await this.trackZiLlmTelemetry({
         userId: ctx?.userId,
+        guestSessionId: ctx?.guestSessionId,
         membership: ctx?.membership || 'free',
         model: this.resolveZiLlmModel(ctx?.membership || 'free'),
         durationMs: Date.now() - startedAt,
@@ -1111,6 +1119,7 @@ ${SAFETY_PROMPT_SUFFIX}
 
   private async trackZiLlmTelemetry(input: {
     userId?: string;
+    guestSessionId?: string;
     membership: MembershipTier;
     model: string;
     durationMs: number;
@@ -1127,6 +1136,7 @@ ${SAFETY_PROMPT_SUFFIX}
           props: {
             module: 'zi',
             feature: 'zi_enhancement',
+            guestSessionId: input.guestSessionId || null,
             membership: input.membership,
             model: input.model,
             durationMs: input.durationMs,

@@ -43,6 +43,7 @@ export class ChartController {
       birthLocation?: string;
       timezone?: string;
       language?: string;
+      guestSessionId?: string;
     },
     @Req() req: { headers?: Record<string, string | string[] | undefined> },
   ) {
@@ -63,6 +64,7 @@ export class ChartController {
       membership: 'free',
       persist: false,
       language,
+      guestSessionId: body.guestSessionId,
     });
   }
 

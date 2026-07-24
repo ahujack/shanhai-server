@@ -117,7 +117,7 @@ export class ZiController {
         membership,
         dto.focusAspect,
         chartCtx,
-        { userQuestion: dto.userQuestion, userId, language },
+        { userQuestion: dto.userQuestion, userId, guestSessionId: dto.guestSessionId, language },
       );
     } catch (error) {
       if (userId && consumeRecordId) {
@@ -241,6 +241,7 @@ export class ZiController {
           preserveVisionHandwriting: preserveVision,
           userQuestion: dto.userQuestion,
           userId,
+          guestSessionId: dto.guestSessionId,
           language,
         },
       );

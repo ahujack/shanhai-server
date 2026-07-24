@@ -530,6 +530,7 @@ export class ReadingService {
     question: string;
     category?: DivinationCategory;
     userId?: string;
+    guestSessionId?: string;
     language?: 'zh-CN' | 'en-US' | 'zh-TW';
   }): Promise<DivinationResult> {
     const now = Date.now();
@@ -549,6 +550,7 @@ export class ReadingService {
         question: dto.question,
         category: dto.category ?? 'general',
         userId: dto.userId,
+        guestSessionId: dto.guestSessionId,
         language: dto.language,
         originalName,
         changedName,
@@ -737,6 +739,7 @@ export class ReadingService {
     question: string;
     category: DivinationCategory;
     userId?: string;
+    guestSessionId?: string;
     language?: 'zh-CN' | 'en-US' | 'zh-TW';
     originalName: string;
     changedName: string;
@@ -810,6 +813,7 @@ recommendations 必须紧扣用户问题和占卜方向，每条不同、可执�
       const parsed = JSON.parse(raw.replace(/```json\n?|\n?```/g, '').trim());
       await this.trackReadingLlmTelemetry({
         userId: ctx.userId,
+        guestSessionId: ctx.guestSessionId,
         membership: selection.membership,
         model,
         durationMs: Date.now() - startedAt,
@@ -828,6 +832,7 @@ recommendations 必须紧扣用户问题和占卜方向，每条不同、可执�
     } catch (error) {
       await this.trackReadingLlmTelemetry({
         userId: ctx.userId,
+        guestSessionId: ctx.guestSessionId,
         membership: selection.membership,
         model,
         durationMs: Date.now() - startedAt,
@@ -898,6 +903,7 @@ recommendations 必须紧扣用户问题和占卜方向，每条不同、可执�
 
   private async trackReadingLlmTelemetry(input: {
     userId?: string;
+    guestSessionId?: string;
     membership: MembershipTier | 'guest';
     model: string;
     durationMs: number;
@@ -914,6 +920,7 @@ recommendations 必须紧扣用户问题和占卜方向，每条不同、可执�
           props: {
             module: 'reading',
             feature: 'reading_interpretation',
+            guestSessionId: input.guestSessionId || null,
             membership: input.membership,
             model: input.model,
             durationMs: input.durationMs,

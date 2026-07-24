@@ -135,6 +135,7 @@ export class ChartService {
       timezone?: string;
       membership?: MembershipTier;
       language?: AppLanguage;
+      guestSessionId?: string;
       /** 为 false 时不写入数据库（游客试算等） */
       persist?: boolean;
     },
@@ -214,6 +215,7 @@ export class ChartService {
       baseDetailedReading,
       membership: options?.membership || 'free',
       language: options?.language || 'zh-CN',
+      guestSessionId: options?.guestSessionId,
     });
     
     const chart: BaziChart = {
@@ -1255,6 +1257,7 @@ export class ChartService {
     baseDetailedReading: BaziChart['detailedReading'];
     membership: MembershipTier;
     language: AppLanguage;
+    guestSessionId?: string;
   }): Promise<BaziChart['detailedReading']> {
     // 排盘用规则，排好后用文本大模型解读（DeepSeek）
     const enableLLM = process.env.BAZI_LLM_ENHANCE !== 'false';
@@ -1354,6 +1357,7 @@ export class ChartService {
       if (!content) {
         await this.trackChartLlmTelemetry({
           userId: input.userId,
+          guestSessionId: input.guestSessionId,
           membership: input.membership,
           model,
           durationMs: Date.now() - startedAt,
@@ -1370,6 +1374,7 @@ export class ChartService {
       this.llmCache.set(cacheKey, { expiresAt: now + 6 * 60 * 60 * 1000, patch: styledPatch });
       await this.trackChartLlmTelemetry({
         userId: input.userId,
+        guestSessionId: input.guestSessionId,
         membership: input.membership,
         model,
         durationMs: Date.now() - startedAt,
@@ -1380,6 +1385,7 @@ export class ChartService {
     } catch (error) {
       await this.trackChartLlmTelemetry({
         userId: input.userId,
+        guestSessionId: input.guestSessionId,
         membership: input.membership,
         model: this.resolveBaziLlmModel(input.membership),
         durationMs: Date.now() - startedAt,
@@ -1545,6 +1551,7 @@ export class ChartService {
 
   private async trackChartLlmTelemetry(input: {
     userId?: string;
+    guestSessionId?: string;
     membership: MembershipTier;
     model: string;
     durationMs: number;
@@ -1561,6 +1568,7 @@ export class ChartService {
           props: {
             module: 'chart',
             feature: 'bazi_detailed_reading',
+            guestSessionId: input.guestSessionId || null,
             membership: input.membership,
             model: input.model,
             durationMs: input.durationMs,
