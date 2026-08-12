@@ -59,6 +59,10 @@ function skip(name, detail = '') {
   console.log(`  ○ ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
+function maskEmail(email) {
+  return String(email || '').replace(/(^.).*(@.*$)/, '$1***$2');
+}
+
 async function request(method, url, { token, body, expectJson = true } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -197,11 +201,11 @@ async function checkAuthFlows() {
   }
   const token = login.json.token;
   const userId = login.json.user?.id;
-  ok('login', `user=${login.json.user?.email || userId}`);
+  ok('login', `user=${maskEmail(login.json.user?.email) || userId}`);
 
   {
     const r = await request('GET', `${API_BASE}/users/me`, { token });
-    if (r.ok && (r.json?.id || r.json?.email)) ok('users/me', r.json.email || r.json.id);
+    if (r.ok && (r.json?.id || r.json?.email)) ok('users/me', maskEmail(r.json.email) || r.json.id);
     else fail('users/me', `${r.status} ${r.text.slice(0, 120)}`);
   }
 

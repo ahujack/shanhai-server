@@ -25,6 +25,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:smoke": "node scripts/smoke-test.js",
+    "test:smoke:ui": "node scripts/playwright-smoke.js",
     "grant-points": "node scripts/grant-points.js",
     "reconcile-payment": "node scripts/reconcile-payment.js"
   },
@@ -75,6 +76,7 @@
     "eslint-plugin-prettier": "^5.2.2",
     "globals": "^16.0.0",
     "jest": "^30.0.0",
+    "playwright": "^1.55.0",
     "prettier": "^3.4.2",
     "prisma": "^5.22.0",
     "source-map-support": "^0.5.21",
