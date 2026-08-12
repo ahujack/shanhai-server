@@ -69,6 +69,7 @@ async function main() {
       { path: '/pricing', expect: /价格|会员|积分|USD|VIP/i },
       { path: '/faq', expect: /常见问题|FAQ|积分|VIP/i },
       { path: '/guides/bazi-day-master', expect: /日主|八字/ },
+      { path: '/deep-destiny-report', expect: /命运报告|登录|报告|山海/ },
     ];
 
     for (const item of pages) {

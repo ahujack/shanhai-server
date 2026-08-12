@@ -120,12 +120,18 @@ async function checkPublicApi() {
     if (r.ok && Array.isArray(list) && list.length > 0) {
       const codes = list.map((p) => p.code).filter(Boolean);
       const hasVip = codes.includes('vip_monthly');
-      const hasReport = codes.includes('deep_destiny_report');
+      const report = list.find((p) => p.code === 'deep_destiny_report');
       ok(
         'payment/products',
-        `${list.length} 个商品; vip_monthly=${hasVip}; deep_destiny_report=${hasReport}`,
+        `${list.length} 个商品; vip_monthly=${hasVip}; deep_destiny_report=${Boolean(report)}`,
       );
       if (!hasVip) fail('product vip_monthly', '未找到 vip_monthly');
+      if (!report) fail('product deep_destiny_report', '未找到 deep_destiny_report');
+      else if (Number(report.price) !== 9.9) {
+        fail('product deep_destiny_report price', `期望 9.9，实际 ${report.price}`);
+      } else {
+        ok('product deep_destiny_report price', `$${report.price}`);
+      }
     } else fail('payment/products', `${r.status} ${r.text.slice(0, 120)}`);
   }
 
@@ -177,6 +183,7 @@ async function checkWebPages() {
     '/bazi-calculator',
     '/guides/bazi-day-master',
     '/guides',
+    '/deep-destiny-report',
   ];
   for (const p of pages) {
     const r = await request('GET', `${WEB_BASE}${p}`, { expectJson: false });
@@ -257,6 +264,18 @@ async function checkAuthFlows() {
     if (r.ok && typeof r.json?.reply === 'string' && r.json.reply.length > 8) {
       ok('agent/chat(logged-in)', `intent=${r.json.intent || '?'} ${r.ms}ms`);
     } else fail('agent/chat(logged-in)', `${r.status} ${r.text.slice(0, 160)}`);
+  }
+
+  {
+    const r = await request('GET', `${API_BASE}/reports/deep-destiny/latest`, { token });
+    if (r.status === 401) {
+      fail('reports/deep-destiny/latest', '未授权');
+    } else if (r.ok) {
+      const status = r.json?.report?.status || 'null';
+      ok('reports/deep-destiny/latest', `report=${status}`);
+    } else {
+      fail('reports/deep-destiny/latest', `${r.status} ${r.text.slice(0, 160)}`);
+    }
   }
 
   return { token, userId };
