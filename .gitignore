@@ -3,6 +3,7 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.smoke.example
 *.log
 .DS_Store
 handwriting-samples/
