@@ -10,6 +10,7 @@ import { PrismaService } from '../../prisma.service';
 import axios from 'axios';
 import * as crypto from 'crypto';
 import type { Prisma } from '@prisma/client';
+import { ReportsService } from '../reports/reports.service';
 
 // Creem 支付服务 - 仅使用 Creem
 
@@ -33,6 +34,11 @@ export class PaymentService implements OnModuleInit {
     vip_yearly: 'prod_2mQYQ2Hl5ylTkRKgEhVvbG',
   };
 
+  constructor(
+    private prisma: PrismaService,
+    private reportsService: ReportsService,
+  ) {}
+
   /** 解析最终用于下单的 Creem 产品 ID（env > 代码映射 > 数据库） */
   private resolvedCreemProductId(
     productCode: string,
@@ -47,8 +53,6 @@ export class PaymentService implements OnModuleInit {
     if (fromDb) return fromDb;
     return undefined;
   }
-
-  constructor(private prisma: PrismaService) {}
 
   async onModuleInit() {
     // 初始化 Creem
@@ -835,6 +839,34 @@ export class PaymentService implements OnModuleInit {
       this.logger.log(
         `Payment completion applied paymentId=${paymentId} userId=${txResult.userId} type=${txResult.productType} amount=${txResult.amount}`,
       );
+      if (txResult.productCode === 'deep_destiny_report') {
+        try {
+          await this.reportsService.fulfillDeepDestinyReport(
+            txResult.userId,
+            paymentId,
+          );
+        } catch (error) {
+          this.logger.error(
+            `Deep destiny report fulfill failed paymentId=${paymentId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+    } else if (txResult.productCode === 'deep_destiny_report') {
+      // 幂等补履约：历史订单或上次生成失败时，再次 webhook/同步可补齐报告
+      try {
+        await this.reportsService.ensureDeepDestinyReport(
+          txResult.userId,
+          paymentId,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Deep destiny report ensure skipped paymentId=${paymentId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
     return txResult.payment;
   }
@@ -889,10 +921,32 @@ export class PaymentService implements OnModuleInit {
       select: { membership: true, membershipExpiryAt: true },
     });
 
+    let reportStatus: string | null = null;
+    if (
+      payment.status === 'completed' &&
+      payment.product.code === 'deep_destiny_report'
+    ) {
+      try {
+        const report = await this.reportsService.ensureDeepDestinyReport(
+          userId,
+          paymentId,
+        );
+        reportStatus = report.status;
+      } catch (error) {
+        this.logger.warn(
+          `Ensure destiny report on status check failed paymentId=${paymentId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
     return {
       paymentId: payment.id,
       status: payment.status,
       productType: payment.product.type,
+      productCode: payment.product.code,
+      reportStatus,
       membership: user?.membership || 'free',
       membershipExpiryAt: user?.membershipExpiryAt
         ? user.membershipExpiryAt.toISOString()
@@ -979,16 +1033,17 @@ export class PaymentService implements OnModuleInit {
       {
         code: 'deep_destiny_report',
         name: '深度命运报告',
-        description: '一次深度八字/命运解读权益，含 30 天 VIP 体验',
+        description:
+          '生成一份可保存、可反复打开的 VIP 级八字命运报告；另赠 30 天 VIP 体验',
         type: 'one_time',
-        price: 19.9,
+        price: 9.9,
         points: 0,
         periodDays: 30,
         features: JSON.stringify([
-          '开通 30 天 VIP，立刻可用深度解读能力',
-          '解锁八字老师傅批注与深度解签',
-          '适合想先完整体验一次、再决定是否长期订阅的用户',
-          '也可继续选择 $5.9 月卡，按使用节奏灵活升级',
+          '支付后生成专属深度命运报告（命盘总论、十神、流年批注等）',
+          '报告永久保存在「我的报告」中，随时可重开阅读',
+          '另赠 30 天 VIP：期间测字/深度解签按会员规则免扣积分',
+          '适合想要一份可带走的解读，而不是只开通几天会员',
         ]),
         sortOrder: 20,
       },

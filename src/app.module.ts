@@ -16,6 +16,7 @@ import { CheckInModule } from './modules/checkin/checkin.module';
 import { AchievementModule } from './modules/achievement/achievement.module';
 import { PointsModule } from './modules/points/points.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { getJwtSecret } from './config/production-env';
 
 @Module({
@@ -43,6 +44,7 @@ import { getJwtSecret } from './config/production-env';
     AchievementModule,
     PointsModule,
     PaymentModule,
+    ReportsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

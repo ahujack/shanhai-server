@@ -65,6 +65,7 @@ model User {
 
   analyticsEvents AnalyticsEvent[]
   feedbacks       UserFeedback[]
+  destinyReports  DestinyReport[]
 
   @@index([affiliatePartnerId])
 }
@@ -544,6 +545,31 @@ model Payment {
 
   affiliateCommission AffiliateCommission?
   affiliateOverrideCommission AffiliateOverrideCommission?
+  destinyReport DestinyReport?
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// 深度命运报告：支付后生成的可重开交付物（VIP 级命盘解读快照）
+model DestinyReport {
+  id        String @id @default(uuid())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentId String @unique
+  payment   Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  /// generating | awaiting_profile | ready | failed
+  status  String @default("generating")
+  title   String @default("深度命运报告")
+  /// 结构化报告内容（conclusion / detailedReading / pillars 等）
+  payload Json?
+
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([status])
