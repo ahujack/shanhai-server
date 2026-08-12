@@ -79,3 +79,14 @@ export class SubmitFeedbackDto {
   @IsObject()
   context?: Record<string, unknown>;
 }
+
+export class EmailLeadDto {
+  @IsString()
+  @MaxLength(254)
+  email!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  source?: string;
+}

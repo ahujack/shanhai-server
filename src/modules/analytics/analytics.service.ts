@@ -173,6 +173,50 @@ export class AnalyticsService {
     return { success: true };
   }
 
+  async submitEmailLead(
+    userId: string | null,
+    dto: { email: string; source?: string },
+    req: Request,
+  ) {
+    const email = String(dto.email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new Error('INVALID_EMAIL');
+    }
+    const source = String(dto.source || 'unknown').trim().slice(0, 64) || 'unknown';
+    await this.prisma.userFeedback.create({
+      data: {
+        userId,
+        category: 'email_lead',
+        comment: email,
+        context: {
+          source,
+          capturedAt: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+    if (userId) {
+      await this.recordFromRequest(req, {
+        userId,
+        name: 'email_lead',
+        props: { email, source },
+      }).catch(() => null);
+    } else {
+      await this.prisma.analyticsEvent
+        .create({
+          data: {
+            userId: null,
+            name: 'email_lead',
+            props: { email, source } as Prisma.InputJsonValue,
+            ip: extractIp(req),
+            country: pickCountry(req),
+            userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) || null,
+          },
+        })
+        .catch(() => null);
+    }
+    return { success: true };
+  }
+
   async adminOverview(days: number) {
     const safeDays = Math.min(Math.max(days, 1), 365);
     const since = new Date(Date.now() - safeDays * 86400000);

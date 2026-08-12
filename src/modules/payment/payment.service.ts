@@ -672,6 +672,42 @@ export class PaymentService implements OnModuleInit {
         });
       }
 
+      // 2b. 一次性深度命运报告：开通短时 VIP + 标记权益，便于立刻做八字/深度解读
+      if (
+        payment.product.type === 'one_time' &&
+        payment.product.code === 'deep_destiny_report'
+      ) {
+        const existing = await tx.user.findUnique({
+          where: { id: payment.userId },
+          select: { membershipExpiryAt: true },
+        });
+        const now = new Date();
+        let base = now;
+        if (existing?.membershipExpiryAt && existing.membershipExpiryAt > now) {
+          base = existing.membershipExpiryAt;
+        }
+        const expiryDate = new Date(base);
+        expiryDate.setDate(expiryDate.getDate() + (payment.product.periodDays || 30));
+        await tx.user.update({
+          where: { id: payment.userId },
+          data: {
+            membership: 'vip',
+            membershipExpiryAt: expiryDate,
+          },
+        });
+        await tx.analyticsEvent.create({
+          data: {
+            userId: payment.userId,
+            name: 'deep_destiny_report_purchased',
+            props: {
+              paymentId: payment.id,
+              productCode: payment.product.code,
+              expiresAt: expiryDate.toISOString(),
+            },
+          },
+        });
+      }
+
       // 3. 推广分佣：用户通过推广员码注册，支付成功后生成 pending 台账
       if (payment.user.affiliatePartnerId) {
         const partner = await tx.affiliatePartner.findUnique({
@@ -939,6 +975,22 @@ export class PaymentService implements OnModuleInit {
         ]),
         creemPriceId: 'prod_2mQYQ2Hl5ylTkRKgEhVvbG',
         sortOrder: 11,
+      },
+      {
+        code: 'deep_destiny_report',
+        name: '深度命运报告',
+        description: '一次性高客单：深度八字/命运解读权益（含 30 天 VIP 体验）',
+        type: 'one_time',
+        price: 19.9,
+        points: 0,
+        periodDays: 30,
+        features: JSON.stringify([
+          '一次买断式深度命运报告入口（高客单）',
+          '开通 30 天 VIP，解锁八字老师傅批注与深度解签',
+          '适合想先看透一次、再决定是否长期订阅的用户',
+          '保留 $5.9 月卡作为日常钩子，报告为增量收入',
+        ]),
+        sortOrder: 20,
       },
     ];
 
