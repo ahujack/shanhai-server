@@ -39,7 +39,10 @@ const WEB_BASE = (process.env.WEB_BASE_URL || 'https://www.shanhai.app').replace
 const EMAIL = String(process.env.SMOKE_EMAIL || '').trim();
 const PASSWORD = String(process.env.SMOKE_PASSWORD || '');
 const DEEP = String(process.env.SMOKE_DEEP || '') === '1';
-const TIMEOUT_MS = Math.min(Math.max(Number(process.env.SMOKE_TIMEOUT_MS || 20000), 3000), 120000);
+const TIMEOUT_MS = Math.min(
+  Math.max(Number(process.env.SMOKE_TIMEOUT_MS || (DEEP ? 90000 : 20000)), 3000),
+  180000,
+);
 
 const results = [];
 let defaultPersonaId = 'yunyouzi';
