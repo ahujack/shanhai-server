@@ -324,6 +324,12 @@ export class AgentService {
 
     let reply = '';
     if (intent === 'chat') {
+      const language = normalizeAppLanguage(dto.language);
+      if (classified.intent !== 'chat') {
+        const deferred = this.buildRouteExplanation(classified.intent, language, { deferred: true });
+        reply += `${deferred}\n\n`;
+        yield { type: 'chunk', content: `${deferred}\n\n` };
+      }
       for await (const chunk of this.generateAIReplyStream(dto.message, persona, userChart, dto)) {
         reply += chunk;
         yield { type: 'chunk', content: chunk };
@@ -429,7 +435,12 @@ export class AgentService {
       };
     }
 
-    const reply = await this.composeReply(persona, intent, dto.message, artifacts, userChart, dto);
+    let reply = await this.composeReply(persona, intent, dto.message, artifacts, userChart, dto);
+    if (intent === 'chat' && classified.intent !== 'chat') {
+      const language = normalizeAppLanguage(dto.language);
+      const deferred = this.buildRouteExplanation(classified.intent, language, { deferred: true });
+      reply = `${deferred}\n\n${reply}`;
+    }
 
     // 保存聊天记录到数据库
     if (dto.userId) {
@@ -1517,6 +1528,41 @@ ${SAFETY_PROMPT_SUFFIX}`;
     return this.buildCareerFollowUpReply(userChart, membership, conversionHint);
   }
 
+  private buildRouteExplanation(
+    intent: AgentIntent,
+    language: 'zh-CN' | 'en-US' | 'zh-TW',
+    opts?: { deferred?: boolean; suggestedZi?: string },
+  ): string {
+    const names: Record<AgentIntent, { zh: string; en: string; tw: string }> = {
+      zi: { zh: '测字', en: 'symbol reading', tw: '測字' },
+      divination: { zh: '占卜', en: 'oracle reading', tw: '占卜' },
+      chart: { zh: '八字', en: 'birth chart', tw: '八字' },
+      fortune: { zh: '今日签', en: "today's oracle", tw: '今日簽' },
+      meditation: { zh: '静心', en: 'grounding pause', tw: '靜心' },
+      chat: { zh: '陪伴聊天', en: 'companion chat', tw: '陪伴聊天' },
+    };
+    const name = names[intent] || names.chat;
+    if (opts?.deferred) {
+      if (language === 'en-US') {
+        return `I almost used ${name.en}, but I need one clearer detail first so the reading stays useful.`;
+      }
+      if (language === 'zh-TW') {
+        return `我本來想用【${name.tw}】，但還差一個更具體的細節，補上後解讀會更準。`;
+      }
+      return `我本来想用【${name.zh}】，但还差一个更具体的细节，补上后解读会更准。`;
+    }
+    if (language === 'en-US') {
+      const ziExtra = intent === 'zi' && opts?.suggestedZi ? ` Starting from "${opts.suggestedZi}".` : '';
+      return `This time I am using ${name.en}.${ziExtra}`;
+    }
+    if (language === 'zh-TW') {
+      const ziExtra = intent === 'zi' && opts?.suggestedZi ? `（可先從「${opts.suggestedZi}」起測）` : '';
+      return `這次我用【${name.tw}】來看。${ziExtra}`;
+    }
+    const ziExtra = intent === 'zi' && opts?.suggestedZi ? `（可先从「${opts.suggestedZi}」起测）` : '';
+    return `这次我用【${name.zh}】来看。${ziExtra}`;
+  }
+
   /**
    * 合成回复
    * 当是聊天意图时，使用AI生成个性化回复
@@ -1532,16 +1578,28 @@ ${SAFETY_PROMPT_SUFFIX}`;
     const membership = await this.getUserMembership(dto.userId);
     const language = normalizeAppLanguage(dto.language);
     const conversionHint = this.buildConversionHint(intent, membership, language);
+    const suggestedZi = String((artifacts as any)?.ziSuggestion?.zi || '').trim() || undefined;
+    const routeLine =
+      intent === 'chat'
+        ? ''
+        : this.buildRouteExplanation(intent, language, { suggestedZi });
+
+    const withRoute = (body: string) =>
+      routeLine ? `${routeLine}\n\n${body}` : body;
 
     // 测字回复：只引导去测字页，不在对话内直接出结果
     if (intent === 'zi') {
-      const suggestedZi = (artifacts as any)?.ziSuggestion?.zi;
-      const ziHint = suggestedZi ? `（可先用「${suggestedZi}」起测）` : '';
+      const suggested = (artifacts as any)?.ziSuggestion?.zi;
+      const ziHint = suggested ? `（可先用「${suggested}」起测）` : '';
       if (language === 'en-US') {
-        const symbolHint = suggestedZi ? ` You can start with "${suggestedZi}" as the symbol.` : '';
-        return `This question is a good fit for a symbol reading.${symbolHint}\n\nHold one real question in mind, then choose or write one Chinese character. I will translate the symbol into plain English: current pattern, emotional signal, and next step.\n\nTap "Symbol Reading" below to begin.${conversionHint ? `\n\n${conversionHint}` : ''}`;
+        const symbolHint = suggested ? ` You can start with "${suggested}" as the symbol.` : '';
+        return withRoute(
+          `This question is a good fit for a symbol reading.${symbolHint}\n\nHold one real question in mind, then choose or write one Chinese character. I will translate the symbol into plain English: current pattern, emotional signal, and next step.\n\nTap "Symbol Reading" below to begin.${conversionHint ? `\n\n${conversionHint}` : ''}`,
+        );
       }
-      return `你这个问题很适合用“字”来入局。${ziHint}\n\n建议你先静心10秒，心里只想着这件事，再写下一个字，这样解读会更聚焦。\n\n点击下方「进入测字页面」开始。${conversionHint ? `\n\n${conversionHint}` : ''}`;
+      return withRoute(
+        `你这个问题很适合用“字”来入局。${ziHint}\n\n建议你先静心10秒，心里只想着这件事，再写下一个字，这样解读会更聚焦。\n\n点击下方「进入测字页面」开始。${conversionHint ? `\n\n${conversionHint}` : ''}`,
+      );
     }
 
     // 占卜回复
@@ -1553,26 +1611,38 @@ ${SAFETY_PROMPT_SUFFIX}`;
           : `抱歉，占卜服务暂时不可用，请稍后再试。`;
       }
       if (language === 'en-US') {
-        return `You brought a real question, so I will keep the answer practical.\n\n[Direct answer]\n${reading.interpretation.overall}\n\n[Symbol basis]\nThe reading pattern is ${reading.hexagram.originalName || 'the current pattern'}.\n\n[Next step]\n${reading.recommendations[0]}\n\nIf you want, we can break the next move into something smaller and easier to act on.${conversionHint ? `\n\n${conversionHint}` : ''}`;
+        return withRoute(
+          `You brought a real question, so I will keep the answer practical.\n\n[Direct answer]\n${reading.interpretation.overall}\n\n[Symbol basis]\nThe reading pattern is ${reading.hexagram.originalName || 'the current pattern'}.\n\n[Next step]\n${reading.recommendations[0]}\n\nIf you want, we can break the next move into something smaller and easier to act on.${conversionHint ? `\n\n${conversionHint}` : ''}`,
+        );
       }
-      return `先抱抱你，带着这个问题来问卦，本身就很有勇气。\n\n【结论】${reading.interpretation.overall}\n【依据】卦象「${reading.hexagram.originalName}」\n【行动建议】${reading.recommendations[0]}\n\n若你愿意，我可以继续和你把下一步拆成更小、更可执行的动作。${conversionHint ? `\n\n${conversionHint}` : ''}`;
+      return withRoute(
+        `先抱抱你，带着这个问题来问卦，本身就很有勇气。\n\n【结论】${reading.interpretation.overall}\n【依据】卦象「${reading.hexagram.originalName}」\n【行动建议】${reading.recommendations[0]}\n\n若你愿意，我可以继续和你把下一步拆成更小、更可执行的动作。${conversionHint ? `\n\n${conversionHint}` : ''}`,
+      );
     }
 
     // 冥想回复
     if (intent === 'meditation') {
       if (language === 'en-US') {
-        return `I can feel that your mind is not settled right now.\n\nLet us slow down with a few breaths and give your body a moment to feel safe.\n\nI prepared a short guided pause for you. Tap "Start meditation" below.`;
+        return withRoute(
+          `I can feel that your mind is not settled right now.\n\nLet us slow down with a few breaths and give your body a moment to feel safe.\n\nI prepared a short guided pause for you. Tap "Start meditation" below.`,
+        );
       }
-      return `我感受到你内心的不静。\n\n让我们一起做几次深呼吸，放下那些困扰你的事情。\n\n我为你准备了一段冥想引导，点击下方「开始冥想」即可。`;
+      return withRoute(
+        `我感受到你内心的不静。\n\n让我们一起做几次深呼吸，放下那些困扰你的事情。\n\n我为你准备了一段冥想引导，点击下方「开始冥想」即可。`,
+      );
     }
 
     // 运势回复
     if (intent === 'fortune' && artifacts.fortune) {
       const fortune = artifacts.fortune as any;
       if (language === 'en-US') {
-        return `Today's oracle is here as a reflection prompt, not a fixed prediction.\n\n[Theme]\n${fortune.poem.title}\n\n[Overall signal]\n${fortune.day}\n\n[Action]\n${fortune.advice[0]}\n\nLucky number: ${fortune.lucky.number}. Lucky color: ${fortune.lucky.color}.${conversionHint ? `\n\n${conversionHint}` : ''}`;
+        return withRoute(
+          `Today's oracle is here as a reflection prompt, not a fixed prediction.\n\n[Theme]\n${fortune.poem.title}\n\n[Overall signal]\n${fortune.day}\n\n[Action]\n${fortune.advice[0]}\n\nLucky number: ${fortune.lucky.number}. Lucky color: ${fortune.lucky.color}.${conversionHint ? `\n\n${conversionHint}` : ''}`,
+        );
       }
-      return `今日与你有缘，也愿你心安。\n\n【今日签诗】${fortune.poem.title}\n【总体提示】${fortune.day}\n【行动建议】${fortune.advice[0]}\n\n幸运数字：${fortune.lucky.number}，幸运颜色：${fortune.lucky.color}${conversionHint ? `\n\n${conversionHint}` : ''}`;
+      return withRoute(
+        `今日与你有缘，也愿你心安。\n\n【今日签诗】${fortune.poem.title}\n【总体提示】${fortune.day}\n【行动建议】${fortune.advice[0]}\n\n幸运数字：${fortune.lucky.number}，幸运颜色：${fortune.lucky.color}${conversionHint ? `\n\n${conversionHint}` : ''}`,
+      );
     }
 
     // 命盘回复
@@ -1587,14 +1657,22 @@ ${SAFETY_PROMPT_SUFFIX}`;
             userChart.birthDate && userChart.birthTime
               ? `I can see birth details already saved in your profile: ${userChart.birthDate} ${userChart.birthTime}. The following is based only on that saved profile for entertainment and self-reflection. If you did not enter it yourself, please edit it in Profile / Birth Chart first.`
               : 'I can see a saved birth-chart record under this account. The following is based only on that saved profile for entertainment and self-reflection. If it is not yours, please edit it in Profile / Birth Chart first.';
-          return `${englishSource}\n\nElement balance: Wood ${userChart.wuxingStrength.wood}% / Fire ${userChart.wuxingStrength.fire}% / Earth ${userChart.wuxingStrength.earth}% / Metal ${userChart.wuxingStrength.metal}% / Water ${userChart.wuxingStrength.water}%\n\nTap "View chart details" for the full breakdown.${conversionHint ? `\n\n${conversionHint}` : ''}`;
+          return withRoute(
+            `${englishSource}\n\nElement balance: Wood ${userChart.wuxingStrength.wood}% / Fire ${userChart.wuxingStrength.fire}% / Earth ${userChart.wuxingStrength.earth}% / Metal ${userChart.wuxingStrength.metal}% / Water ${userChart.wuxingStrength.water}%\n\nTap "View chart details" for the full breakdown.${conversionHint ? `\n\n${conversionHint}` : ''}`,
+          );
         }
-        return `${sourceLine}\n\n🌟 五行：木${userChart.wuxingStrength.wood}% 火${userChart.wuxingStrength.fire}% 土${userChart.wuxingStrength.earth}% 金${userChart.wuxingStrength.metal}% 水${userChart.wuxingStrength.water}%\n\n完整命盘和补五行建议请点下方「查看命盘详情」。${conversionHint ? `\n\n${conversionHint}` : ''}`;
+        return withRoute(
+          `${sourceLine}\n\n🌟 五行：木${userChart.wuxingStrength.wood}% 火${userChart.wuxingStrength.fire}% 土${userChart.wuxingStrength.earth}% 金${userChart.wuxingStrength.metal}% 水${userChart.wuxingStrength.water}%\n\n完整命盘和补五行建议请点下方「查看命盘详情」。${conversionHint ? `\n\n${conversionHint}` : ''}`,
+        );
       } else {
         if (language === 'en-US') {
-          return `I cannot calculate what your five elements lack without birth details.\n\nPlease enter birth date, birth time, and gender in Profile / Birth Chart first. I will generate the element balance after you confirm those details.`;
+          return withRoute(
+            `I cannot calculate what your five elements lack without birth details.\n\nPlease enter birth date, birth time, and gender in Profile / Birth Chart first. I will generate the element balance after you confirm those details.`,
+          );
         }
-        return `我现在不能凭空判断你五行缺什么。\n\n需要你先填写出生日期、出生时间和性别，再生成命盘；生成后我才能基于这份资料看五行强弱和补五行建议。`;
+        return withRoute(
+          `我现在不能凭空判断你五行缺什么。\n\n需要你先填写出生日期、出生时间和性别，再生成命盘；生成后我才能基于这份资料看五行强弱和补五行建议。`,
+        );
       }
     }
 
