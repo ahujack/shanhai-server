@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import axios from 'axios';
 import solarlunar from 'solarlunar';
+import { Solar } from 'lunar-javascript';
 import { AppLanguage, buildOutputLanguageInstruction } from '../../common/app-language';
 import {
   chartFreeTeaserCommentary,
@@ -166,8 +167,16 @@ export class ChartService {
       options?.timezone,
     );
     
-    // 计算八字：年/月/日柱用 solarlunar（按节气），时柱自算
-    const { yearGZ, monthGZ, dayGZ } = this.getGanZhiFromSolar(year, month, day);
+    // 计算八字：年/月柱按节气精确时刻切换（lunar-javascript），日柱按真太阳时校正后的日期，时柱自算
+    const { yearGZ, monthGZ, dayGZ } = this.getGanZhiFromSolar(
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      options?.timezone,
+      correctedTime,
+    );
     const hourGZ = this.calculateHourGanZhi(dayGZ, correctedTime.hour);
     
     // 日主（日柱天干）
@@ -418,13 +427,48 @@ export class ChartService {
   }
 
   /**
-   * 从阳历日期获取年/月/日柱（按节气，使用 solarlunar）
+   * 从阳历日期时间获取年/月/日柱。
+   * 年柱/月柱按节气精确时刻切换：节气是天文绝对时刻，先把出生地时间换算成北京时间再比较，
+   * 避免「出生在节气当天」按日切换导致的半天误差。
+   * 日柱按真太阳时校正后的当地日期（与真太阳时时柱同一套时间观）。
    */
   private getGanZhiFromSolar(
     year: number,
     month: number,
     day: number,
+    hour: number,
+    minute: number,
+    timezone?: string,
+    corrected?: { year: number; month: number; day: number; hour: number; minute: number },
   ): { yearGZ: string; monthGZ: string; dayGZ: string } {
+    try {
+      // 出生地民用时 → UTC 绝对时刻（两遍逼近以跨过夏令时边界）→ 北京时间
+      const approxUtcMs = Date.UTC(year, month - 1, day, hour, minute);
+      const tz = timezone || 'Asia/Shanghai';
+      const offset1 = this.getTimezoneOffsetHours(tz, new Date(approxUtcMs));
+      const utcMs = approxUtcMs - offset1 * 3600000;
+      const offset2 = this.getTimezoneOffsetHours(tz, new Date(utcMs));
+      const beijing = new Date(approxUtcMs - offset2 * 3600000 + 8 * 3600000);
+      const lunar = Solar.fromYmdHms(
+        beijing.getUTCFullYear(),
+        beijing.getUTCMonth() + 1,
+        beijing.getUTCDate(),
+        beijing.getUTCHours(),
+        beijing.getUTCMinutes(),
+        0,
+      ).getLunar();
+      const yearGZ = lunar.getYearInGanZhiExact();
+      const monthGZ = lunar.getMonthInGanZhiExact();
+      const daySolar = corrected
+        ? Solar.fromYmdHms(corrected.year, corrected.month, corrected.day, 12, 0, 0)
+        : Solar.fromYmdHms(year, month, day, 12, 0, 0);
+      const dayGZ = daySolar.getLunar().getDayInGanZhiExact2();
+      if (yearGZ && monthGZ && dayGZ) {
+        return { yearGZ, monthGZ, dayGZ };
+      }
+    } catch (err) {
+      this.logger.warn(`lunar-javascript 精确排盘失败，回退按日切换: ${(err as Error)?.message}`);
+    }
     try {
       const api = (solarlunar as any).default ?? solarlunar;
       const result = api.solar2lunar(year, month, day);
@@ -508,6 +552,7 @@ export class ChartService {
   /**
    * 真太阳时校正：经度时差 + 均时差
    * 北京 7:06 + 出生地 113.8°E → 约 6:39 真太阳时 → 卯时
+   * 返回校正后的完整日期：跨零点时日柱应跟着变。
    */
   private applyTrueSolarTimeCorrection(
     year: number,
@@ -517,9 +562,9 @@ export class ChartService {
     minute: number,
     longitude?: number,
     timezone?: string,
-  ): { hour: number; minute: number } {
+  ): { year: number; month: number; day: number; hour: number; minute: number } {
     if (longitude === undefined || longitude === null || Number.isNaN(longitude)) {
-      return { hour, minute };
+      return { year, month, day, hour, minute };
     }
 
     const offsetHours = this.getTimezoneOffsetHours(timezone || 'Asia/Shanghai', new Date(year, month - 1, day, hour, minute));
@@ -532,7 +577,13 @@ export class ChartService {
 
     const date = new Date(year, month - 1, day, hour, minute);
     date.setMinutes(date.getMinutes() + totalCorrection);
-    return { hour: date.getHours(), minute: date.getMinutes() };
+    return {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+      hour: date.getHours(),
+      minute: date.getMinutes(),
+    };
   }
 
   /** 均时差（分钟），近似公式：真太阳时 = 平太阳时 + 均时差 */
