@@ -1375,6 +1375,8 @@ export class ChartService {
         '输出JSON，字段可包含：corePattern,relationship,career,wealth,health,decadeRhythm(string[]),yearlyTips(string[])。' +
         '文风偏口语老师傅、温和、不制造焦虑；每条建议具体可执行。' +
         '表达策略使用“硬锚点+弹性缓冲”：每段先给1个可验证锚点（如起运年龄/十神主线/某个干支），再给1个概率表达（如通常、多半、往往、这几年更容易）。' +
+        '全文累计必须引用至少3个来自输入的具体字段（四柱干支、日主、十神、五行强弱、起运年龄、流年干支），分布在不同段落。' +
+        '反套话自检：任何一句把干支、年龄、十神换掉后依然对任何人都成立（例如“外表坚强内心敏感”“熬过这阵就会好”），必须重写或删除。' +
         `语言要求：${languageInstruction}`;
       const response = await axios.post(
         apiUrl,

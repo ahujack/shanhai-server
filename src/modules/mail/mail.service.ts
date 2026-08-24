@@ -192,4 +192,75 @@ export class MailService {
       return false;
     }
   }
+
+  /**
+   * 把这一次解读摘要发到用户邮箱。不承诺日报，只寄当前这一封。
+   */
+  async sendReadingSnapshot(input: {
+    email: string;
+    source: string;
+    headline?: string;
+    summary?: string;
+    tip?: string;
+    ctaUrl: string;
+  }): Promise<boolean> {
+    const appName = this.getConfig('APP_NAME') || '山海灵境';
+    const fromAddress = this.getFromAddress();
+    const headline = this.escapeHtml(String(input.headline || '这一次的结论').slice(0, 120));
+    const summary = this.escapeHtml(String(input.summary || '').slice(0, 400));
+    const tip = this.escapeHtml(String(input.tip || '').slice(0, 200));
+    const ctaUrl = this.escapeHtml(input.ctaUrl);
+
+    if (!this.resend) {
+      const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+      if (isProd) {
+        this.logger.error('生产环境未配置 RESEND_API_KEY，无法发送解读摘要');
+        return false;
+      }
+      this.logger.log(`[模拟] 发送解读摘要到 ${input.email} source=${input.source}`);
+      return true;
+    }
+
+    try {
+      const result = await this.resend.emails.send({
+        from: fromAddress,
+        to: input.email,
+        subject: `【${appName}】${String(input.headline || '这一次的结论').slice(0, 40)}`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 24px; max-width: 560px; margin: 0 auto; background: #0B0D14; color: #EDE4D4;">
+            <p style="color: #D6B36A; font-size: 13px; letter-spacing: 2px; margin: 0 0 12px 0;">${appName}</p>
+            <p style="color: rgba(214,179,106,0.8); font-size: 13px; font-style: italic; margin: 0 0 20px 0;">不是判决，是下一步的坐标。</p>
+            <h1 style="color: #F7F1E6; font-size: 22px; line-height: 1.4; margin: 0 0 16px 0;">${headline}</h1>
+            ${summary ? `<p style="color: #C9D0DC; font-size: 15px; line-height: 1.7; margin: 0 0 16px 0;">${summary}</p>` : ''}
+            ${tip ? `<p style="color: #D6B36A; font-size: 15px; line-height: 1.7; margin: 0 0 24px 0;">今日一招：${tip}</p>` : ''}
+            <p style="margin: 0 0 28px 0;">
+              <a href="${ctaUrl}" style="display: inline-block; background: #D6B36A; color: #17120A; text-decoration: none; font-weight: 700; padding: 12px 18px; border-radius: 8px;">继续追问这一步</a>
+            </p>
+            <p style="color: rgba(232,226,212,0.45); font-size: 12px; line-height: 1.6; margin: 0;">
+              这是你刚才留下的这一次摘要，不是每日群发运势。仅供娱乐与自我反思。<br/>
+              若不想再收到，忽略即可。
+            </p>
+          </div>
+        `,
+      });
+      const resendError = (result as { error?: { message?: string } | null } | null)?.error;
+      if (resendError) {
+        this.logger.error(`解读摘要发送被 Resend 拒绝: ${resendError.message || 'unknown error'}`);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      this.logger.error(`发送解读摘要失败: ${(error as Error)?.message}`);
+      return false;
+    }
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 }

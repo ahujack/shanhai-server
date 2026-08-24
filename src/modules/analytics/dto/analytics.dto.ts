@@ -89,4 +89,24 @@ export class EmailLeadDto {
   @IsString()
   @MaxLength(64)
   source?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  headline?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  summary?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  tip?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  ctaPath?: string;
 }

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import type { Request } from 'express';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../prisma.service';
+import { MailService } from '../mail/mail.service';
 import type { SubmitFeedbackDto, TrackEventsDto } from './dto/analytics.dto';
 
 function extractIp(req: Request): string | null {
@@ -30,7 +31,10 @@ function pickCountry(req: Request): string | null {
 
 @Injectable()
 export class AnalyticsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mail: MailService,
+  ) {}
 
   private hashAffiliateToken(token: string): string {
     return crypto.createHash('sha256').update(token).digest('hex');
@@ -175,7 +179,14 @@ export class AnalyticsService {
 
   async submitEmailLead(
     userId: string | null,
-    dto: { email: string; source?: string },
+    dto: {
+      email: string;
+      source?: string;
+      headline?: string;
+      summary?: string;
+      tip?: string;
+      ctaPath?: string;
+    },
     req: Request,
   ) {
     const email = String(dto.email || '').trim().toLowerCase();
@@ -183,6 +194,11 @@ export class AnalyticsService {
       throw new Error('INVALID_EMAIL');
     }
     const source = String(dto.source || 'unknown').trim().slice(0, 64) || 'unknown';
+    const headline = String(dto.headline || '').trim().slice(0, 120);
+    const summary = String(dto.summary || '').trim().slice(0, 400);
+    const tip = String(dto.tip || '').trim().slice(0, 200);
+    const ctaUrl = this.safePublicUrl(dto.ctaPath);
+    const hasSnapshot = !!(headline || summary || tip);
     await this.prisma.userFeedback.create({
       data: {
         userId,
@@ -191,6 +207,7 @@ export class AnalyticsService {
         context: {
           source,
           capturedAt: new Date().toISOString(),
+          hasSnapshot,
         } as Prisma.InputJsonValue,
       },
     });
@@ -198,7 +215,7 @@ export class AnalyticsService {
       await this.recordFromRequest(req, {
         userId,
         name: 'email_lead',
-        props: { email, source },
+        props: { email, source, hasSnapshot },
       }).catch(() => null);
     } else {
       await this.prisma.analyticsEvent
@@ -206,7 +223,7 @@ export class AnalyticsService {
           data: {
             userId: null,
             name: 'email_lead',
-            props: { email, source } as Prisma.InputJsonValue,
+            props: { email, source, hasSnapshot } as Prisma.InputJsonValue,
             ip: extractIp(req),
             country: pickCountry(req),
             userAgent: String(req.headers['user-agent'] ?? '').slice(0, 512) || null,
@@ -214,7 +231,27 @@ export class AnalyticsService {
         })
         .catch(() => null);
     }
-    return { success: true };
+
+    let emailed = false;
+    if (hasSnapshot) {
+      emailed = await this.mail.sendReadingSnapshot({
+        email,
+        source,
+        headline: headline || undefined,
+        summary: summary || undefined,
+        tip: tip || undefined,
+        ctaUrl,
+      });
+    }
+    return { success: true, emailed };
+  }
+
+  private safePublicUrl(path?: string): string {
+    const raw = String(path || '/').trim();
+    if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('://')) {
+      return 'https://www.shanhai.app/';
+    }
+    return `https://www.shanhai.app${raw.slice(0, 128)}`;
   }
 
   async adminOverview(days: number) {
