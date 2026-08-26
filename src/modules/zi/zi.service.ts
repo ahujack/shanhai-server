@@ -78,6 +78,8 @@ export interface ZiAnalyzeOptions {
   guestSessionId?: string;
   /** 返回语言 */
   language?: 'zh-CN' | 'en-US' | 'zh-TW';
+  /** 只返回拆字+模板，不调用大模型（首轮秒出） */
+  skipLlm?: boolean;
 }
 
 // 笔迹特征库
@@ -304,6 +306,7 @@ export interface ZiResult {
   metadata: {
     method: '测字有术 - AI笔迹与语义分析';
     generatedAt: string;
+    stage?: 'preview' | 'full';
   };
 }
 
@@ -361,6 +364,7 @@ export class ZiService {
       }
       const followUpQuestions = this.generateFollowUpQuestions(ziAnalysis, focus);
 
+      if (!analyzeOpts?.skipLlm) {
       try {
         const llmResult = await this.getLLMEnhancement(char, handwriting, ziAnalysis, focus, {
           chartContext: chartContext ?? undefined,
@@ -424,6 +428,7 @@ export class ZiService {
       } catch (error) {
         this.logger.warn('LLM 解读失败，使用模板', error);
       }
+      }
 
       handwriting = this.ensureHandwritingMentionsZi(handwriting, char);
 
@@ -437,6 +442,7 @@ export class ZiService {
         metadata: {
           method: '测字有术 - AI笔迹与语义分析',
           generatedAt: new Date().toISOString(),
+          stage: analyzeOpts?.skipLlm ? 'preview' : 'full',
         },
       };
     } catch (error) {
@@ -846,10 +852,10 @@ export class ZiService {
       const model = this.resolveZiLlmModel(ctx?.membership || 'free');
       // 原 5500 tokens + 30s 超时极易未完成即断开，前端表现为 net::ERR_CONNECTION_TIMED_OUT
       const fastMode = String(process.env.ZI_LLM_FAST_MODE || 'true') !== 'false';
-      const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || (fastMode ? '1800' : '2800'), 10);
-      const maxTokens = Math.min(8192, Math.max(1000, Number.isFinite(maxTokensRaw) ? maxTokensRaw : fastMode ? 1800 : 2800));
-      const timeoutRaw = parseInt(process.env.ZI_DEEPSEEK_TIMEOUT_MS || (fastMode ? '22000' : '90000'), 10);
-      const timeoutMs = Math.min(180000, Math.max(12000, Number.isFinite(timeoutRaw) ? timeoutRaw : fastMode ? 22000 : 90000));
+      const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || (fastMode ? '900' : '1800'), 10);
+      const maxTokens = Math.min(8192, Math.max(600, Number.isFinite(maxTokensRaw) ? maxTokensRaw : fastMode ? 900 : 1800));
+      const timeoutRaw = parseInt(process.env.ZI_DEEPSEEK_TIMEOUT_MS || (fastMode ? '12000' : '25000'), 10);
+      const timeoutMs = Math.min(180000, Math.max(8000, Number.isFinite(timeoutRaw) ? timeoutRaw : fastMode ? 12000 : 25000));
 
       const outputLanguageRule = buildOutputLanguageInstruction(normalizeAppLanguage(ctx?.language));
       const response = await axios.post(
@@ -862,26 +868,21 @@ export class ZiService {
           messages: [
             {
               role: 'system',
-              content: fastMode ? `你是山海灵境的“云游子”，精通测字、字形拆解与东方心理陪伴。
+              content: fastMode ? `你是山海灵境的“云游子”，精通测字与东方心理陪伴。
 
 【核心要求】
-1. 必须围绕用户所测单字「${zi}」输出，禁止换字、禁止泛泛而谈。
-2. focusAspect 是本次重点，至少 70% 内容围绕该方向。
-3. 输出要短、准、可扫读，用户正在等待结果，优先给结论和下一步。
-4. 每个字段都结合该字的部首/部件/笔画/五行/阴阳/吉凶之一。
-5. ${outputLanguageRule}
+1. 只围绕所测单字「${zi}」和方向「${focus.label}」，禁止换字、禁止空话。
+2. 四块运势里只需深写与方向对应的那一块；其余三块各写一句（不超过40字）。
+3. 先给结论和下一步，用户正在等待。
+4. ${outputLanguageRule}
 ${SAFETY_PROMPT_SUFFIX}
 
 【长度控制】
-- overall: 120-180字，先给明确主线，再拆字形依据
-- career/love/wealth/health: 各 60-100字
-- coldReadings: 3条，每条不超过40字
-- lihefa/tianziGe: 各3条，每条不超过40字
-- imageryInference: 60-90字
-- oracleBoneInterpretation: 70-110字
-- handwritingInterpretation 四项：每项 50-70字，开头点明「你写的「${zi}」」
-- focusReading.summary: 100-150字
-- anchors/riskSignals/actionPlan: 分别最多3条，每条不超过28字
+- overall: 80-130字
+- 重点方向那一块: 80-120字；其余三块各一句
+- advice: 3条，每条不超过28字
+- coldReadings: 3条，每条不超过32字
+- focusReading.summary: 80-130字；anchors/actionPlan 各最多3条，每条不超过24字
 
 【输出格式】只返回 JSON：
 {
@@ -892,13 +893,7 @@ ${SAFETY_PROMPT_SUFFIX}
   health: string,
   advice: string[],
   coldReadings: string[],
-  lihefa: string[],
-  tianziGe: string[],
-  imageryInference: string,
-  probingQuestion: string,
-  handwritingInterpretation: { pressureInterpretation: string, stabilityInterpretation: string, structureInterpretation: string, continuityInterpretation: string },
-  oracleBoneInterpretation: string,
-  focusReading?: { focus: string, summary: string, anchors: string[], riskSignals: string[], actionPlan: string[] }
+  focusReading: { focus: string, summary: string, anchors: string[], riskSignals: string[], actionPlan: string[] }
 }` : `你是一位精通《测字有术》的高阶分析师，深谙中国传统文化、笔迹心理学和甲骨文。
 
 【核心要求】

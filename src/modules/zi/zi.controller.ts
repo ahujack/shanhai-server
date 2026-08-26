@@ -38,6 +38,9 @@ export class AnalyzeZiDto {
 
   @IsOptional()
   invitePreview?: boolean;
+
+  @IsOptional()
+  previewOnly?: boolean;
 }
 
 export class RecognizeDto {
@@ -109,6 +112,7 @@ export class ZiController {
     }
     const chartCtx = userId ? await this.buildZiBaziContext(userId) : null;
     const language = normalizeAppLanguage((dto as any)?.language || (req as any)?.headers?.['x-app-language']);
+    const previewOnly = dto.previewOnly === true || String((dto as any).previewOnly) === 'true';
     let result;
     try {
       result = await this.ziService.analyze(
@@ -117,7 +121,13 @@ export class ZiController {
         membership,
         dto.focusAspect,
         chartCtx,
-        { userQuestion: dto.userQuestion, userId, guestSessionId: dto.guestSessionId, language },
+        {
+          userQuestion: dto.userQuestion,
+          userId,
+          guestSessionId: dto.guestSessionId,
+          language,
+          skipLlm: previewOnly,
+        },
       );
     } catch (error) {
       if (userId && consumeRecordId) {
@@ -158,6 +168,40 @@ export class ZiController {
     }
 
     return result;
+  }
+
+  @Post('enhance')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async enhance(@Body() dto: AnalyzeZiDto, @Req() req: { user?: { sub?: string; id?: string } }) {
+    const userId = req.user?.sub ?? req.user?.id;
+    const zi = String(dto.zi || '').trim().charAt(0);
+    if (!/[\u4e00-\u9fa5]/.test(zi)) {
+      throw new BadRequestException('请输入一个有效的汉字');
+    }
+    const membershipState = await this.getMembershipState(userId);
+    const membership = membershipState.tier;
+    const chartCtx = userId ? await this.buildZiBaziContext(userId) : null;
+    const language = normalizeAppLanguage((dto as any)?.language || (req as any)?.headers?.['x-app-language']);
+    try {
+      return await this.ziService.analyze(
+        zi,
+        dto.handwriting,
+        membership,
+        dto.focusAspect,
+        chartCtx,
+        {
+          userQuestion: dto.userQuestion,
+          userId,
+          guestSessionId: dto.guestSessionId,
+          language,
+          skipLlm: false,
+        },
+      );
+    } catch (error) {
+      Logger.error('测字深度补全失败', (error as Error).message, ZiController.name);
+      throw new BadRequestException('深度解读暂时响应较慢，已保留首轮结果');
+    }
   }
 
   @Post('recognize')
