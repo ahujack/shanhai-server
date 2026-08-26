@@ -764,7 +764,7 @@ export class ReadingService {
 1. 占卜方向（career/love/wealth/health/growth）决定解读重心，至少 80% 内容围绕该方向
 2. 用户问题要逐句回应，不能一笔带过
 3. 结合本卦、变卦、动爻数做具体分析，引用卦名和爻象
-4. 讲解要详细、有层次，每条 200-400 字
+4. 讲解要清楚、有层次，overall/situation/guidance 各 120-200 字
 5. 避免套话，每条建议都要可执行、有针对性
 6. ${outputLanguageRule}
 ${SAFETY_PROMPT_SUFFIX}`;
@@ -777,9 +777,9 @@ ${SAFETY_PROMPT_SUFFIX}`;
 
 请返回 JSON：
 {
-  "overall": "总体运势解读，紧扣用户问题与占卜方向，200-400字，引用卦象",
-  "situation": "当前形势分析，结合本卦变卦动爻，200-350字",
-  "guidance": "具体可执行建议，针对用户问题，150-300字",
+  "overall": "总体运势解读，紧扣用户问题与占卜方向，120-200字，引用卦象",
+  "situation": "当前形势分析，结合本卦变卦动爻，120-180字",
+  "guidance": "具体可执行建议，针对用户问题，80-150字",
   "recommendations": ["建议1，针对用户问题，可执行", "建议2", "建议3"]
 }
 recommendations 必须紧扣用户问题和占卜方向，每条不同、可执行，禁止泛泛而谈。`;
@@ -790,7 +790,7 @@ recommendations 必须紧扣用户问题和占卜方向，每条不同、可执�
         {
           model,
           temperature: 0.75,
-          max_tokens: 3000,
+          max_tokens: 1600,
           messages: [
             {
               role: 'system',
@@ -804,7 +804,7 @@ recommendations 必须紧扣用户问题和占卜方向，每条不同、可执�
         },
         {
           headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          timeout: 30000,
+          timeout: 20000,
         },
       );
 

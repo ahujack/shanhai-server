@@ -304,7 +304,7 @@ export class ChartService {
       return null;
     }
 
-    return await this.formatChart(chart, membership, language);
+    return await this.formatChart(chart, membership, language, true);
   }
 
   // 格式化数据库中的图表数据
@@ -312,6 +312,7 @@ export class ChartService {
     chart: any,
     membership: MembershipTier = 'free',
     language: AppLanguage = 'zh-CN',
+    skipLlm = false,
   ): Promise<BaziChart> {
     const baseDetailedReading = this.generateDetailedReading(
       chart.dayMaster,
@@ -334,7 +335,9 @@ export class ChartService {
       undefined,
       'Asia/Shanghai',
     );
-    const detailedReading = await this.enhanceDetailedReadingWithLLM({
+    const detailedReading = skipLlm
+      ? this.applyMembershipLayer(baseDetailedReading, membership, language)
+      : await this.enhanceDetailedReadingWithLLM({
       userId: chart.userId,
       birthDate: chart.birthDate,
       birthTime: chart.birthTime,

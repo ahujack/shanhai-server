@@ -572,7 +572,7 @@ export class FortuneService {
     const today = new Date().toISOString().split('T')[0];
     
     // 同一用户同一天返回相同签
-    if (this.lastUserId === userId && this.lastDate === today && this.cachedSlip) {
+    if (this.lastUserId === (userId || null) && this.lastDate === today && this.cachedSlip) {
       return this.cachedSlip;
     }
     
@@ -583,13 +583,16 @@ export class FortuneService {
     
     const index = seed % fortuneSlips.length;
     let slip = this.decorateSlip(fortuneSlips[index], rng, seedKey);
-    slip = await this.enhanceWithLLM(slip, userId);
-
-    // 缓存
     this.lastUserId = userId || null;
     this.lastDate = today;
     this.cachedSlip = slip;
-
+    void this.enhanceWithLLM(slip, userId)
+      .then((enhanced) => {
+        if (this.lastUserId === (userId || null) && this.lastDate === today) {
+          this.cachedSlip = enhanced;
+        }
+      })
+      .catch(() => null);
     return slip;
   }
 

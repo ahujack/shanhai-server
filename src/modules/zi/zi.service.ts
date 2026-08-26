@@ -846,10 +846,10 @@ export class ZiService {
       const model = this.resolveZiLlmModel(ctx?.membership || 'free');
       // 原 5500 tokens + 30s 超时极易未完成即断开，前端表现为 net::ERR_CONNECTION_TIMED_OUT
       const fastMode = String(process.env.ZI_LLM_FAST_MODE || 'true') !== 'false';
-      const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || (fastMode ? '2600' : '3800'), 10);
-      const maxTokens = Math.min(8192, Math.max(1200, Number.isFinite(maxTokensRaw) ? maxTokensRaw : fastMode ? 2600 : 3800));
-      const timeoutRaw = parseInt(process.env.ZI_DEEPSEEK_TIMEOUT_MS || (fastMode ? '35000' : '120000'), 10);
-      const timeoutMs = Math.min(180000, Math.max(12000, Number.isFinite(timeoutRaw) ? timeoutRaw : fastMode ? 35000 : 120000));
+      const maxTokensRaw = parseInt(process.env.ZI_DEEPSEEK_MAX_TOKENS || (fastMode ? '1800' : '2800'), 10);
+      const maxTokens = Math.min(8192, Math.max(1000, Number.isFinite(maxTokensRaw) ? maxTokensRaw : fastMode ? 1800 : 2800));
+      const timeoutRaw = parseInt(process.env.ZI_DEEPSEEK_TIMEOUT_MS || (fastMode ? '22000' : '90000'), 10);
+      const timeoutMs = Math.min(180000, Math.max(12000, Number.isFinite(timeoutRaw) ? timeoutRaw : fastMode ? 22000 : 90000));
 
       const outputLanguageRule = buildOutputLanguageInstruction(normalizeAppLanguage(ctx?.language));
       const response = await axios.post(
@@ -873,15 +873,15 @@ export class ZiService {
 ${SAFETY_PROMPT_SUFFIX}
 
 【长度控制】
-- overall: 180-260字，先给明确主线，再拆字形依据
-- career/love/wealth/health: 各 80-130字
-- coldReadings: 3条，每条不超过45字
-- lihefa/tianziGe: 各3条，每条不超过48字
-- imageryInference: 80-120字
-- oracleBoneInterpretation: 90-140字
-- handwritingInterpretation 四项：每项 60-90字，开头点明「你写的「${zi}」」
-- focusReading.summary: 140-200字
-- anchors/riskSignals/actionPlan: 分别最多3条，每条不超过32字
+- overall: 120-180字，先给明确主线，再拆字形依据
+- career/love/wealth/health: 各 60-100字
+- coldReadings: 3条，每条不超过40字
+- lihefa/tianziGe: 各3条，每条不超过40字
+- imageryInference: 60-90字
+- oracleBoneInterpretation: 70-110字
+- handwritingInterpretation 四项：每项 50-70字，开头点明「你写的「${zi}」」
+- focusReading.summary: 100-150字
+- anchors/riskSignals/actionPlan: 分别最多3条，每条不超过28字
 
 【输出格式】只返回 JSON：
 {
