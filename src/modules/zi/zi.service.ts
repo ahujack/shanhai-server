@@ -743,9 +743,9 @@ export class ZiService {
       `当前财运关键词是“${zi.jixiong === '吉' ? '抓机会' : '控风险'}”，重点在现金流与执行纪律。`,
     ], seed + 23);
     const healthLine = this.pickBySeed([
-      `注意 ${this.getHealthByWuxing(zi.wuxing)}。`,
       `健康面建议优先关注${this.getHealthByWuxing(zi.wuxing)}，先修复作息再谈负荷提升。`,
       `身心状态上，${zi.wuxing}性较敏感，重点照顾${this.getHealthByWuxing(zi.wuxing)}相关信号。`,
+      `作息和恢复优先于加码，尤其留意${this.getHealthByWuxing(zi.wuxing)}。`,
     ], seed + 29);
     
     const base: ZiResult['interpretation'] = {
@@ -882,7 +882,9 @@ ${SAFETY_PROMPT_SUFFIX}
 - 重点方向那一块: 80-120字；其余三块各一句
 - advice: 3条，每条不超过28字
 - coldReadings: 3条，每条不超过32字
-- focusReading.summary: 80-130字；anchors/actionPlan 各最多3条，每条不超过24字
+- focusReading.summary: 80-130字，只写结论和下一步，禁止复述 anchors，禁止出现「XX锚点」
+- anchors/actionPlan 各最多3条，每条不超过24字；anchors 写字形依据，不要重复 summary 的行动建议
+- 非重点方向至少 20 字，禁止「注意心脏」这类过短句
 
 【输出格式】只返回 JSON：
 {
@@ -925,10 +927,11 @@ ${SAFETY_PROMPT_SUFFIX}
 
 【方向解读】career/love/wealth/health 每条 100-200 字，必须结合该字部首/部件/字义
 【运势与建议】focusReading 必须结合该字+方向，每条都要具体；列表项每条不超过约 60 字：
-- summary：方向详解，150-200字
-- anchors：关键锚点 4 条，每条结合该字笔画/五行/阴阳/吉凶
+- summary：方向详解，150-200字，只写结论和下一步，禁止把 anchors 原文粘进去，禁止「XX锚点」字样
+- anchors：关键锚点 4 条，写笔画/五行/阴阳/吉凶依据，不要重复 summary 的行动建议
 - riskSignals：风险信号 3 条，每条与该字和方向相关
-- actionPlan：行动计划 3 条，每条可执行且与该字意象相关
+- actionPlan：行动计划 3 条，每条可执行且与该字意象相关；不得与 riskSignals 或 summary 逐字相同
+- career/love/wealth/health：非重点方向至少 40 字，禁止「注意 XX」这类过短句
 
 【输出格式】JSON，以下字段必须全部返回：
 {
@@ -1179,15 +1182,14 @@ ${SAFETY_PROMPT_SUFFIX}
       `阴阳锚点：${zi.yinyang}性，决定你在该议题里的表达方式`,
       `吉凶锚点：${zi.jixiong}，提示当前窗口更适合“${zi.jixiong === '吉' ? '推进' : zi.jixiong === '凶' ? '收敛防错' : '稳态试探'}”`,
     ];
-    const focusLine = `你本次聚焦「${focus.label}」，以下用笔画/五行/阴阳/吉凶四锚做定向解读。`;
-    const focusedOverall = `${focusLine}${base.overall}`;
+    const windowHint = zi.jixiong === '吉' ? '稳步推进' : zi.jixiong === '凶' ? '收敛防错' : '稳态试探';
     const map: Record<Exclude<FocusKey, 'general'>, string> = {
-      career: `事业详解：${anchors[0]}；${anchors[1]}。当前更适合以${this.getCareerByWuxing(zi.wuxing)}为主轴，先拿“可验证成绩”，再谈岗位跃迁。`,
-      wealth: `财运详解：${anchors[2]}；${anchors[3]}。本阶段先稳现金流和风险边界，再做增量策略，避免情绪型投入。`,
-      love: `婚恋详解：${anchors[2]}；${anchors[1]}。${this.getLoveByComponents(zi.components, zi.zi)}。${this.getLoveByWuxing(zi.wuxing)}，${this.getLoveByJixiong(zi.jixiong)}。`,
-      study: `学业详解：${anchors[0]}；${anchors[3]}。建议做“7天-14天”双周期复盘，先补短板再冲刺高分区。`,
-      health: `健康详解：${anchors[1]}；${anchors[3]}。重点关注${this.getHealthByWuxing(zi.wuxing)}信号，先修复作息与恢复，再提升负荷。`,
-      relationship: `人际详解：${anchors[2]}；${anchors[0]}。优先修复关键关系，沟通用“先共情后结论”，减少对抗成本。`,
+      career: `当前更适合以${this.getCareerByWuxing(zi.wuxing)}为主轴，先拿可验证成绩，再谈岗位跃迁。节奏偏${zi.bihua % 2 === 0 ? '稳中求进' : '先动后稳'}。`,
+      wealth: `本阶段先稳现金流和风险边界，再做增量策略，避免情绪型投入。窗口更适合${windowHint}。`,
+      love: `${this.getLoveByComponents(zi.components, zi.zi)}。${this.getLoveByWuxing(zi.wuxing)}，${this.getLoveByJixiong(zi.jixiong)}。先对齐期待，再谈承诺。`,
+      study: `建议做「7天-14天」双周期复盘，先补短板再冲刺高分区。节奏偏${zi.bihua % 2 === 0 ? '稳中求进' : '先动后稳'}。`,
+      health: `重点关注${this.getHealthByWuxing(zi.wuxing)}信号，先修复作息与恢复，再提升负荷。`,
+      relationship: `优先修复关键关系，沟通用「先共情后结论」，减少对抗成本。`,
     };
     const targeted = map[focus.key as Exclude<FocusKey, 'general'>] || `本轮聚焦「${focus.label}」，建议围绕该主题做拆解与行动。`;
     const focusAdvice = this.getFocusAdvice(focus, zi, handwriting);
@@ -1202,7 +1204,7 @@ ${SAFETY_PROMPT_SUFFIX}
 
     return {
       ...base,
-      overall: focusedOverall,
+      overall: `你本次聚焦「${focus.label}」。${targeted}`,
       career: focus.key === 'career' ? targeted : base.career,
       wealth: focus.key === 'wealth' ? targeted : base.wealth,
       love: focus.key === 'love' ? targeted : base.love,
@@ -1434,7 +1436,7 @@ ${SAFETY_PROMPT_SUFFIX}
       小畜: '小畜卦主“蓄力渐进”。先做可控增量，积小胜为大胜。',
       履: '履卦主“谨慎践行”。按规则前进更稳，重细节可降风险。',
       泰: '泰卦主“通达与顺势”。可适度加速推进，但仍需留出风险缓冲。',
-      否: '否卦主“闭塞与回撤”。当前宜收敛阵线、修内功，等待转机再扩张。',
+      否: '否卦主“闭塞与回撤”。当下宜收敛阵线、修内功。下一步先把战线缩到一件事上，等窗口再扩张。',
     };
     const base = map[gua] || '卦象偏中性，宜先稳态观察，再做关键决策。';
     if (!meta) return base;
