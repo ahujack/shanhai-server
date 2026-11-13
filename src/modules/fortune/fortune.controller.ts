@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { FortuneService } from './fortune.service';
+import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { FortuneService, FortuneSlip } from './fortune.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('fortunes')
@@ -17,6 +17,18 @@ export class FortuneController {
   @Get('draw')
   drawRandom() {
     return this.fortuneService.drawRandomSlip();
+  }
+
+  /** 签文 → 竖屏条漫分镜（可游客） */
+  @Post('comic')
+  composeComic(
+    @Body()
+    body: {
+      slip?: Partial<FortuneSlip>;
+      companionId?: 'elder' | 'youth' | 'oracle';
+    },
+  ) {
+    return this.fortuneService.composeComic(body?.slip, body?.companionId);
   }
 
   @Get(':index')

@@ -622,4 +622,232 @@ export class FortuneService {
     const slip = this.pick(pickPool, rng);
     return this.enhanceWithLLM(slip);
   }
+
+  /** 把一支签编成竖屏条漫分镜（LLM 优先，失败走模板） */
+  async composeComic(
+    input?: Partial<FortuneSlip>,
+    companionId: 'elder' | 'youth' | 'oracle' = 'elder',
+  ): Promise<FortuneComic> {
+    const slip = this.normalizeSlipInput(input);
+    const companion = this.comicCompanion(companionId);
+    const fallback = this.buildComicFallback(slip, companion);
+
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) return fallback;
+
+    try {
+      const poemText = `${slip.poem.title}：${slip.poem.line1} ${slip.poem.line2} ${slip.poem.line3} ${slip.poem.line4}`;
+      const res = await axios.post(
+        resolveDeepSeekChatUrl(),
+        {
+          model: this.resolveFortuneLlmModel('free'),
+          temperature: 0.85,
+          max_tokens: 2200,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: `你是山海灵境的条漫编剧。把签诗改编成竖屏网漫分镜，语气像${companion.name}（${companion.title}）在道观里对读者说话。
+必须输出合法 json object，字段：
+- title: 短标题
+- subtitle: 一句副标题
+- closing: 收束句（<=40字）
+- shareText: 适合转发的一句话（<=48字）
+- panels: 数组，长度 8~10。每项：
+  - visual: 枚举 gate|hall|incense|pine|mist|cushion|night|wish|path
+  - caption: 画面旁白/场景句（<=28字）
+  - bubble: 角色对白（<=36字，口语、直接）
+  - poemLine: 可选，引用签诗半句
+禁止恐吓、宿命论断言、医疗法律承诺；强调自我反思与下一步行动。不要输出 markdown。`,
+            },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                companion,
+                签诗: poemText,
+                签运: slip.fortuneRank,
+                主题: slip.fortuneTheme,
+                解读: slip.interpretation,
+                建议: slip.advice,
+                任务: slip.mission,
+                社交金句: slip.socialLine,
+              }),
+            },
+          ],
+        },
+        {
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 25000,
+        },
+      );
+      const raw = res.data?.choices?.[0]?.message?.content ?? '{}';
+      const parsed = JSON.parse(String(raw).replace(/```json\n?|\n?```/g, '').trim());
+      const panels = Array.isArray(parsed.panels) ? parsed.panels : [];
+      if (panels.length < 6) return fallback;
+
+      const visuals = new Set(['gate', 'hall', 'incense', 'pine', 'mist', 'cushion', 'night', 'wish', 'path']);
+      return {
+        id: `comic_${slip.id}_${Date.now()}`,
+        slipId: slip.id,
+        title: String(parsed.title || fallback.title).slice(0, 40),
+        subtitle: String(parsed.subtitle || fallback.subtitle).slice(0, 60),
+        companion,
+        rank: slip.fortuneRank || '中签',
+        poemTitle: slip.poem.title,
+        panels: panels.slice(0, 10).map((p: any, i: number) => ({
+          id: `p${i + 1}`,
+          visual: visuals.has(String(p.visual)) ? String(p.visual) : fallback.panels[i % fallback.panels.length].visual,
+          caption: String(p.caption || '').slice(0, 40),
+          bubble: String(p.bubble || '').slice(0, 48),
+          poemLine: p.poemLine ? String(p.poemLine).slice(0, 40) : undefined,
+        })),
+        closing: String(parsed.closing || fallback.closing).slice(0, 60),
+        shareText: String(parsed.shareText || fallback.shareText).slice(0, 64),
+        createdAt: new Date().toISOString(),
+      };
+    } catch (err) {
+      this.logger.warn(`条漫分镜失败，回退模板: ${(err as Error).message}`);
+      return fallback;
+    }
+  }
+
+  private comicCompanion(id: 'elder' | 'youth' | 'oracle') {
+    const map = {
+      elder: { id: 'elder' as const, name: '云游子', title: '断事老师' },
+      youth: { id: 'youth' as const, name: '灵溪', title: '清醒同频' },
+      oracle: { id: 'oracle' as const, name: '月华', title: '情绪陪伴' },
+    };
+    return map[id] || map.elder;
+  }
+
+  private normalizeSlipInput(input?: Partial<FortuneSlip>): FortuneSlip {
+    const base = fortuneSlips[0];
+    if (!input) return base;
+    const matched = input.id ? fortuneSlips.find((s) => s.id === String(input.id)) : undefined;
+    const seed = matched || base;
+    return {
+      ...seed,
+      ...input,
+      id: String(input.id || seed.id),
+      poem: {
+        title: String(input.poem?.title || seed.poem.title),
+        line1: String(input.poem?.line1 || seed.poem.line1),
+        line2: String(input.poem?.line2 || seed.poem.line2),
+        line3: String(input.poem?.line3 || seed.poem.line3),
+        line4: String(input.poem?.line4 || seed.poem.line4),
+      },
+      interpretation: {
+        overall: String(input.interpretation?.overall || seed.interpretation.overall),
+        love: String(input.interpretation?.love || seed.interpretation.love),
+        career: String(input.interpretation?.career || seed.interpretation.career),
+        wealth: String(input.interpretation?.wealth || seed.interpretation.wealth),
+        health: String(input.interpretation?.health || seed.interpretation.health),
+      },
+      advice: Array.isArray(input.advice) && input.advice.length ? input.advice.map(String) : seed.advice,
+      fortuneRank: (input.fortuneRank as FortuneSlip['fortuneRank']) || seed.fortuneRank || '中签',
+      fortuneTheme: input.fortuneTheme || seed.fortuneTheme,
+      mission: input.mission || seed.mission,
+      socialLine: input.socialLine || seed.socialLine,
+      funTip: input.funTip || seed.funTip,
+      drawCode: input.drawCode || seed.drawCode,
+    };
+  }
+
+  private buildComicFallback(
+    slip: FortuneSlip,
+    companion: FortuneComic['companion'],
+  ): FortuneComic {
+    const lines = [slip.poem.line1, slip.poem.line2, slip.poem.line3, slip.poem.line4];
+    const advice = (slip.advice || []).filter(Boolean);
+    const panels: FortuneComicPanel[] = [
+      {
+        id: 'p1',
+        visual: 'gate',
+        caption: '山门半掩，今日这支签正好落在你手里。',
+        bubble: `${companion.name}在此。先别急着求答案，跟我走两步。`,
+      },
+      {
+        id: 'p2',
+        visual: 'hall',
+        caption: `签题：${slip.poem.title}`,
+        bubble: `这是「${slip.fortuneRank || '中签'}」。名号不重要，看它把你带到哪一句。`,
+        poemLine: lines[0],
+      },
+      {
+        id: 'p3',
+        visual: 'incense',
+        caption: '香火一缕，像把心事从胸口轻轻托起。',
+        bubble: lines[1] || '先把眼前这一念看清楚。',
+        poemLine: lines[1],
+      },
+      {
+        id: 'p4',
+        visual: 'pine',
+        caption: '庭中松影不动，风却已经换了方向。',
+        bubble: slip.interpretation.overall.slice(0, 36),
+        poemLine: lines[2],
+      },
+      {
+        id: 'p5',
+        visual: 'mist',
+        caption: '远山淡墨，近处的路其实只有一步。',
+        bubble: lines[3] || '能走的那一步，比想明白整盘棋更要紧。',
+        poemLine: lines[3],
+      },
+      {
+        id: 'p6',
+        visual: 'cushion',
+        caption: '蒲团还在，坐下也不必很久。',
+        bubble: advice[0] || slip.mission || '今天只做一件能落地的小事。',
+      },
+      {
+        id: 'p7',
+        visual: 'path',
+        caption: '廊下回声渐轻，你听见的是自己的脚步。',
+        bubble: advice[1] || slip.funTip || '别把犹豫当成深思。',
+      },
+      {
+        id: 'p8',
+        visual: 'night',
+        caption: '灯火未尽，故事还可以继续写。',
+        bubble: slip.socialLine || '山海有灵，一念知止。',
+      },
+    ];
+
+    return {
+      id: `comic_${slip.id}_fallback`,
+      slipId: slip.id,
+      title: `今日签 · ${slip.poem.title}`,
+      subtitle: `${slip.fortuneRank || '中签'} · ${companion.name}为你讲这一卦`,
+      companion,
+      rank: slip.fortuneRank || '中签',
+      poemTitle: slip.poem.title,
+      panels,
+      closing: '不是判决，是下一步的坐标。',
+      shareText: `我在山海灵境抽到「${slip.poem.title}」·${slip.fortuneRank || '签'}，${companion.name}画成了命书。`,
+      createdAt: new Date().toISOString(),
+    };
+  }
+}
+
+export interface FortuneComicPanel {
+  id: string;
+  visual: string;
+  caption: string;
+  bubble: string;
+  poemLine?: string;
+}
+
+export interface FortuneComic {
+  id: string;
+  slipId: string;
+  title: string;
+  subtitle: string;
+  companion: { id: 'elder' | 'youth' | 'oracle'; name: string; title: string };
+  rank: string;
+  poemTitle: string;
+  panels: FortuneComicPanel[];
+  closing: string;
+  shareText: string;
+  createdAt: string;
 }
