@@ -9,3 +9,6 @@ dist/
 handwriting-samples/
 .env.local
 scripts/test-chart.mjs
+public/comic-cache/*
+!public/comic-cache/.gitkeep
+

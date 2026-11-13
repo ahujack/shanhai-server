@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../../prisma.service';
 import { resolveDeepSeekChatUrl } from '../../common/llm-endpoint';
+import { ComicImageService } from './comic-image.service';
 
 export interface FortuneSlip {
   id: string;
@@ -377,7 +378,10 @@ const socialLines = [
 export class FortuneService {
   private readonly logger = new Logger(FortuneService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly comicImage: ComicImageService,
+  ) {}
 
   private lastUserId: string | null = null;
   private lastDate: string | null = null;
@@ -623,7 +627,7 @@ export class FortuneService {
     return this.enhanceWithLLM(slip);
   }
 
-  /** 把一支签编成竖屏条漫分镜（LLM 优先，失败走模板） */
+  /** 把一支签编成竖屏条漫分镜（LLM 优先，失败走模板；可配 MiniMax 文生图） */
   async composeComic(
     input?: Partial<FortuneSlip>,
     companionId: 'elder' | 'youth' | 'oracle' = 'elder',
@@ -631,23 +635,23 @@ export class FortuneService {
     const slip = this.normalizeSlipInput(input);
     const companion = this.comicCompanion(companionId);
     const fallback = this.buildComicFallback(slip, companion);
+    let comic = fallback;
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) return fallback;
-
-    try {
-      const poemText = `${slip.poem.title}：${slip.poem.line1} ${slip.poem.line2} ${slip.poem.line3} ${slip.poem.line4}`;
-      const res = await axios.post(
-        resolveDeepSeekChatUrl(),
-        {
-          model: this.resolveFortuneLlmModel('free'),
-          temperature: 0.85,
-          max_tokens: 2200,
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'system',
-              content: `你是山海灵境的条漫编剧。把签诗改编成竖屏网漫分镜，语气像${companion.name}（${companion.title}）在道观里对读者说话。
+    if (apiKey) {
+      try {
+        const poemText = `${slip.poem.title}：${slip.poem.line1} ${slip.poem.line2} ${slip.poem.line3} ${slip.poem.line4}`;
+        const res = await axios.post(
+          resolveDeepSeekChatUrl(),
+          {
+            model: this.resolveFortuneLlmModel('free'),
+            temperature: 0.85,
+            max_tokens: 2200,
+            response_format: { type: 'json_object' },
+            messages: [
+              {
+                role: 'system',
+                content: `你是山海灵境的条漫编剧。把签诗改编成竖屏网漫分镜，语气像${companion.name}（${companion.title}）在道观里对读者说话。
 必须输出合法 json object，字段：
 - title: 短标题
 - subtitle: 一句副标题
@@ -659,55 +663,64 @@ export class FortuneService {
   - bubble: 角色对白（<=36字，口语、直接）
   - poemLine: 可选，引用签诗半句
 禁止恐吓、宿命论断言、医疗法律承诺；强调自我反思与下一步行动。不要输出 markdown。`,
-            },
-            {
-              role: 'user',
-              content: JSON.stringify({
-                companion,
-                签诗: poemText,
-                签运: slip.fortuneRank,
-                主题: slip.fortuneTheme,
-                解读: slip.interpretation,
-                建议: slip.advice,
-                任务: slip.mission,
-                社交金句: slip.socialLine,
-              }),
-            },
-          ],
-        },
-        {
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          timeout: 25000,
-        },
-      );
-      const raw = res.data?.choices?.[0]?.message?.content ?? '{}';
-      const parsed = JSON.parse(String(raw).replace(/```json\n?|\n?```/g, '').trim());
-      const panels = Array.isArray(parsed.panels) ? parsed.panels : [];
-      if (panels.length < 6) return fallback;
+              },
+              {
+                role: 'user',
+                content: JSON.stringify({
+                  companion,
+                  签诗: poemText,
+                  签运: slip.fortuneRank,
+                  主题: slip.fortuneTheme,
+                  解读: slip.interpretation,
+                  建议: slip.advice,
+                  任务: slip.mission,
+                  社交金句: slip.socialLine,
+                }),
+              },
+            ],
+          },
+          {
+            headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            timeout: 25000,
+          },
+        );
+        const raw = res.data?.choices?.[0]?.message?.content ?? '{}';
+        const parsed = JSON.parse(String(raw).replace(/```json\n?|\n?```/g, '').trim());
+        const panels = Array.isArray(parsed.panels) ? parsed.panels : [];
+        if (panels.length >= 6) {
+          const visuals = new Set(['gate', 'hall', 'incense', 'pine', 'mist', 'cushion', 'night', 'wish', 'path']);
+          comic = {
+            id: `comic_${slip.id}_${Date.now()}`,
+            slipId: slip.id,
+            title: String(parsed.title || fallback.title).slice(0, 40),
+            subtitle: String(parsed.subtitle || fallback.subtitle).slice(0, 60),
+            companion,
+            rank: slip.fortuneRank || '中签',
+            poemTitle: slip.poem.title,
+            panels: panels.slice(0, 10).map((p: any, i: number) => ({
+              id: `p${i + 1}`,
+              visual: visuals.has(String(p.visual))
+                ? String(p.visual)
+                : fallback.panels[i % fallback.panels.length].visual,
+              caption: String(p.caption || '').slice(0, 40),
+              bubble: String(p.bubble || '').slice(0, 48),
+              poemLine: p.poemLine ? String(p.poemLine).slice(0, 40) : undefined,
+            })),
+            closing: String(parsed.closing || fallback.closing).slice(0, 60),
+            shareText: String(parsed.shareText || fallback.shareText).slice(0, 64),
+            createdAt: new Date().toISOString(),
+          };
+        }
+      } catch (err) {
+        this.logger.warn(`条漫分镜失败，回退模板: ${(err as Error).message}`);
+      }
+    }
 
-      const visuals = new Set(['gate', 'hall', 'incense', 'pine', 'mist', 'cushion', 'night', 'wish', 'path']);
-      return {
-        id: `comic_${slip.id}_${Date.now()}`,
-        slipId: slip.id,
-        title: String(parsed.title || fallback.title).slice(0, 40),
-        subtitle: String(parsed.subtitle || fallback.subtitle).slice(0, 60),
-        companion,
-        rank: slip.fortuneRank || '中签',
-        poemTitle: slip.poem.title,
-        panels: panels.slice(0, 10).map((p: any, i: number) => ({
-          id: `p${i + 1}`,
-          visual: visuals.has(String(p.visual)) ? String(p.visual) : fallback.panels[i % fallback.panels.length].visual,
-          caption: String(p.caption || '').slice(0, 40),
-          bubble: String(p.bubble || '').slice(0, 48),
-          poemLine: p.poemLine ? String(p.poemLine).slice(0, 40) : undefined,
-        })),
-        closing: String(parsed.closing || fallback.closing).slice(0, 60),
-        shareText: String(parsed.shareText || fallback.shareText).slice(0, 64),
-        createdAt: new Date().toISOString(),
-      };
+    try {
+      return await this.comicImage.attachImages(comic);
     } catch (err) {
-      this.logger.warn(`条漫分镜失败，回退模板: ${(err as Error).message}`);
-      return fallback;
+      this.logger.warn(`条漫配图跳过: ${(err as Error).message}`);
+      return comic;
     }
   }
 
@@ -836,6 +849,8 @@ export interface FortuneComicPanel {
   caption: string;
   bubble: string;
   poemLine?: string;
+  /** MiniMax 生成并缓存后的场景图 */
+  imageUrl?: string;
 }
 
 export interface FortuneComic {
@@ -850,4 +865,5 @@ export interface FortuneComic {
   closing: string;
   shareText: string;
   createdAt: string;
+  coverImageUrl?: string;
 }
