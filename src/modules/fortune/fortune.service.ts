@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../../prisma.service';
-import { resolveDeepSeekChatUrl } from '../../common/llm-endpoint';
+import { resolveDeepSeekChatUrl, withDeepSeekCostControls } from '../../common/llm-endpoint';
 import { ComicImageService } from './comic-image.service';
 
 export interface FortuneSlip {
@@ -487,7 +487,7 @@ export class FortuneService {
       const poemText = `${slip.poem.title}：${slip.poem.line1} ${slip.poem.line2} ${slip.poem.line3} ${slip.poem.line4}`;
       const res = await axios.post(
         resolveDeepSeekChatUrl(),
-        {
+        withDeepSeekCostControls({
           model,
           temperature: 0.8,
           max_tokens: 2000,
@@ -506,7 +506,7 @@ export class FortuneService {
               }),
             },
           ],
-        },
+        }),
         {
           headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
           timeout: 20000,
@@ -605,7 +605,7 @@ export class FortuneService {
     return fortuneSlips[index % fortuneSlips.length];
   }
 
-  // 随机抽签
+  // 随机抽签（公开接口：只返回本地签文，不打 LLM，避免被刷爆余额）
   async drawRandomSlip(): Promise<FortuneSlip> {
     const nowSeed = `${Date.now()}_${Math.random()}`;
     const seed = this.hashString(nowSeed);
@@ -623,8 +623,7 @@ export class FortuneService {
     );
     const rankedPool = decoratedPool.filter((slip) => slip.fortuneRank === preferredRank);
     const pickPool = rankedPool.length ? rankedPool : decoratedPool;
-    const slip = this.pick(pickPool, rng);
-    return this.enhanceWithLLM(slip);
+    return this.pick(pickPool, rng);
   }
 
   /** 把一支签编成竖屏条漫分镜（LLM 优先，失败走模板；可配 MiniMax 文生图） */
@@ -643,7 +642,7 @@ export class FortuneService {
         const poemText = `${slip.poem.title}：${slip.poem.line1} ${slip.poem.line2} ${slip.poem.line3} ${slip.poem.line4}`;
         const res = await axios.post(
           resolveDeepSeekChatUrl(),
-          {
+          withDeepSeekCostControls({
             model: this.resolveFortuneLlmModel('free'),
             temperature: 0.85,
             max_tokens: 2200,
@@ -678,7 +677,7 @@ export class FortuneService {
                 }),
               },
             ],
-          },
+          }),
           {
             headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
             timeout: 25000,

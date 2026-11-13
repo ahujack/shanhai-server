@@ -27,6 +27,23 @@ export function resolveDeepSeekChatUrl(): string {
   );
 }
 
+/**
+ * DeepSeek V4+ 默认开启 thinking（effort=high），推理 token 也计费。
+ * 业务 JSON/短回复场景统一关闭，避免单次请求被放大到数万 token。
+ * 可用 DEEPSEEK_THINKING=enabled 临时打开。
+ */
+export function withDeepSeekCostControls<T extends Record<string, unknown>>(
+  body: T,
+): T & { thinking: { type: 'enabled' | 'disabled' } } {
+  const enabled = /^(1|true|yes|on|enabled)$/i.test(
+    String(process.env.DEEPSEEK_THINKING || '').trim(),
+  );
+  return {
+    ...body,
+    thinking: { type: enabled ? 'enabled' : 'disabled' },
+  };
+}
+
 export function resolveMultimodalChatUrl(): string {
   return resolveChatCompletionsUrl(
     process.env.LLM_API_URL || process.env.LLM_URL,

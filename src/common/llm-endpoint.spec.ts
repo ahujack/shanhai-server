@@ -1,6 +1,7 @@
 import {
   resolveChatCompletionsUrl,
   resolveSttTranscriptionsUrl,
+  withDeepSeekCostControls,
 } from './llm-endpoint';
 
 describe('llm-endpoint', () => {
@@ -23,5 +24,18 @@ describe('llm-endpoint', () => {
       'http://proxy/v1/audio/transcriptions',
     );
     process.env.LLM_API_URL = prev;
+  });
+
+  it('disables DeepSeek thinking by default for cost control', () => {
+    const prev = process.env.DEEPSEEK_THINKING;
+    delete process.env.DEEPSEEK_THINKING;
+    expect(withDeepSeekCostControls({ model: 'deepseek-flash' }).thinking).toEqual({
+      type: 'disabled',
+    });
+    process.env.DEEPSEEK_THINKING = 'enabled';
+    expect(withDeepSeekCostControls({ model: 'deepseek-flash' }).thinking).toEqual({
+      type: 'enabled',
+    });
+    process.env.DEEPSEEK_THINKING = prev;
   });
 });

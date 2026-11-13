@@ -12,7 +12,7 @@ import {
   ziPremiumHintLiteFocus,
   ziPremiumHintNoFocus,
 } from '../../common/localized-strings';
-import { resolveDeepSeekChatUrl } from '../../common/llm-endpoint';
+import { resolveDeepSeekChatUrl, withDeepSeekCostControls } from '../../common/llm-endpoint';
 import { SAFETY_PROMPT_SUFFIX } from '../../common/safety';
 
 // 汉典笔画部首数据（zdic），懒加载
@@ -860,7 +860,7 @@ export class ZiService {
       const outputLanguageRule = buildOutputLanguageInstruction(normalizeAppLanguage(ctx?.language));
       const response = await axios.post(
         apiUrl,
-        {
+        withDeepSeekCostControls({
           model: model,
           temperature: 0.75,
           max_tokens: maxTokens,
@@ -1002,7 +1002,7 @@ ${SAFETY_PROMPT_SUFFIX}
               }),
             },
           ],
-        },
+        }),
         {
           headers: {
             Authorization: `Bearer ${apiKey}`,

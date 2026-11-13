@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../../prisma.service';
 import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
-import { resolveDeepSeekChatUrl } from '../../common/llm-endpoint';
+import { resolveDeepSeekChatUrl, withDeepSeekCostControls } from '../../common/llm-endpoint';
 import { SAFETY_PROMPT_SUFFIX } from '../../common/safety';
 
 export type DivinationCategory = 'career' | 'love' | 'wealth' | 'health' | 'growth' | 'general';
@@ -787,7 +787,7 @@ recommendations 必须紧扣用户问题和占卜方向，每条不同、可执�
     try {
       const response = await axios.post(
         resolveDeepSeekChatUrl(),
-        {
+        withDeepSeekCostControls({
           model,
           temperature: 0.75,
           max_tokens: 1600,
@@ -801,7 +801,7 @@ recommendations 必须紧扣用户问题和占卜方向，每条不同、可执�
               content: userPrompt,
             },
           ],
-        },
+        }),
         {
           headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
           timeout: 20000,

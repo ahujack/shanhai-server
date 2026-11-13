@@ -11,7 +11,7 @@ import {
   chartUnlockFavorable,
   chartUnlockWindowMonths,
 } from '../../common/localized-strings';
-import { resolveChatCompletionsUrl } from '../../common/llm-endpoint';
+import { resolveChatCompletionsUrl, withDeepSeekCostControls } from '../../common/llm-endpoint';
 
 type MembershipTier = 'free' | 'premium' | 'vip';
 
@@ -1383,7 +1383,7 @@ export class ChartService {
         `语言要求：${languageInstruction}`;
       const response = await axios.post(
         apiUrl,
-        {
+        withDeepSeekCostControls({
           model,
           temperature: 0.3,
           max_tokens: 1200,
@@ -1398,7 +1398,7 @@ export class ChartService {
               content: JSON.stringify(payload),
             },
           ],
-        },
+        }),
         {
           headers: {
             Authorization: `Bearer ${apiKey}`,

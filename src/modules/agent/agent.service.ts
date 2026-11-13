@@ -9,7 +9,11 @@ import { ChartService } from '../chart/chart.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 import { PrismaService } from '../../prisma.service';
 import { buildOutputLanguageInstruction, normalizeAppLanguage } from '../../common/app-language';
-import { resolveDeepSeekChatUrl, resolveSttTranscriptionsUrl } from '../../common/llm-endpoint';
+import {
+  resolveDeepSeekChatUrl,
+  resolveSttTranscriptionsUrl,
+  withDeepSeekCostControls,
+} from '../../common/llm-endpoint';
 import { SAFETY_PROMPT_SUFFIX, buildCrisisResponse, detectCrisisIntent } from '../../common/safety';
 
 type AgentIntent = 'chat' | 'divination' | 'meditation' | 'chart' | 'fortune' | 'zi';
@@ -533,7 +537,7 @@ export class AgentService {
       const contextLines = (dto.context || []).slice(-6).join('\n');
       const response = await axios.post(
         resolveDeepSeekChatUrl(),
-        {
+        withDeepSeekCostControls({
           model,
           temperature: 0,
           max_tokens: 512,
@@ -586,7 +590,7 @@ ${contextInfo}`,
               }),
             },
           ].filter(Boolean),
-        },
+        }),
         {
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -870,14 +874,16 @@ ${SAFETY_PROMPT_SUFFIX}`;
             'Content-Type': 'application/json',
           },
           signal: abortController.signal,
-          body: JSON.stringify({
-            model,
-            temperature: 0.8,
-            // 提高输出上限，减少长回复被截断成半句的概率
-            max_tokens: 700,
-            stream: true,
-            messages,
-          }),
+          body: JSON.stringify(
+            withDeepSeekCostControls({
+              model,
+              temperature: 0.8,
+              // 提高输出上限，减少长回复被截断成半句的概率
+              max_tokens: 700,
+              stream: true,
+              messages,
+            }),
+          ),
         });
       } finally {
         clearTimeout(timeoutId);
@@ -1034,7 +1040,7 @@ ${SAFETY_PROMPT_SUFFIX}`;
 
       const response = await axios.post(
         resolveDeepSeekChatUrl(),
-        {
+        withDeepSeekCostControls({
           model,
           temperature: 0.8, // 稍高一点温度，让回复更生动
           // 与流式一致，避免回退到非流式时出现半句截断
@@ -1049,7 +1055,7 @@ ${SAFETY_PROMPT_SUFFIX}`;
               : null,
             { role: 'user', content: message },
           ].filter(Boolean),
-        },
+        }),
         {
           headers: {
             Authorization: `Bearer ${apiKey}`,
